@@ -69,7 +69,8 @@ class JudgeConfig:
     provider: str = "openai"
     model: str = "gpt-5-nano"
     temperature: float = 0.1
-    max_tokens: int = 1800
+    max_tokens: int = 3000
+    timeout_seconds: float = 300.0
 
 
 @dataclass

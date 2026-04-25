@@ -234,6 +234,7 @@ def judge_text(
     user_prompt: str,
     temperature: float,
     max_tokens: int,
+    timeout: float = 300.0
 ) -> str:
     text, error = _generate_text(
         provider=provider,
@@ -242,6 +243,7 @@ def judge_text(
         user_prompt=user_prompt,
         temperature=temperature,
         max_tokens=max_tokens,
+        timeout=timeout,
     )
     if error:
         return f"Judge model call failed: {error}"

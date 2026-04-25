@@ -317,6 +317,7 @@ def main() -> None:
             user_prompt=build_judge_prompt(suite_summary),
             temperature=judge_config.temperature,
             max_tokens=judge_config.max_tokens,
+            timeout=judge_config.timeout_seconds,
         )
 
     report = render_markdown_report(suite_summary, llm_report)
