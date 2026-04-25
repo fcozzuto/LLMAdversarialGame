@@ -1,0 +1,10 @@
+def choose_move(observation):
+    # Deterministic: head for the closest resource by Manhattan distance.
+    x, y = observation["self_position"]
+    resources = observation.get("resources", [])
+    if not resources:
+        return [0, 0]
+    target = min(resources, key=lambda p: abs(p[0] - x) + abs(p[1] - y))
+    dx = 0 if target[0] == x else (1 if target[0] > x else -1)
+    dy = 0 if target[1] == y else (1 if target[1] > y else -1)
+    return [dx, dy]

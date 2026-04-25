@@ -1,0 +1,74 @@
+def choose_move(observation):
+    # Deterministic simple strategy:
+    # Move towards the nearest resource if available, else chase the opponent's position.
+    # Allowed moves: dx, dy in {-1, 0, 1}, including diagonals.
+
+    # Helper to compute Manhattan and Chebyshev distances
+    def dist_chebyshev(a, b):
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+    def dist_manhattan(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    turn = observation.get("turn_index", 0)
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+
+    my = observation["self_position"]  # [x, y]
+    opp = observation["opponent_position"]
+
+    resources = observation.get("resources", [])
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    max_move = [-1, -1]
+
+    # If there are resources, target the closest one
+    best_res = None
+    best_dist = None
+    for r in resources:
+        rxy = tuple(r)
+        if rxy in obstacles:
+            continue
+        d = dist_chebyshev(my, rxy)
+        if best_dist is None or d < best_dist:
+            best_dist = d
+            best_res = rxy
+
+    if best_res is not None:
+        # Move one step towards best_res
+        dx = 0
+        dy = 0
+        if best_res[0] > my[0]:
+            dx = 1
+        elif best_res[0] < my[0]:
+            dx = -1
+        if best_res[1] > my[1]:
+            dy = 1
+        elif best_res[1] < my[1]:
+            dy = -1
+        candidate = [dx, dy]
+    else:
+        # No resource available; chase opponent using Chebyshev step
+        dx = 0
+        dy = 0
+        if opp[0] > my[0]:
+            dx = 1
+        elif opp[0] < my[0]:
+            dx = -1
+        if opp[1] > my[1]:
+            dy = 1
+        elif opp[1] < my[1]:
+            dy = -1
+        candidate = [dx, dy]
+
+    # Validate candidate is within allowed moves
+    for i in range(2):
+        if candidate[i] < -1 or candidate[i] > 1:
+            candidate[i] = 0  # safe fallback
+    # Apply obstacles: if the target cell is blocked, stay or attempt alternative
+    new_pos = [my[0] + candidate[0], my[1] + candidate[1]]
+    if (new_pos[0] < 0 or new_pos[0] >= w or new_pos[1] < 0 or new_pos[1] >= h):
+        # out of bounds, stay
+        return [0, 0]
+    if tuple(new_pos) in obstacles:
+        # blocked by obstacle, stay
+        return [0, 0]
+    return candidate
