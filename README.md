@@ -6,7 +6,7 @@ The design stays intentionally small:
 
 - One package, one runner, one JSON suite config.
 - No mandatory third-party dependencies.
-- Artifacts are written as JSON, Markdown, and SVG so you can inspect them without extra tooling.
+- Artifacts are written as JSON, Markdown, SVG, PNG, and PDF so you can inspect them without extra tooling.
 - The same runner supports same-model vs cross-model experiments, feedback ablations, obstacles, fixed vs resampled maps, and a final low-cost report pass.
 
 ## Layout
@@ -71,10 +71,14 @@ For each condition and epoch, the project writes:
 For the full suite, it writes:
 
 - `suite_summary.json`
+- `run_metadata.json`
 - `report.md`
+- `report.pdf`
+- one `scores.svg` per condition
+- one `scores.png` per condition for report embedding
 
 ## Notes
 
-- The OpenAI backend uses the Responses API with low verbosity and minimal reasoning effort. That is deliberate: OpenAI’s current docs recommend Responses for GPT-5-family reasoning models, and it avoids the empty-output issue that can happen with Chat Completions on long prompts.
+- The OpenAI backend uses the Responses API with low verbosity and a reasoning-effort fallback that retries with supported values when a model rejects the initial setting. That keeps mixed-model suites from silently failing onto default code.
 - The default judge model is `gpt-5-nano`. That is deliberate: it is the cheapest OpenAI GPT-5 family option currently documented, while still being adequate for summary-style analysis.
 - If you want offline smoke tests first, change providers in the config to `builtin` and use models like `nearest_resource`, `sweep_rows`, or `opponent_shadow`.

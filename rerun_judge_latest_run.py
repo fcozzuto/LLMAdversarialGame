@@ -1,17 +1,87 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 from pathlib import Path
 from typing import Any
 
 from llm_grid_battle.analysis import render_markdown_report
 from llm_grid_battle.llm import judge_text, load_env_files
+from llm_grid_battle.pdf_report import write_pdf_report
+from llm_grid_battle.visualization import write_score_plot_png, write_score_plot_svg
 from run_suite import build_judge_prompt
 
 
 def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_or_infer_run_metadata(run_dir: Path) -> dict[str, Any] | None:
+    metadata_path = run_dir / "run_metadata.json"
+    if metadata_path.exists():
+        return _load_json(metadata_path)
+
+    started_at = None
+    if run_dir.name.startswith("run_"):
+        suffix = run_dir.name.removeprefix("run_")
+        try:
+            started_at = datetime.strptime(suffix, "%Y%m%d_%H%M%S")
+        except ValueError:
+            started_at = None
+
+    finished_source = run_dir / "report.md"
+    if not finished_source.exists():
+        finished_source = run_dir / "suite_summary.json"
+    if not finished_source.exists():
+        return None
+    finished_at = datetime.fromtimestamp(finished_source.stat().st_mtime)
+
+    if started_at is None:
+        duration_hhmm = "-"
+        started_value = "-"
+    else:
+        total_seconds = max(0.0, (finished_at - started_at).total_seconds())
+        minutes = int(round(total_seconds / 60.0))
+        hours, remainder = divmod(minutes, 60)
+        duration_hhmm = f"{hours:02d}:{remainder:02d}"
+        started_value = started_at.strftime("%Y-%m-%d %H:%M:%S")
+
+    return {
+        "run_name": run_dir.name,
+        "started_at_local": started_value,
+        "finished_at_local": finished_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "duration_hhmm": duration_hhmm,
+    }
+
+
+def _agent_label(agent: dict[str, Any]) -> str:
+    return f"{agent['name']} ({agent['provider']}:{agent['model']})"
+
+
+def _regenerate_score_charts(run_dir: Path, condition_payloads: list[dict[str, Any]]) -> None:
+    for payload in condition_payloads:
+        condition_name = str(payload["condition_name"])
+        agents = payload.get("agents", [])
+        series: dict[str, list[float]] = {str(agent["name"]): [] for agent in agents}
+        for epoch in payload.get("epochs", []):
+            scores = epoch.get("scores", {})
+            for agent_name in list(series):
+                series[agent_name].append(float(scores.get(agent_name, 0.0)))
+        labels = {str(agent["name"]): _agent_label(agent) for agent in agents}
+        condition_dir = run_dir / condition_name
+        write_score_plot_svg(
+            path=condition_dir / "scores.svg",
+            title=f"{condition_name} scores",
+            series=series,
+            series_labels=labels,
+        )
+        write_score_plot_png(
+            path=condition_dir / "scores.png",
+            title=f"{condition_name} scores",
+            series=series,
+            series_labels=labels,
+        )
 
 
 def _find_latest_run_dir(project_root: Path) -> Path:
@@ -53,6 +123,12 @@ def rerun_judge_for_latest_run(project_root: Path, run_dir: Path | None = None) 
 
     suite_summary = _load_json(suite_summary_path)
     judge_config = _load_judge_config_from_run(target_run_dir)
+    run_metadata = _load_or_infer_run_metadata(target_run_dir)
+    if run_metadata is None:
+        run_metadata = {"run_name": target_run_dir.name}
+    run_metadata["judge_status"] = "enabled"
+    run_metadata["judge_provider"] = str(judge_config.get("provider", "openai"))
+    run_metadata["judge_model"] = str(judge_config.get("model", "gpt-5-nano"))
 
     llm_report = judge_text(
         provider=str(judge_config.get("provider", "openai")),
@@ -64,9 +140,25 @@ def rerun_judge_for_latest_run(project_root: Path, run_dir: Path | None = None) 
         timeout=float(judge_config.get("timeout_seconds", 300.0))
     )
 
-    report = render_markdown_report(suite_summary, llm_report)
+    report = render_markdown_report(suite_summary, llm_report, run_metadata=run_metadata)
     report_path = target_run_dir / "report.md"
     report_path.write_text(report, encoding="utf-8")
+    (target_run_dir / "run_metadata.json").write_text(
+        json.dumps(run_metadata, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+    condition_payloads = [
+        _load_json(path)
+        for path in sorted(target_run_dir.glob("*/condition_summary.json"))
+    ]
+    _regenerate_score_charts(target_run_dir, condition_payloads)
+    write_pdf_report(
+        path=target_run_dir / "report.pdf",
+        run_name=target_run_dir.name,
+        markdown_report=report,
+        suite_summary=suite_summary,
+        condition_payloads=condition_payloads,
+    )
     return report_path
 
 
