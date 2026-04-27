@@ -128,11 +128,11 @@ def rerun_judge_for_latest_run(project_root: Path, run_dir: Path | None = None) 
         run_metadata = {"run_name": target_run_dir.name}
     run_metadata["judge_status"] = "enabled"
     run_metadata["judge_provider"] = str(judge_config.get("provider", "openai"))
-    run_metadata["judge_model"] = str(judge_config.get("model", "gpt-5-nano"))
+    run_metadata["judge_model"] = str(judge_config.get("model", "gpt-5-mini"))
 
     llm_report = judge_text(
         provider=str(judge_config.get("provider", "openai")),
-        model=str(judge_config.get("model", "gpt-5-nano")),
+        model=str(judge_config.get("model", "gpt-5-mini")),
         system_prompt="You are a careful research assistant. Answer in concise markdown.",
         user_prompt=build_judge_prompt(suite_summary),
         temperature=float(judge_config.get("temperature", 0.1)),

@@ -80,5 +80,5 @@ For the full suite, it writes:
 ## Notes
 
 - The OpenAI backend uses the Responses API with low verbosity and a reasoning-effort fallback that retries with supported values when a model rejects the initial setting. That keeps mixed-model suites from silently failing onto default code.
-- The default judge model is `gpt-5-nano`. That is deliberate: it is the cheapest OpenAI GPT-5 family option currently documented, while still being adequate for summary-style analysis.
+- The default judge model is `gpt-5-mini`. That is deliberate: it is a low-cost GPT-5 family option that is still adequate for summary-style analysis.
 - If you want offline smoke tests first, change providers in the config to `builtin` and use models like `nearest_resource`, `sweep_rows`, or `opponent_shadow`.
