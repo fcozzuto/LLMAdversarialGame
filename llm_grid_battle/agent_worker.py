@@ -9,6 +9,7 @@ import math
 import sys
 from typing import Any
 
+from .code_validation import validate_code
 from .llm import default_agent_code
 
 
@@ -19,12 +20,18 @@ SAFE_BUILTINS = {
     "bool": bool,
     "dict": dict,
     "enumerate": enumerate,
+    "Exception": Exception,
+    "filter": filter,
     "float": float,
     "int": int,
+    "isinstance": isinstance,
     "len": len,
     "list": list,
+    "map": map,
     "max": max,
     "min": min,
+    "next": next,
+    "pow": pow,
     "range": range,
     "reversed": reversed,
     "round": round,
@@ -32,51 +39,11 @@ SAFE_BUILTINS = {
     "sorted": sorted,
     "str": str,
     "sum": sum,
+    "TypeError": TypeError,
     "tuple": tuple,
+    "ValueError": ValueError,
     "zip": zip,
 }
-
-DISALLOWED_CALLS = {
-    "__import__",
-    "compile",
-    "delattr",
-    "eval",
-    "exec",
-    "getattr",
-    "globals",
-    "help",
-    "input",
-    "locals",
-    "open",
-    "setattr",
-    "vars",
-}
-
-
-def validate_code(code: str) -> list[str]:
-    issues: list[str] = []
-    try:
-        tree = ast.parse(code)
-    except SyntaxError as exc:
-        return [f"syntax_error:{exc.msg}"]
-
-    has_entrypoint = False
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
-            issues.append("imports_not_allowed")
-        elif isinstance(node, ast.Attribute) and str(node.attr).startswith("__"):
-            issues.append("dunder_attribute_not_allowed")
-        elif isinstance(node, ast.Name) and str(node.id).startswith("__"):
-            issues.append("dunder_name_not_allowed")
-        elif isinstance(node, ast.Call):
-            if isinstance(node.func, ast.Name) and node.func.id in DISALLOWED_CALLS:
-                issues.append(f"disallowed_call:{node.func.id}")
-        elif isinstance(node, ast.FunctionDef) and node.name == "choose_move":
-            has_entrypoint = True
-    if not has_entrypoint:
-        issues.append("missing_choose_move")
-    return sorted(set(issues))
-
 
 def parse_move(value: Any) -> tuple[int, int] | None:
     if isinstance(value, dict):

@@ -194,9 +194,12 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         epoch_dir.mkdir(parents=True, exist_ok=True)
 
         codes: dict[str, str] = {}
+        submitted_codes: dict[str, str] = {}
         prompts: dict[str, str] = {}
         raw_responses: dict[str, str] = {}
         generation_errors: dict[str, str | None] = {}
+        generation_validation_issues: dict[str, list[str]] = {}
+        generation_used_fallback: dict[str, bool] = {}
 
         for index, agent in enumerate(config.agents):
             opponent = config.agents[1 - index]
@@ -217,10 +220,15 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
                 max_tokens=agent.max_tokens,
             )
             codes[agent.name] = generation.code
+            submitted_codes[agent.name] = generation.submitted_code or generation.code
             raw_responses[agent.name] = generation.raw_text
             generation_errors[agent.name] = generation.error
+            generation_validation_issues[agent.name] = generation.validation_issues
+            generation_used_fallback[agent.name] = generation.used_fallback
             (epoch_dir / f"{agent.name}_prompt.txt").write_text(prompt, encoding="utf-8")
             (epoch_dir / f"{agent.name}_code.py").write_text(generation.code, encoding="utf-8")
+            if submitted_codes[agent.name] != generation.code:
+                (epoch_dir / f"{agent.name}_submitted_code.py").write_text(submitted_codes[agent.name], encoding="utf-8")
             (epoch_dir / f"{agent.name}_response.txt").write_text(generation.raw_text or generation.code, encoding="utf-8")
 
         epoch_result = run_epoch(
@@ -229,9 +237,12 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
             map_seed=map_seeds[epoch_index - 1],
             codes=codes,
         )
+        epoch_result["submitted_codes"] = submitted_codes
         epoch_result["prompts"] = prompts
         epoch_result["raw_responses"] = raw_responses
         epoch_result["generation_errors"] = generation_errors
+        epoch_result["generation_validation_issues"] = generation_validation_issues
+        epoch_result["generation_used_fallback"] = generation_used_fallback
         epoch_result["agents"] = [agent.__dict__ for agent in config.agents]
         epoch_result["feedback"] = config.feedback.__dict__
         _json_dump(epoch_dir / "artifact.json", epoch_result)

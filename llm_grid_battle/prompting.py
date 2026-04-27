@@ -4,12 +4,18 @@ import json
 from typing import Any
 
 from .config import ConditionConfig
+from .code_validation import TARGET_CHARACTERS, TARGET_NON_EMPTY_LINES
 
 
-def truncate_text(text: str, limit: int = 2200) -> str:
+def truncate_text(text: str, limit: int = 1400) -> str:
     if len(text) <= limit:
         return text
     return text[:limit] + "\n...[truncated]..."
+
+
+def _format_delta(value: float) -> str:
+    rounded = round(value, 3)
+    return f"{rounded:+.3f}"
 
 
 def build_generation_prompt(
@@ -22,8 +28,10 @@ def build_generation_prompt(
 ) -> str:
     parts = [
         f"You are {agent_name} in a deterministic two-agent grid competition.",
-        "Return exactly one fenced python code block that defines:",
-        "def choose_move(observation):",
+        "Return only raw Python source code.",
+        "The first line must be exactly: def choose_move(observation):",
+        "Do not use markdown fences.",
+        "Do not include any explanation before or after the function.",
         "",
         "Game rules:",
         f"- Grid size: {config.map.width} x {config.map.height}",
@@ -35,7 +43,17 @@ def build_generation_prompt(
         f"- Staying still is {'allowed' if config.observation.allow_stay else 'not allowed'}.",
         "- The engine rejects invalid moves by keeping the agent in place.",
         "- Code must be deterministic. Do not use randomness.",
-        "- No imports, file access, networking, subprocesses, eval, exec, or introspection tricks.",
+        "- Keep the solution self-contained inside choose_move(observation) using only local deterministic logic derived from the observation.",
+        "- Do not write import statements of any kind.",
+        "- Do not use names beginning with __.",
+        "- Do not depend on external files, external services, subprocesses, or hidden state.",
+        "- Every control path must end by returning [dx, dy] with integer dx and dy in {-1, 0, 1}.",
+        "- Do not leave placeholder logic, unfinished branches, or helper code without a final return path.",
+        "- Return exactly one top-level function named choose_move.",
+        "- Prefer concise heuristics over large helper stacks or full-grid search if brevity is at risk.",
+        f"- Use at most {TARGET_NON_EMPTY_LINES} non-empty lines.",
+        f"- Keep the function under {TARGET_CHARACTERS} characters.",
+        "- If you cannot fit, simplify the strategy instead of adding more code.",
         "",
         "Observation schema:",
         "- turn_index: int",
@@ -50,15 +68,47 @@ def build_generation_prompt(
         "",
         "Design goal:",
         "- Maximize your final score against the opponent.",
-        "- Favor clear deterministic logic over clever but brittle hacks.",
+        "- Favor clear deterministic logic over brittle shortcuts.",
+        "- If recent feedback does not show improvement or a decisive win, make a meaningful strategic change instead of repeating the same policy with cosmetic edits.",
+        "- Keep innovating until you are winning decisively and consistently, then preserve the strong core and only refine obvious weaknesses.",
         "",
         f"Epoch: {epoch_index}",
     ]
 
     if history:
+        latest = history[-1]
+        latest_score = float(latest["scores"][agent_name])
+        latest_opponent_score = float(latest["scores"][opponent_name])
+        parts.extend(
+            [
+                "",
+                "Recent performance signal:",
+                f"- Most recent score margin: {_format_delta(latest_score - latest_opponent_score)}",
+            ]
+        )
+        if len(history) >= 2:
+            previous = history[-2]
+            previous_score = float(previous["scores"][agent_name])
+            score_delta = latest_score - previous_score
+            parts.append(f"- Your score change vs previous epoch: {_format_delta(score_delta)}")
+            if score_delta <= 0:
+                parts.append(
+                    "- Adaptation note: your score did not improve last epoch, so do not reuse the same policy unless you can justify a real strategic advantage."
+                )
+        if latest_score <= latest_opponent_score:
+            parts.append(
+                "- Adaptation note: you were not ahead last epoch, so prefer a materially different targeting, obstacle-handling, or opponent-response strategy."
+            )
+
+        feedback_items = history[-config.feedback.history_window :]
+        if config.feedback.include_codes and len(feedback_items) > 1:
+            # Code-bearing prompts are the largest and have shown truncation risk, so only
+            # include the latest epoch when prior code is embedded.
+            feedback_items = feedback_items[-1:]
+
         parts.append("")
         parts.append("Previous epoch feedback:")
-        for item in history[-config.feedback.history_window :]:
+        for item in feedback_items:
             parts.append(f"Epoch {item['epoch_index']}:")
             if config.feedback.include_scores:
                 parts.append(f"- Scores: {json.dumps(item['scores'], sort_keys=True)}")
@@ -73,11 +123,14 @@ def build_generation_prompt(
                 parts.append(f"- {agent_name} runtime events: {json.dumps(item['runtime_events'][agent_name])}")
                 parts.append(f"- {opponent_name} runtime events: {json.dumps(item['runtime_events'][opponent_name])}")
             if config.feedback.include_codes:
-                parts.append(f"- {agent_name} code:\n```python\n{truncate_text(item['codes'][agent_name])}\n```")
+                parts.append(
+                    f"- {agent_name} code:\nBEGIN_PREVIOUS_CODE\n{truncate_text(item['codes'][agent_name])}\nEND_PREVIOUS_CODE"
+                )
                 if config.feedback.include_opponent_code:
-                    parts.append(f"- {opponent_name} code:\n```python\n{truncate_text(item['codes'][opponent_name])}\n```")
+                    parts.append(
+                        f"- {opponent_name} code:\nBEGIN_PREVIOUS_CODE\n{truncate_text(item['codes'][opponent_name])}\nEND_PREVIOUS_CODE"
+                    )
 
     parts.append("")
-    parts.append("Output only the python code block.")
+    parts.append("Output only raw Python source code.")
     return "\n".join(parts)
-

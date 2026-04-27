@@ -24,12 +24,12 @@ class AgentConfig:
     model: str
     system_prompt: str = "You write deterministic Python for a grid-game agent."
     temperature: float = 0.2
-    max_tokens: int = 1400
+    max_tokens: int = 1200
 
 
 @dataclass
 class FeedbackConfig:
-    history_window: int = 2
+    history_window: int = 1
     include_scores: bool = True
     include_paths: bool = True
     include_codes: bool = True
@@ -137,4 +137,3 @@ class SuiteConfig:
         if not conditions:
             raise ValueError("The suite config did not contain any conditions.")
         return SuiteConfig(defaults=defaults, conditions=conditions)
-
