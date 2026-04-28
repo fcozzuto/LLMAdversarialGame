@@ -16,6 +16,32 @@ def _label_for(agent_name: str, agent_labels: dict[str, str] | None) -> str:
     return agent_name
 
 
+def _text_size(
+    draw: ImageDraw.ImageDraw,
+    font: ImageFont.ImageFont,
+    text: str,
+) -> tuple[int, int]:
+    box = draw.textbbox((0, 0), text, font=font)
+    return box[2] - box[0], box[3] - box[1]
+
+
+def _wrap_label(text: str, *, max_line_length: int = 16) -> list[str]:
+    words = text.split()
+    if not words:
+        return [text]
+    lines: list[str] = []
+    current = words[0]
+    for word in words[1:]:
+        candidate = f"{current} {word}"
+        if len(candidate) <= max_line_length:
+            current = candidate
+            continue
+        lines.append(current)
+        current = word
+    lines.append(current)
+    return lines
+
+
 def write_epoch_map_svg(
     *,
     path: Path,
@@ -226,10 +252,6 @@ def write_score_plot_png(
         color = color.lstrip("#")
         return tuple(int(color[index : index + 2], 16) for index in (0, 2, 4))
 
-    def text_size(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont, text: str) -> tuple[int, int]:
-        box = draw.textbbox((0, 0), text, font=font)
-        return box[2] - box[0], box[3] - box[1]
-
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
     title_font = ImageFont.load_default()
@@ -248,7 +270,7 @@ def write_score_plot_png(
     )
 
     x_label = "Epoch"
-    x_label_width, x_label_height = text_size(draw, body_font, x_label)
+    x_label_width, _ = _text_size(draw, body_font, x_label)
     draw.text(
         ((left_margin + (width - left_margin - right_margin) / 2) - (x_label_width / 2), height - 34),
         x_label,
@@ -273,7 +295,7 @@ def write_score_plot_png(
             width=1,
         )
         tick_label = str(tick_index + 1)
-        tick_width, _ = text_size(draw, body_font, tick_label)
+        tick_width, _ = _text_size(draw, body_font, tick_label)
         draw.text(
             (x_pos - (tick_width / 2), height - bottom_margin + 10),
             tick_label,
@@ -296,7 +318,7 @@ def write_score_plot_png(
             width=1,
         )
         label = f"{value:.1f}" if max_value <= 12 else f"{value:.0f}"
-        label_width, label_height = text_size(draw, body_font, label)
+        label_width, label_height = _text_size(draw, body_font, label)
         draw.text(
             (left_margin - 10 - label_width, y_pos - (label_height / 2)),
             label,
@@ -325,6 +347,172 @@ def write_score_plot_png(
             fill=color,
             font=body_font,
         )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path, format="PNG")
+
+
+def write_grouped_bar_chart_png(
+    *,
+    path: Path,
+    title: str,
+    categories: list[str],
+    series: dict[str, list[float]],
+    x_label: str,
+    y_label: str,
+    series_labels: dict[str, str] | None = None,
+    error_ranges: dict[str, list[tuple[float, float]]] | None = None,
+    percent_scale: bool = False,
+) -> None:
+    width = 1080
+    height = 520
+    left_margin = 84
+    right_margin = 280
+    top_margin = 72
+    bottom_margin = 116
+    colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd"]
+
+    def hex_to_rgb(color: str) -> tuple[int, int, int]:
+        color = color.lstrip("#")
+        return tuple(int(color[index : index + 2], 16) for index in (0, 2, 4))
+
+    def scale_value(value: float) -> float:
+        return value * 100.0 if percent_scale else value
+
+    def format_value(value: float) -> str:
+        scaled = scale_value(value)
+        if percent_scale:
+            return f"{scaled:.1f}%"
+        if scaled <= 12:
+            return f"{scaled:.2f}"
+        return f"{scaled:.1f}"
+
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    title_font = ImageFont.load_default()
+    body_font = ImageFont.load_default()
+
+    plotted_values = [scale_value(point) for points in series.values() for point in points]
+    plotted_highs = plotted_values[:]
+    if error_ranges:
+        for name, ranges in error_ranges.items():
+            for _, high in ranges:
+                plotted_highs.append(scale_value(high))
+            if name not in series:
+                continue
+    max_value = max(plotted_highs) if plotted_highs else 1.0
+    max_value = max(1.0, max_value * 1.12)
+    if percent_scale:
+        max_value = min(100.0, max_value)
+
+    plot_width = width - left_margin - right_margin
+    plot_height = height - top_margin - bottom_margin
+    group_count = max(1, len(categories))
+    series_count = max(1, len(series))
+    group_span = plot_width / group_count
+    bar_width = min(60.0, (group_span * 0.72) / series_count)
+    bar_cluster_width = bar_width * series_count
+
+    def project_y(value: float) -> float:
+        return height - bottom_margin - ((value / max_value) * plot_height)
+
+    draw.text((left_margin, 20), title, fill=(17, 17, 17), font=title_font)
+    draw.line(
+        [(left_margin, height - bottom_margin), (width - right_margin, height - bottom_margin)],
+        fill=(68, 68, 68),
+        width=2,
+    )
+    draw.line(
+        [(left_margin, top_margin), (left_margin, height - bottom_margin)],
+        fill=(68, 68, 68),
+        width=2,
+    )
+
+    x_label_width, _ = _text_size(draw, body_font, x_label)
+    draw.text(
+        ((left_margin + (plot_width / 2)) - (x_label_width / 2), height - 34),
+        x_label,
+        fill=(51, 51, 51),
+        font=body_font,
+    )
+    draw.text((18, top_margin + 8), y_label, fill=(51, 51, 51), font=body_font)
+
+    tick_count = 5
+    for tick_index in range(tick_count + 1):
+        value = (max_value * tick_index) / tick_count
+        y_pos = project_y(value)
+        draw.line([(left_margin - 6, y_pos), (left_margin, y_pos)], fill=(102, 102, 102), width=1)
+        draw.line(
+            [(left_margin, y_pos), (width - right_margin, y_pos)],
+            fill=(230, 230, 230),
+            width=1,
+        )
+        tick_label = f"{value:.0f}%" if percent_scale else (f"{value:.1f}" if max_value <= 12 else f"{value:.0f}")
+        label_width, label_height = _text_size(draw, body_font, tick_label)
+        draw.text(
+            (left_margin - 10 - label_width, y_pos - (label_height / 2)),
+            tick_label,
+            fill=(85, 85, 85),
+            font=body_font,
+        )
+
+    for category_index, category in enumerate(categories):
+        group_center_x = left_margin + (group_span * category_index) + (group_span / 2)
+        group_start_x = group_center_x - (bar_cluster_width / 2)
+        tick_x = group_center_x
+        draw.line(
+            [(tick_x, height - bottom_margin), (tick_x, height - bottom_margin + 6)],
+            fill=(102, 102, 102),
+            width=1,
+        )
+        label_lines = _wrap_label(category)
+        for line_index, line in enumerate(label_lines):
+            line_width, _ = _text_size(draw, body_font, line)
+            draw.text(
+                (group_center_x - (line_width / 2), height - bottom_margin + 12 + (line_index * 12)),
+                line,
+                fill=(85, 85, 85),
+                font=body_font,
+            )
+
+        for series_index, (series_name, values) in enumerate(series.items()):
+            if category_index >= len(values):
+                continue
+            color = hex_to_rgb(colors[series_index % len(colors)])
+            bar_value = scale_value(values[category_index])
+            x0 = group_start_x + (series_index * bar_width)
+            x1 = x0 + bar_width - 6
+            y0 = project_y(bar_value)
+            y1 = height - bottom_margin
+            draw.rectangle((x0, y0, x1, y1), fill=color)
+
+            if error_ranges and series_name in error_ranges and category_index < len(error_ranges[series_name]):
+                low, high = error_ranges[series_name][category_index]
+                low_y = project_y(scale_value(low))
+                high_y = project_y(scale_value(high))
+                center_x = (x0 + x1) / 2
+                draw.line((center_x, high_y, center_x, low_y), fill=(45, 45, 45), width=1)
+                draw.line((center_x - 6, high_y, center_x + 6, high_y), fill=(45, 45, 45), width=1)
+                draw.line((center_x - 6, low_y, center_x + 6, low_y), fill=(45, 45, 45), width=1)
+
+            value_label = format_value(values[category_index])
+            label_width, label_height = _text_size(draw, body_font, value_label)
+            draw.text(
+                (((x0 + x1) / 2) - (label_width / 2), y0 - label_height - 4),
+                value_label,
+                fill=(68, 68, 68),
+                font=body_font,
+            )
+
+    for legend_index, series_name in enumerate(series):
+        color = hex_to_rgb(colors[legend_index % len(colors)])
+        label = _label_for(series_name, series_labels)
+        legend_y = top_margin + 24 * legend_index
+        draw.rectangle(
+            (width - right_margin + 8, legend_y - 8, width - right_margin + 26, legend_y + 8),
+            fill=color,
+        )
+        draw.text((width - right_margin + 36, legend_y - 6), label, fill=color, font=body_font)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     image.save(path, format="PNG")
