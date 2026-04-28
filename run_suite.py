@@ -112,6 +112,7 @@ def run_epoch(
                     scores=scores,
                     reveal_scores=config.observation.reveal_scores_each_turn,
                     reveal_paths=config.observation.reveal_paths_each_turn,
+                    undocumented_fields_profile=config.observation.undocumented_fields_profile,
                 )
                 request_move(runtimes[name], observations[name])
 
@@ -194,6 +195,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
 
     history: list[dict[str, Any]] = []
     score_series: dict[str, list[float]] = {agent.name: [] for agent in config.agents}
+    previous_generation_by_agent: dict[str, Any] = {agent.name: None for agent in config.agents}
 
     if config.map.resample_each_epoch:
         map_seeds = [config.seed + (epoch * 1009) for epoch in range(1, config.game.epochs + 1)]
@@ -211,9 +213,37 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         generation_errors: dict[str, str | None] = {}
         generation_validation_issues: dict[str, list[str]] = {}
         generation_used_fallback: dict[str, bool] = {}
+        generation_reused: dict[str, bool] = {}
 
         for index, agent in enumerate(config.agents):
             opponent = config.agents[1 - index]
+            reused_generation = (
+                epoch_index > 1
+                and not agent.regenerate_each_epoch
+                and previous_generation_by_agent.get(agent.name) is not None
+            )
+            if reused_generation:
+                prior = previous_generation_by_agent[agent.name]
+                codes[agent.name] = prior.code
+                submitted_codes[agent.name] = prior.submitted_code or prior.code
+                raw_responses[agent.name] = "[generation skipped: reused previous code because regenerate_each_epoch=false]"
+                generation_errors[agent.name] = None
+                generation_validation_issues[agent.name] = list(prior.validation_issues if prior.used_fallback else [])
+                generation_used_fallback[agent.name] = bool(prior.used_fallback)
+                generation_reused[agent.name] = True
+                (epoch_dir / f"{agent.name}_prompt.txt").write_text(
+                    "# generation skipped: reused previous code because regenerate_each_epoch=false",
+                    encoding="utf-8",
+                )
+                (epoch_dir / f"{agent.name}_code.py").write_text(prior.code, encoding="utf-8")
+                if submitted_codes[agent.name] != prior.code:
+                    (epoch_dir / f"{agent.name}_submitted_code.py").write_text(
+                        submitted_codes[agent.name],
+                        encoding="utf-8",
+                    )
+                (epoch_dir / f"{agent.name}_response.txt").write_text(raw_responses[agent.name], encoding="utf-8")
+                continue
+
             prompt = build_generation_prompt(
                 config=config,
                 agent_name=agent.name,
@@ -229,13 +259,17 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
                 user_prompt=prompt,
                 temperature=agent.temperature,
                 max_tokens=agent.max_tokens,
+                pre_execution_validation=config.generation.pre_execution_validation,
+                repair_invalid_submissions=config.generation.repair_invalid_submissions,
             )
+            previous_generation_by_agent[agent.name] = generation
             codes[agent.name] = generation.code
             submitted_codes[agent.name] = generation.submitted_code or generation.code
             raw_responses[agent.name] = generation.raw_text
             generation_errors[agent.name] = generation.error
             generation_validation_issues[agent.name] = generation.validation_issues
             generation_used_fallback[agent.name] = generation.used_fallback
+            generation_reused[agent.name] = False
             (epoch_dir / f"{agent.name}_prompt.txt").write_text(prompt, encoding="utf-8")
             (epoch_dir / f"{agent.name}_code.py").write_text(generation.code, encoding="utf-8")
             if submitted_codes[agent.name] != generation.code:
@@ -254,8 +288,11 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         epoch_result["generation_errors"] = generation_errors
         epoch_result["generation_validation_issues"] = generation_validation_issues
         epoch_result["generation_used_fallback"] = generation_used_fallback
+        epoch_result["generation_reused"] = generation_reused
         epoch_result["agents"] = [agent.__dict__ for agent in config.agents]
         epoch_result["feedback"] = config.feedback.__dict__
+        epoch_result["generation_policy"] = config.generation.__dict__
+        epoch_result["metadata"] = config.metadata
         _json_dump(epoch_dir / "artifact.json", epoch_result)
 
         write_epoch_map_svg(
@@ -290,6 +327,8 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         "condition_name": config.name,
         "agents": [agent.__dict__ for agent in config.agents],
         "feedback": config.feedback.__dict__,
+        "generation": config.generation.__dict__,
+        "metadata": config.metadata,
         "epochs": history,
     }
     _json_dump(condition_dir / "condition_summary.json", condition_payload)

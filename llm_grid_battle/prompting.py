@@ -44,6 +44,7 @@ def build_generation_prompt(
         "- The engine rejects invalid moves by keeping the agent in place.",
         "- Code must be deterministic. Do not use randomness.",
         "- Keep the solution self-contained inside choose_move(observation) using only local deterministic logic derived from the observation.",
+        "- Use only the documented observation fields listed below.",
         "- Do not write import statements of any kind.",
         "- Do not use names beginning with __.",
         "- Do not depend on external files, external services, subprocesses, or hidden state.",
@@ -76,6 +77,8 @@ def build_generation_prompt(
     ]
 
     if history:
+        history_window = max(0, int(config.feedback.history_window))
+        code_history_window = max(0, int(config.feedback.code_history_window))
         latest = history[-1]
         latest_score = float(latest["scores"][agent_name])
         latest_opponent_score = float(latest["scores"][opponent_name])
@@ -100,36 +103,34 @@ def build_generation_prompt(
                 "- Adaptation note: you were not ahead last epoch, so prefer a materially different targeting, obstacle-handling, or opponent-response strategy."
             )
 
-        feedback_items = history[-config.feedback.history_window :]
-        if config.feedback.include_codes and len(feedback_items) > 1:
-            # Code-bearing prompts are the largest and have shown truncation risk, so only
-            # include the latest epoch when prior code is embedded.
-            feedback_items = feedback_items[-1:]
+        feedback_items = history[-history_window:] if history_window else []
+        code_feedback_items = feedback_items[-code_history_window:] if code_history_window else []
 
-        parts.append("")
-        parts.append("Previous epoch feedback:")
-        for item in feedback_items:
-            parts.append(f"Epoch {item['epoch_index']}:")
-            if config.feedback.include_scores:
-                parts.append(f"- Scores: {json.dumps(item['scores'], sort_keys=True)}")
-                parts.append(f"- Winner: {item['winner']}")
-            if config.feedback.include_grid_state:
-                parts.append(f"- Initial resources: {json.dumps(item['initial_resources'])}")
-                parts.append(f"- Obstacles: {json.dumps(item['obstacles'])}")
-            if config.feedback.include_paths:
-                parts.append(f"- {agent_name} path: {json.dumps(item['paths'][agent_name])}")
-                parts.append(f"- {opponent_name} path: {json.dumps(item['paths'][opponent_name])}")
-            if config.feedback.include_runtime_events:
-                parts.append(f"- {agent_name} runtime events: {json.dumps(item['runtime_events'][agent_name])}")
-                parts.append(f"- {opponent_name} runtime events: {json.dumps(item['runtime_events'][opponent_name])}")
-            if config.feedback.include_codes:
-                parts.append(
-                    f"- {agent_name} code:\nBEGIN_PREVIOUS_CODE\n{truncate_text(item['codes'][agent_name])}\nEND_PREVIOUS_CODE"
-                )
-                if config.feedback.include_opponent_code:
+        if feedback_items:
+            parts.append("")
+            parts.append("Previous epoch feedback:")
+            for item in feedback_items:
+                parts.append(f"Epoch {item['epoch_index']}:")
+                if config.feedback.include_scores:
+                    parts.append(f"- Scores: {json.dumps(item['scores'], sort_keys=True)}")
+                    parts.append(f"- Winner: {item['winner']}")
+                if config.feedback.include_grid_state:
+                    parts.append(f"- Initial resources: {json.dumps(item['initial_resources'])}")
+                    parts.append(f"- Obstacles: {json.dumps(item['obstacles'])}")
+                if config.feedback.include_paths:
+                    parts.append(f"- {agent_name} path: {json.dumps(item['paths'][agent_name])}")
+                    parts.append(f"- {opponent_name} path: {json.dumps(item['paths'][opponent_name])}")
+                if config.feedback.include_runtime_events:
+                    parts.append(f"- {agent_name} runtime events: {json.dumps(item['runtime_events'][agent_name])}")
+                    parts.append(f"- {opponent_name} runtime events: {json.dumps(item['runtime_events'][opponent_name])}")
+                if config.feedback.include_codes and item in code_feedback_items:
                     parts.append(
-                        f"- {opponent_name} code:\nBEGIN_PREVIOUS_CODE\n{truncate_text(item['codes'][opponent_name])}\nEND_PREVIOUS_CODE"
+                        f"- {agent_name} code:\nBEGIN_PREVIOUS_CODE\n{truncate_text(item['codes'][agent_name])}\nEND_PREVIOUS_CODE"
                     )
+                    if config.feedback.include_opponent_code:
+                        parts.append(
+                            f"- {opponent_name} code:\nBEGIN_PREVIOUS_CODE\n{truncate_text(item['codes'][opponent_name])}\nEND_PREVIOUS_CODE"
+                        )
 
     parts.append("")
     parts.append("Output only raw Python source code.")

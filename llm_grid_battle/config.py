@@ -25,11 +25,13 @@ class AgentConfig:
     system_prompt: str = "You write deterministic Python for a grid-game agent."
     temperature: float = 0.2
     max_tokens: int = 1200
+    regenerate_each_epoch: bool = True
 
 
 @dataclass
 class FeedbackConfig:
     history_window: int = 1
+    code_history_window: int = 1
     include_scores: bool = True
     include_paths: bool = True
     include_codes: bool = True
@@ -44,6 +46,7 @@ class ObservationConfig:
     reveal_paths_each_turn: bool = False
     allow_stay: bool = True
     allow_diagonal: bool = True
+    undocumented_fields_profile: str = "none"
 
 
 @dataclass
@@ -74,6 +77,12 @@ class JudgeConfig:
 
 
 @dataclass
+class GenerationConfig:
+    pre_execution_validation: bool = True
+    repair_invalid_submissions: bool = True
+
+
+@dataclass
 class ConditionConfig:
     name: str
     seed: int
@@ -84,6 +93,7 @@ class ConditionConfig:
     map: MapConfig
     game: GameConfig
     judge: JudgeConfig
+    generation: GenerationConfig
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
@@ -99,6 +109,7 @@ class ConditionConfig:
             map=MapConfig(**data.get("map", {})),
             game=GameConfig(**data.get("game", {})),
             judge=JudgeConfig(**data.get("judge", {})),
+            generation=GenerationConfig(**data.get("generation", {})),
             metadata=data.get("metadata", {}),
         )
 
@@ -113,6 +124,7 @@ class ConditionConfig:
             "map": self.map.__dict__,
             "game": self.game.__dict__,
             "judge": self.judge.__dict__,
+            "generation": self.generation.__dict__,
             "metadata": self.metadata,
         }
 

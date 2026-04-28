@@ -81,6 +81,8 @@ def choose_move(observation):
 
 def builtin_strategy_code(name: str) -> str:
     normalized = name.lower()
+    if normalized in {"nearest_resource", "default", "greedy_nearest"}:
+        return default_agent_code()
     if normalized == "sweep_rows":
         return """
 def choose_move(observation):
@@ -412,8 +414,14 @@ def _behavioral_issues(code: str) -> list[str]:
     return sorted(set(issues))
 
 
-def _validate_submission(text: str) -> tuple[str, list[str]]:
+def _validate_submission(
+    text: str,
+    *,
+    pre_execution_validation: bool,
+) -> tuple[str, list[str]]:
     code = extract_code(text)
+    if not pre_execution_validation:
+        return code, []
     issues = validate_code(code)
     if issues:
         return code, issues
@@ -428,6 +436,8 @@ def generate_code(
     user_prompt: str,
     temperature: float,
     max_tokens: int,
+    pre_execution_validation: bool = True,
+    repair_invalid_submissions: bool = True,
     timeout: float = 60.0,
 ) -> GenerationResult:
     if provider == "builtin":
@@ -452,9 +462,22 @@ def generate_code(
             used_fallback=True,
         )
 
-    code, issues = _validate_submission(text)
+    code, issues = _validate_submission(
+        text,
+        pre_execution_validation=pre_execution_validation,
+    )
     if not issues:
         return GenerationResult(raw_text=text, code=code, submitted_code=code)
+
+    if not repair_invalid_submissions:
+        return GenerationResult(
+            raw_text=text,
+            code=default_agent_code(),
+            submitted_code=code,
+            error=f"Initial submission invalid ({', '.join(issues)})",
+            validation_issues=issues,
+            used_fallback=True,
+        )
 
     repair_prompt = _build_repair_prompt(
         invalid_code=code,
@@ -487,7 +510,10 @@ def generate_code(
             used_fallback=True,
         )
 
-    repaired_code, repaired_issues = _validate_submission(repaired_text)
+    repaired_code, repaired_issues = _validate_submission(
+        repaired_text,
+        pre_execution_validation=pre_execution_validation,
+    )
     if repaired_issues:
         return GenerationResult(
             raw_text=combined_raw_text,

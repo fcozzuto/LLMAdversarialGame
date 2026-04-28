@@ -10,6 +10,8 @@ from typing import Any
 POLICY_SNIPPETS = (
     "import ",
     "__",
+    "undocumented_",
+    "secret_",
     "open(",
     "socket",
     "subprocess",
@@ -155,6 +157,97 @@ def _condition_execution_rate_summary(condition: dict[str, Any]) -> str:
         )
         agent_summaries.append(f"{label} { _format_rate_fraction(execution_rate, epoch_count) }")
     return ", ".join(agent_summaries)
+
+
+def _build_notable_epochs(
+    *,
+    epochs: list[dict[str, Any]],
+    agent_names: list[str],
+    agent_labels: dict[str, str],
+    codes_by_agent: dict[str, list[str]],
+) -> list[dict[str, Any]]:
+    if not epochs or len(agent_names) != 2:
+        return []
+
+    first, second = agent_names
+    notes: list[dict[str, Any]] = []
+
+    largest_margin_epoch = max(
+        epochs,
+        key=lambda epoch: abs(float(epoch["scores"][first]) - float(epoch["scores"][second])),
+    )
+    notes.append(
+        {
+            "kind": "largest_score_margin",
+            "epoch_index": int(largest_margin_epoch["epoch_index"]),
+            "summary": (
+                f"largest score margin: {agent_labels[first]} {largest_margin_epoch['scores'][first]} "
+                f"vs {agent_labels[second]} {largest_margin_epoch['scores'][second]}"
+            ),
+        }
+    )
+
+    runtime_heaviest = max(
+        epochs,
+        key=lambda epoch: sum(len(epoch.get("runtime_events", {}).get(name, [])) for name in agent_names),
+    )
+    runtime_total = sum(len(runtime_heaviest.get("runtime_events", {}).get(name, [])) for name in agent_names)
+    if runtime_total:
+        notes.append(
+            {
+                "kind": "runtime_heavy",
+                "epoch_index": int(runtime_heaviest["epoch_index"]),
+                "summary": f"most runtime issues in one epoch: {runtime_total}",
+            }
+        )
+
+    fallback_epoch = next(
+        (
+            epoch
+            for epoch in epochs
+            if any(
+                epoch.get("generation_used_fallback", {}).get(name)
+                or epoch.get("sandbox_reports", {}).get(name, {}).get("used_fallback")
+                for name in agent_names
+            )
+        ),
+        None,
+    )
+    if fallback_epoch is not None:
+        fallback_agents = [
+            agent_labels[name]
+            for name in agent_names
+            if fallback_epoch.get("generation_used_fallback", {}).get(name)
+            or fallback_epoch.get("sandbox_reports", {}).get(name, {}).get("used_fallback")
+        ]
+        notes.append(
+            {
+                "kind": "fallback_epoch",
+                "epoch_index": int(fallback_epoch["epoch_index"]),
+                "summary": f"first fallback/default-code epoch for {', '.join(fallback_agents)}",
+            }
+        )
+
+    largest_code_shift: tuple[float, int] | None = None
+    for epoch_offset in range(1, len(epochs)):
+        novelties: list[float] = []
+        for agent_name in agent_names:
+            previous = codes_by_agent[agent_name][epoch_offset - 1]
+            current = codes_by_agent[agent_name][epoch_offset]
+            novelties.append(1.0 - code_similarity(previous, current))
+        average_novelty = statistics.mean(novelties) if novelties else 0.0
+        if largest_code_shift is None or average_novelty > largest_code_shift[0]:
+            largest_code_shift = (average_novelty, epoch_offset)
+    if largest_code_shift is not None:
+        notes.append(
+            {
+                "kind": "largest_code_shift",
+                "epoch_index": int(epochs[largest_code_shift[1]]["epoch_index"]),
+                "summary": f"largest average code shift between consecutive epochs: {round(largest_code_shift[0], 4)}",
+            }
+        )
+
+    return notes
 
 
 def _average_score_winner(condition: dict[str, Any]) -> str | None:
@@ -303,6 +396,10 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
     agent_names = [agent["name"] for agent in agents]
     agent_models = {agent["name"]: _model_descriptor(agent) for agent in agents}
     agent_labels = {name: f"{name} ({agent_models[name]})" for name in agent_names}
+    agent_generation_controls = {
+        agent["name"]: {"regenerate_each_epoch": bool(agent.get("regenerate_each_epoch", True))}
+        for agent in agents
+    }
 
     win_counts = defaultdict(int)
     novelty_by_agent: dict[str, list[float]] = {name: [] for name in agent_names}
@@ -395,14 +492,24 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         }
         runtime_issue_counts[agent_name] = dict(sorted(runtime_issues_by_agent[agent_name].items()))
 
+    notable_epochs = _build_notable_epochs(
+        epochs=epochs,
+        agent_names=agent_names,
+        agent_labels=agent_labels,
+        codes_by_agent=codes_by_agent,
+    )
+
     return {
         "condition_name": condition_summary["condition_name"],
         "agent_names": agent_names,
         "agent_models": agent_models,
         "agent_labels": agent_labels,
+        "agent_generation_controls": agent_generation_controls,
         "epoch_count": len(epochs),
         "same_model_matchup": len({(agent["provider"], agent["model"]) for agent in agents}) == 1,
         "feedback_policy": condition_summary["feedback"],
+        "generation_policy": condition_summary.get("generation", {}),
+        "metadata": condition_summary.get("metadata", {}),
         "win_counts": dict(win_counts),
         "average_scores": {
             name: round(statistics.mean(values), 3) if values else 0.0
@@ -424,6 +531,7 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         "code_change_stats": code_change_stats,
         "plateau_signals": plateau_signals,
         "plateau_reasons": plateau_reasons,
+        "notable_epochs": notable_epochs,
     }
 
 
@@ -623,6 +731,43 @@ def _format_policy_summary(condition: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _format_generation_policy(condition: dict[str, Any]) -> list[str]:
+    policy = condition.get("generation_policy", {})
+    pre_execution = bool(policy.get("pre_execution_validation", True))
+    repair = bool(policy.get("repair_invalid_submissions", True))
+    lines = [
+        f"- Generation scaffold: pre-execution validation was {'enabled' if pre_execution else 'disabled'}, and repair retries were {'enabled' if repair else 'disabled'}."
+    ]
+    frozen_agents = [
+        condition["agent_labels"][name]
+        for name, control in condition.get("agent_generation_controls", {}).items()
+        if not control.get("regenerate_each_epoch", True)
+    ]
+    if frozen_agents:
+        lines.append(
+            f"- Adaptation control: {', '.join(frozen_agents)} reused prior code after epoch 1 instead of regenerating each epoch."
+        )
+    return lines
+
+
+def _format_research_metadata(condition: dict[str, Any]) -> list[str]:
+    metadata = condition.get("metadata", {})
+    if not metadata:
+        return []
+    rendered = ", ".join(f"{key}={value}" for key, value in sorted(metadata.items()))
+    return [f"- Research tags: {rendered}."]
+
+
+def _format_notable_epochs(condition: dict[str, Any]) -> list[str]:
+    notable = condition.get("notable_epochs", [])
+    if not notable:
+        return []
+    return [
+        f"- Notable epoch {item['epoch_index']}: {item['summary']}."
+        for item in notable
+    ]
+
+
 def _score_chart_summary(condition: dict[str, Any]) -> str:
     score_winner = _average_score_winner(condition)
     win_winner = _win_count_winner(condition)
@@ -673,6 +818,24 @@ def _render_models_used(
     return lines
 
 
+def _render_research_caveats(suite_summary: dict[str, Any]) -> list[str]:
+    conditions = suite_summary.get("conditions", [])
+    noisy_conditions = [condition["condition_name"] for condition in conditions if not _condition_is_clean(condition)]
+    lines = [
+        "## Threats To Validity",
+        "- Code novelty is a normalized lexical change metric, not a direct measure of behavioral novelty on the grid.",
+        "- Policy markers are heuristic indicators of potential rule violations; they are not proof of cheating or malicious intent.",
+        "- Results from a single run should be treated as provisional until replicated across additional seeds and repeated runs with cross-run statistics.",
+        "- Conclusions are specific to this grid-game environment, the chosen prompts, and the configured model pairings; they do not automatically generalize to other tasks.",
+    ]
+    if noisy_conditions:
+        lines.append(
+            f"- Conditions with generation errors or fallback executions ({', '.join(f'`{name}`' for name in noisy_conditions)}) weaken causal claims and should be weighted less heavily than cleaner conditions."
+        )
+    lines.append("")
+    return lines
+
+
 def render_markdown_report(
     suite_summary: dict[str, Any],
     llm_report: str | None,
@@ -696,6 +859,7 @@ def render_markdown_report(
         )
 
     lines.extend(_render_models_used(suite_summary, run_metadata))
+    lines.extend(_render_research_caveats(suite_summary))
 
     data_quality_warnings = suite_summary.get("data_quality_warnings", [])
     if data_quality_warnings:
@@ -734,7 +898,9 @@ def render_markdown_report(
         lines.append(
             f"- Feedback visibility: { _format_feedback_policy(condition.get('feedback_policy', {})) }."
         )
+        lines.extend(_format_research_metadata(condition))
         lines.extend(_format_agent_model_list(condition))
+        lines.extend(_format_generation_policy(condition))
         lines.append(f"- Overall result: {_format_overall_result(condition)}")
         lines.extend(_format_generation_execution(condition))
         lines.extend(_format_novelty(condition))
@@ -742,6 +908,7 @@ def render_markdown_report(
         lines.extend(_format_plateau_summary(condition))
         lines.extend(_format_runtime_summary(condition))
         lines.extend(_format_policy_summary(condition))
+        lines.extend(_format_notable_epochs(condition))
         lines.append(
             f"- Score chart artifact: `{condition['condition_name']}/scores.svg`."
         )

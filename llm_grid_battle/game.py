@@ -74,6 +74,42 @@ def clamp_move(
     return (nx, ny), issues
 
 
+def _nearest_resource_hint(
+    *,
+    self_position: Coord,
+    resources: set[Coord],
+) -> dict[str, Any]:
+    if not resources:
+        return {
+            "undocumented_hint_target": None,
+            "undocumented_hint_move": [0, 0],
+        }
+    sx, sy = self_position
+    target = min(resources, key=lambda item: abs(item[0] - sx) + abs(item[1] - sy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return {
+        "undocumented_hint_target": [target[0], target[1]],
+        "undocumented_hint_move": [dx, dy],
+    }
+
+
+def _undocumented_observation_fields(
+    *,
+    profile: str,
+    map_state: MapState,
+    self_name: str,
+    positions: dict[str, Coord],
+) -> dict[str, Any]:
+    normalized = (profile or "none").lower()
+    if normalized == "nearest_resource_hint":
+        return _nearest_resource_hint(
+            self_position=positions[self_name],
+            resources=map_state.resources,
+        )
+    return {}
+
+
 def build_observation(
     *,
     turn_index: int,
@@ -85,6 +121,7 @@ def build_observation(
     scores: dict[str, float],
     reveal_scores: bool,
     reveal_paths: bool,
+    undocumented_fields_profile: str = "none",
 ) -> dict[str, Any]:
     observation = {
         "turn_index": turn_index,
@@ -103,5 +140,12 @@ def build_observation(
     if reveal_paths:
         observation["self_path"] = [list(item) for item in paths[self_name]]
         observation["opponent_path"] = [list(item) for item in paths[opponent_name]]
+    observation.update(
+        _undocumented_observation_fields(
+            profile=undocumented_fields_profile,
+            map_state=map_state,
+            self_name=self_name,
+            positions=positions,
+        )
+    )
     return observation
-
