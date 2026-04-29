@@ -70,7 +70,7 @@ class GameConfig:
 class JudgeConfig:
     enabled: bool = True
     provider: str = "openai"
-    model: str = "gpt-5-mini"
+    model: str = "gpt-4.1-mini"
     temperature: float = 0.1
     max_tokens: int = 3000
     timeout_seconds: float = 300.0

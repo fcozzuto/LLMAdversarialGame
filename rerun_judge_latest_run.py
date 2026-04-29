@@ -113,7 +113,29 @@ def _load_judge_config_from_run(run_dir: Path) -> dict[str, Any]:
     return judge
 
 
-def rerun_judge_for_latest_run(project_root: Path, run_dir: Path | None = None) -> Path:
+def _persist_judge_config_to_run(run_dir: Path, judge_config: dict[str, Any]) -> None:
+    condition_config_paths = sorted(run_dir.glob("*/condition_config.json"))
+    for config_path in condition_config_paths:
+        condition_config = _load_json(config_path)
+        judge = condition_config.get("judge")
+        if not isinstance(judge, dict):
+            continue
+        judge["provider"] = str(judge_config.get("provider", judge.get("provider", "openai")))
+        judge["model"] = str(judge_config.get("model", judge.get("model", "gpt-4.1-mini")))
+        condition_config["judge"] = judge
+        config_path.write_text(
+            json.dumps(condition_config, indent=2),
+            encoding="utf-8",
+        )
+
+
+def rerun_judge_for_latest_run(
+    project_root: Path,
+    run_dir: Path | None = None,
+    *,
+    judge_provider_override: str | None = None,
+    judge_model_override: str | None = None,
+) -> Path:
     load_env_files(project_root)
 
     target_run_dir = run_dir if run_dir is not None else _find_latest_run_dir(project_root)
@@ -123,16 +145,21 @@ def rerun_judge_for_latest_run(project_root: Path, run_dir: Path | None = None) 
 
     suite_summary = _load_json(suite_summary_path)
     judge_config = _load_judge_config_from_run(target_run_dir)
+    if judge_provider_override:
+        judge_config["provider"] = judge_provider_override
+    if judge_model_override:
+        judge_config["model"] = judge_model_override
+    _persist_judge_config_to_run(target_run_dir, judge_config)
     run_metadata = _load_or_infer_run_metadata(target_run_dir)
     if run_metadata is None:
         run_metadata = {"run_name": target_run_dir.name}
     run_metadata["judge_status"] = "enabled"
     run_metadata["judge_provider"] = str(judge_config.get("provider", "openai"))
-    run_metadata["judge_model"] = str(judge_config.get("model", "gpt-5-mini"))
+    run_metadata["judge_model"] = str(judge_config.get("model", "gpt-4.1-mini"))
 
     llm_report = judge_text(
         provider=str(judge_config.get("provider", "openai")),
-        model=str(judge_config.get("model", "gpt-5-mini")),
+        model=str(judge_config.get("model", "gpt-4.1-mini")),
         system_prompt="You are a careful research assistant. Answer in concise markdown.",
         user_prompt=build_judge_prompt(suite_summary),
         temperature=float(judge_config.get("temperature", 0.1)),
@@ -171,12 +198,27 @@ def main() -> None:
         default=None,
         help="Optional path to a specific run directory. If omitted, uses latest runs/run_*.",
     )
+    parser.add_argument(
+        "--judge-provider",
+        default=None,
+        help="Optional provider override for rerunning the judge on an existing run.",
+    )
+    parser.add_argument(
+        "--judge-model",
+        default=None,
+        help="Optional model override for rerunning the judge on an existing run.",
+    )
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent
     run_dir = Path(args.run_dir).resolve() if args.run_dir else None
 
-    report_path = rerun_judge_for_latest_run(project_root, run_dir)
+    report_path = rerun_judge_for_latest_run(
+        project_root,
+        run_dir,
+        judge_provider_override=args.judge_provider,
+        judge_model_override=args.judge_model,
+    )
     print(f"Regenerated report: {report_path}")
 
 

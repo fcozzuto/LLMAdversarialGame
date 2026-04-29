@@ -175,7 +175,12 @@ def _openai_responses_text(response: dict[str, Any]) -> str:
 
 def _is_unsupported_openai_reasoning_error(body: str) -> bool:
     lowered = body.lower()
-    return "reasoning.effort" in lowered and "unsupported" in lowered and "supported values" in lowered
+    return "reasoning.effort" in lowered and ("unsupported" in lowered or "not supported" in lowered)
+
+
+def _is_unsupported_openai_text_verbosity_error(body: str) -> bool:
+    lowered = body.lower()
+    return "text.verbosity" in lowered and ("unsupported" in lowered or "not supported" in lowered)
 
 
 def _generate_text(
@@ -224,8 +229,8 @@ def _generate_text(
     try:
         if provider == "openai":
             last_error: str | None = None
-            for reasoning_effort in ("minimal", "low", "none"):
-                payload = {
+            payloads: list[dict[str, Any]] = [
+                {
                     "model": model,
                     "instructions": system_prompt,
                     "input": user_prompt,
@@ -233,13 +238,46 @@ def _generate_text(
                     "text": {"verbosity": "low"},
                     "max_output_tokens": max_tokens,
                 }
+                for reasoning_effort in ("minimal", "low", "none")
+            ]
+            payloads.append(
+                {
+                    "model": model,
+                    "instructions": system_prompt,
+                    "input": user_prompt,
+                    "text": {"verbosity": "low"},
+                    "max_output_tokens": max_tokens,
+                }
+            )
+            payloads.append(
+                {
+                    "model": model,
+                    "instructions": system_prompt,
+                    "input": user_prompt,
+                    "text": {"verbosity": "medium"},
+                    "max_output_tokens": max_tokens,
+                }
+            )
+            payloads.append(
+                {
+                    "model": model,
+                    "instructions": system_prompt,
+                    "input": user_prompt,
+                    "max_output_tokens": max_tokens,
+                }
+            )
+            for payload in payloads:
                 try:
                     response = _post_json(url, headers, payload, timeout)
                     return _openai_responses_text(response), None
                 except urllib.error.HTTPError as exc:
                     body = exc.read().decode("utf-8", errors="replace")
                     last_error = f"HTTP {exc.code}: {body[:500]}"
-                    if exc.code == 400 and _is_unsupported_openai_reasoning_error(body) and reasoning_effort != "none":
+                    has_reasoning = "reasoning" in payload
+                    verbosity = payload.get("text", {}).get("verbosity") if isinstance(payload.get("text"), dict) else None
+                    if exc.code == 400 and _is_unsupported_openai_reasoning_error(body) and has_reasoning:
+                        continue
+                    if exc.code == 400 and _is_unsupported_openai_text_verbosity_error(body) and verbosity != "medium":
                         continue
                     return "", last_error
             return "", last_error or "OpenAI request failed."
