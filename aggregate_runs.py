@@ -68,6 +68,10 @@ def _format_stat(label: str, stats: dict[str, Any]) -> str:
     )
 
 
+def _has_samples(stats: dict[str, Any]) -> bool:
+    return int(stats.get("count", 0)) > 0
+
+
 def _ci_overlaps(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return not (
         float(left["ci95_high"]) < float(right["ci95_low"])
@@ -109,17 +113,29 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
     cross_model_novelty_values: list[float] = []
     same_model_policy_values: list[float] = []
     cross_model_policy_values: list[float] = []
+    suite_families: set[str] = set()
+    suite_types: set[str] = set()
     for bundle in bundles:
+        conditions = bundle["suite_summary"].get("conditions", [])
+        has_same_model = any(bool(condition.get("same_model_matchup", False)) for condition in conditions)
+        has_cross_model = any(not bool(condition.get("same_model_matchup", False)) for condition in conditions)
         comparison = bundle["suite_summary"].get("cross_condition_comparison", {})
-        if "same_model_avg_novelty" in comparison:
+        if has_same_model and "same_model_avg_novelty" in comparison:
             same_model_novelty_values.append(float(comparison["same_model_avg_novelty"]))
-        if "cross_model_avg_novelty" in comparison:
+        if has_cross_model and "cross_model_avg_novelty" in comparison:
             cross_model_novelty_values.append(float(comparison["cross_model_avg_novelty"]))
-        if "same_model_avg_policy_markers" in comparison:
+        if has_same_model and "same_model_avg_policy_markers" in comparison:
             same_model_policy_values.append(float(comparison["same_model_avg_policy_markers"]))
-        if "cross_model_avg_policy_markers" in comparison:
+        if has_cross_model and "cross_model_avg_policy_markers" in comparison:
             cross_model_policy_values.append(float(comparison["cross_model_avg_policy_markers"]))
-        for condition in bundle["suite_summary"].get("conditions", []):
+        for condition in conditions:
+            metadata = condition.get("metadata", {})
+            suite_family = metadata.get("suite_family")
+            suite_type = metadata.get("suite_type")
+            if isinstance(suite_family, str) and suite_family:
+                suite_families.add(suite_family)
+            if isinstance(suite_type, str) and suite_type:
+                suite_types.add(suite_type)
             by_condition.setdefault(str(condition["condition_name"]), []).append(
                 {"run_name": bundle["run_name"], "condition": condition}
             )
@@ -170,7 +186,8 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
                 [float(entry["condition"]["novelty"][agent_name]["average"]) for entry in entries]
             )
             condition_summary["policy_marker_count"][agent_name] = _stat_summary(
-                [float(len(entry["condition"].get("policy_markers", {}).get(agent_name, []))) for entry in entries]
+                [float(len(entry["condition"].get("policy_markers", {}).get(agent_name, []))) for entry in entries],
+                lower_bound=0.0,
             )
 
         for outcome_name in [*agent_names, "draw"]:
@@ -192,6 +209,10 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
         "run_names": [bundle["run_name"] for bundle in bundles],
         "run_directories": [bundle["run_dir"] for bundle in bundles],
         "condition_count": len(condition_summaries),
+        "suite_families": sorted(suite_families),
+        "suite_types": sorted(suite_types),
+        "has_same_model_conditions": any(bool(condition.get("same_model_matchup", False)) for condition in condition_summaries),
+        "has_cross_model_conditions": any(not bool(condition.get("same_model_matchup", False)) for condition in condition_summaries),
         "cross_run_summary": {
             "same_model_avg_novelty": _stat_summary(same_model_novelty_values),
             "cross_model_avg_novelty": _stat_summary(cross_model_novelty_values),
@@ -278,6 +299,13 @@ def _aggregate_conclusions(aggregate_summary: dict[str, Any]) -> list[str]:
         f"{quality_counts['near-clean']}/{len(conditions)} were near-clean, and "
         f"{quality_counts['higher-noise']}/{len(conditions)} remained higher-noise."
     )
+    mixed_suite_families = len(aggregate_summary.get("suite_families", [])) > 1
+    mixed_suite_types = len(aggregate_summary.get("suite_types", [])) > 1
+    mixed_campaign = mixed_suite_families or mixed_suite_types
+    if mixed_campaign:
+        lines.append(
+            "- This aggregate mixes multiple suite families or suite types, so treat it as a campaign-level inventory and sanity check rather than a causal comparison report."
+        )
     if int(aggregate_summary.get("run_count", 0)) < 3:
         run_word = "run" if int(aggregate_summary.get("run_count", 0)) == 1 else "runs"
         lines.append(
@@ -289,41 +317,68 @@ def _aggregate_conclusions(aggregate_summary: dict[str, Any]) -> list[str]:
 
     same_novelty = aggregate_summary["cross_run_summary"]["same_model_avg_novelty"]
     cross_novelty = aggregate_summary["cross_run_summary"]["cross_model_avg_novelty"]
-    if float(same_novelty["mean"]) > float(cross_novelty["mean"]):
-        strong_novelty = int(aggregate_summary.get("run_count", 0)) >= 3 and not _ci_overlaps(same_novelty, cross_novelty)
-        novelty_phrase = "consistently" if strong_novelty else "directionally"
+    if mixed_campaign:
         lines.append(
-            f"- Same-model conditions showed {novelty_phrase} higher code novelty than cross-model conditions "
-            f"({same_novelty['mean']} vs {cross_novelty['mean']})."
+            "- Family-level novelty comparisons are not the main interpretation target here because the aggregate mixes core, ablation, control, or opportunity suites."
         )
-    elif float(cross_novelty["mean"]) > float(same_novelty["mean"]):
-        strong_novelty = int(aggregate_summary.get("run_count", 0)) >= 3 and not _ci_overlaps(same_novelty, cross_novelty)
-        novelty_phrase = "consistently" if strong_novelty else "directionally"
+    elif _has_samples(same_novelty) and _has_samples(cross_novelty):
+        if float(same_novelty["mean"]) > float(cross_novelty["mean"]):
+            strong_novelty = int(aggregate_summary.get("run_count", 0)) >= 3 and not _ci_overlaps(same_novelty, cross_novelty)
+            novelty_phrase = "consistently" if strong_novelty else "directionally"
+            lines.append(
+                f"- Same-model conditions showed {novelty_phrase} higher code novelty than cross-model conditions "
+                f"({same_novelty['mean']} vs {cross_novelty['mean']})."
+            )
+        elif float(cross_novelty["mean"]) > float(same_novelty["mean"]):
+            strong_novelty = int(aggregate_summary.get("run_count", 0)) >= 3 and not _ci_overlaps(same_novelty, cross_novelty)
+            novelty_phrase = "consistently" if strong_novelty else "directionally"
+            lines.append(
+                f"- Cross-model conditions showed {novelty_phrase} higher code novelty than same-model conditions "
+                f"({cross_novelty['mean']} vs {same_novelty['mean']})."
+            )
+        else:
+            lines.append("- Same-model and cross-model novelty were effectively tied in the current aggregate.")
+    elif _has_samples(same_novelty):
         lines.append(
-            f"- Cross-model conditions showed {novelty_phrase} higher code novelty than same-model conditions "
-            f"({cross_novelty['mean']} vs {same_novelty['mean']})."
+            f"- This aggregate only supports same-model novelty summary ({same_novelty['mean']}); no cross-model comparison is available here."
+        )
+    elif _has_samples(cross_novelty):
+        lines.append(
+            f"- This aggregate only supports cross-model novelty summary ({cross_novelty['mean']}); no same-model comparison is available here."
         )
     else:
-        lines.append("- Same-model and cross-model novelty were effectively tied in the current aggregate.")
+        lines.append("- No same-model versus cross-model novelty comparison is available in this aggregate.")
 
     same_markers = aggregate_summary["cross_run_summary"]["same_model_avg_policy_markers"]
     cross_markers = aggregate_summary["cross_run_summary"]["cross_model_avg_policy_markers"]
-    if float(same_markers["mean"]) <= 0.5 and float(cross_markers["mean"]) <= 0.5:
+    if mixed_campaign:
+        lines.append(
+            "- Policy-marker totals should also be interpreted at the family level rather than as one combined same-model versus cross-model comparison."
+        )
+    elif _has_samples(same_markers) and _has_samples(cross_markers) and float(same_markers["mean"]) <= 0.5 and float(cross_markers["mean"]) <= 0.5:
         lines.append(
             f"- Policy-marker rates remained low across the aggregate "
             f"(same-model {same_markers['mean']}, cross-model {cross_markers['mean']}), "
             "so the current evidence does not show repeated or dominant rule-violation behavior."
         )
-    else:
+    elif _has_samples(same_markers) and _has_samples(cross_markers):
         lines.append(
             f"- Policy-marker rates were non-trivial in at least one comparison family "
             f"(same-model {same_markers['mean']}, cross-model {cross_markers['mean']}), "
             "so rule-boundary behavior should be inspected qualitatively before making strong claims."
         )
+    elif _has_samples(same_markers):
+        lines.append(
+            f"- Policy-marker rates for the available same-model conditions were {same_markers['mean']}; no cross-model comparison is available here."
+        )
+    elif _has_samples(cross_markers):
+        lines.append(
+            f"- Policy-marker rates for the available cross-model conditions were {cross_markers['mean']}; no same-model comparison is available here."
+        )
 
     limited = _condition_by_name(aggregate_summary, "same_model_limited_feedback")
     same_full = _condition_by_name(aggregate_summary, "same_model_full_feedback")
-    if limited and same_full:
+    if limited and same_full and not mixed_campaign:
         limited_exec = _min_rate(limited, "execution_rate")
         full_exec = _min_rate(same_full, "execution_rate")
         if limited_exec + 0.005 < full_exec:
@@ -334,7 +389,7 @@ def _aggregate_conclusions(aggregate_summary: dict[str, Any]) -> list[str]:
 
     cross_full = _condition_by_name(aggregate_summary, "cross_model_full_feedback")
     cross_winner_line = _cross_model_winner_line(cross_full) if cross_full else None
-    if cross_winner_line:
+    if cross_winner_line and not mixed_campaign:
         lines.append(cross_winner_line)
 
     lines.append("")
@@ -468,10 +523,34 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
         [
             "",
             "## Cross-Run Summary",
-            f"- {_format_stat('Same-model novelty', aggregate_summary['cross_run_summary']['same_model_avg_novelty'])}.",
-            f"- {_format_stat('Cross-model novelty', aggregate_summary['cross_run_summary']['cross_model_avg_novelty'])}.",
-            f"- {_format_stat('Same-model policy markers', aggregate_summary['cross_run_summary']['same_model_avg_policy_markers'])}.",
-            f"- {_format_stat('Cross-model policy markers', aggregate_summary['cross_run_summary']['cross_model_avg_policy_markers'])}.",
+        ]
+    )
+    same_novelty = aggregate_summary["cross_run_summary"]["same_model_avg_novelty"]
+    cross_novelty = aggregate_summary["cross_run_summary"]["cross_model_avg_novelty"]
+    same_markers = aggregate_summary["cross_run_summary"]["same_model_avg_policy_markers"]
+    cross_markers = aggregate_summary["cross_run_summary"]["cross_model_avg_policy_markers"]
+    if _has_samples(same_novelty):
+        lines.append(f"- {_format_stat('Same-model novelty', same_novelty)}.")
+    else:
+        lines.append("- No same-model conditions were included in this aggregate.")
+    if _has_samples(cross_novelty):
+        lines.append(f"- {_format_stat('Cross-model novelty', cross_novelty)}.")
+    else:
+        lines.append("- No cross-model conditions were included in this aggregate.")
+    if _has_samples(same_markers):
+        lines.append(f"- {_format_stat('Same-model policy markers', same_markers)}.")
+    else:
+        lines.append("- No same-model policy-marker summary is available for this aggregate.")
+    if _has_samples(cross_markers):
+        lines.append(f"- {_format_stat('Cross-model policy markers', cross_markers)}.")
+    else:
+        lines.append("- No cross-model policy-marker summary is available for this aggregate.")
+    if len(aggregate_summary.get("suite_families", [])) > 1 or len(aggregate_summary.get("suite_types", [])) > 1:
+        lines.append(
+            "- This aggregate mixes multiple suite families or suite types, so use the family-specific aggregates for interpretation and treat this summary as descriptive only."
+        )
+    lines.extend(
+        [
             "",
             "## Aggregate Charts",
         ]
