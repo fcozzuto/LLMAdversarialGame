@@ -1,0 +1,86 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    occ = {(p[0], p[1]) for p in obstacles}
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def local_pen(x, y):
+        if (x, y) in occ:
+            return -10**18
+        pen = 0
+        for dx, dy in ((1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)):
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) in occ:
+                pen -= 6
+        return pen
+
+    if not resources:
+        tx, ty = w - 1, 0 if (sx + sy) % 2 == 0 else 0, h - 1
+        best, bestmv = -10**18, (0, 0)
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in occ:
+                continue
+            s = -cheb(nx, ny, tx, ty) + local_pen(nx, ny)
+            if s > best:
+                best, bestmv = s, (dx, dy)
+        return [bestmv[0], bestmv[1]]
+
+    opp_reach = []
+    for rx, ry in resources:
+        d = cheb(ox, oy, rx, ry)
+        if d <= 2:
+            opp_reach.append((rx, ry, d))
+    opp_reach.sort(key=lambda t: (t[2], t[0], t[1]))
+    focus_block = opp_reach[0][:2] if opp_reach else None
+
+    best, bestmv = -10**18, (0, 0)
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in occ:
+            continue
+
+        base = local_pen(nx, ny)
+        score = base
+
+        # Primary: improve our standing versus opponent per resource.
+        best_gain = -10**9
+        for rx, ry in resources:
+            sd = cheb(nx, ny, rx, ry)
+            od = cheb(ox, oy, rx, ry)
+            # Want od - sd large (we get there sooner than them)
+            gain = od - sd
+            # Encourage shorter paths once gain is non-negative
+            if gain >= 0:
+                gain += 0.01 * (12 - sd)
+            else:
+                gain -= 0.005 * sd
+            if gain > best_gain:
+                best_gain = gain
+        score += 10.0 * best_gain
+
+        # Secondary: if opponent is likely to grab soon, block by reducing their advantage.
+        if focus_block is not None:
+            frx, fry = focus_block
+            sd = cheb(nx, ny, frx, fry)
+            od = cheb(ox, oy, frx, fry)
+            cur_adv = od - cheb(sx, sy, frx, fry)
+            new_adv = od - sd
+            score += 8.0 * (cur_adv - new_adv)
+
+        # Tertiary: avoid drifting away from nearest resource cluster.

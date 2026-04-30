@@ -1,0 +1,161 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    resources = [tuple(p) for p in observation.get("resources", [])]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def md(a, b, c=None, d=None):
+        if c is None:
+            return abs(a[0] - b[0]) + abs(a[1] - b[1])
+        return abs(a - b) + abs(c - d)
+
+    def blocked(x, y):
+        return (x, y) in obstacles
+
+    def neigh_obstacle_pen(x, y):
+        pen = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                if (x + dx, y + dy) in obstacles:
+                    pen += 5
+        return pen
+
+    center = ((w - 1) // 2, (h - 1) // 2)
+    moves = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+
+    # Pick target resource: prefer ones where we can get an advantage (or least lose).
+    tx, ty = center
+    if resources:
+        best_key = None
+        for rx, ry in resources:
+            myd = abs(sx - rx) + abs(sy - ry)
+            opd = abs(ox - rx) + abs(oy - ry)
+            # Favor (opponent far - self near). Break ties by self closeness.
+            key = (-(opd - myd), myd, rx, ry)
+            # If we are tied or behind, still choose something that reduces lead against us.
+            if best_key is None or key < best_key:
+                best_key = key
+                tx, ty = rx, ry
+
+    best_move = (0, 0)
+    best_val = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or blocked(nx, ny):
+            continue
+
+        if resources and (nx, ny) in obstacles:
+            continue
+
+        myd_next = abs(nx - tx) + abs(ny - ty)
+        opd_now = abs(ox - tx) + abs(oy - ty)
+        myd_now = abs(sx - tx) + abs(sy - ty)
+
+        # If we collect a resource next, huge value.
+        collect_bonus = 0
+        if (nx, ny) in resources:
+            collect_bonus = 10**7
+
+        # Blocking pressure: attempt to move closer to the "meeting" point along shortest path direction.
+        # Meeting point approximates where both would arrive if moving optimally.
+        mx = (tx + sx) // 2
+        my = (ty + sy) // 2
+        meet_bias = -0.8 * (abs(nx - mx) + abs(ny - my))
+
+        # Reduce opponent advantage: maximize (opponent_distance - our_distance).
+        lead_now = opd_now - myd_now
+        lead_next = opd_now - myd_next
+        lead_improve = (lead_next - lead_now)
+
+        center_bias = -0.02 * (abs(nx - center[0]) + abs(ny - center[1]))
+        obstacle_pen = neigh_obstacle_pen(nx, ny)
+
+        # If we are behind on target, prioritize catching up; otherwise maintain.
+        catch_factor = 1.0 if lead_now < 0 else 0.5
+
+        val = (collect_bonus +
+               3000 * (lead_next) +
+               500 * catch_factor * lead_improve +
+               120 * (-myd_next) +
+               80 * meet_bias +
+               center_bias -
+               obstacle_pen)
+
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    if dx not in (-1, 0, 1) or dy not in (-1, 0, 1):
+        return [0, 0]
+    return [dx, dy]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    resources = [tuple(p) for p in observation.get("resources", [])]
+
+    moves = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                moves.append((dx, dy))
+
+    if not moves:
+        return [0, 0]
+
+    # Choose a deterministic target: maximize (opp distance - my distance), tie by my distance.
+    tx, ty = ((w - 1) // 2, (h - 1) // 2)
+    if resources:
+        best = None
+        for rx, ry in resources:
+            myd = abs(sx - rx) + abs(sy - ry)
+            opd = abs(ox - rx) + abs(oy - ry)
+            key = (-(opd - myd), myd, rx, ry)
+            if best is None or key < best[0]:
+                best = (key, rx, ry)
+        tx, ty = best[1], best[2]
+
+    def score_move(dx, dy):
+        nx, ny = sx + dx, sy + dy
+        myd = abs(nx - tx) + abs(ny - ty)
+        # Prefer getting closer to target
+        s = myd * 3
+        # If opponent is close to the same target, avoid them a bit
+        opd_next = abs(ox - tx) + abs(oy - ty)
+        s += (0 if opd_next >= 999999 else 0)
+        # Add spacing from opponent position
+        s -= min(8, abs(nx - ox) + abs(ny - oy))
+        # Small preference to move toward target without getting stuck near obstacles
+        adj_obs = 0
+        for a in (-1, 0, 1):
+            for b in (-1, 0, 1):
+                if a == 0 and b == 0:
+                    continue
+                if (nx + a, ny + b) in obstacles:
+                    adj_obs += 1
+        s += adj_obs * 2
+        return s
+
+    best_dx, best_dy, best_s = moves[0][0], moves[0][1], None
+    for dx, dy in moves:
+        s = score_move(dx, dy)
+        if best_s is None or s < best_s or (s == best_s and (dx, dy) < (best_dx, best_dy)):
+            best_s = s
+            best_dx, best_dy = dx, dy
+    return [int(best_dx), int(best_dy)]

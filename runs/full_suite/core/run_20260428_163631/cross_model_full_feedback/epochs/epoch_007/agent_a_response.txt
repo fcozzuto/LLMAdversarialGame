@@ -1,0 +1,157 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    resources = [tuple(r) for r in observation.get("resources", [])]
+
+    deltas = [(-1, -1), (0, -1), (1, -1),
+              (-1, 0), (0, 0), (1, 0),
+              (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(a, b):
+        dx = a[0] - b[0]
+        if dx < 0: dx = -dx
+        dy = a[1] - b[1]
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def bfs_min_dist(start, targets, limit=10):
+        if not targets:
+            return None
+        tgt_set = set(targets)
+        if start in tgt_set:
+            return 0
+        q = [(start, 0)]
+        seen = {start}
+        head = 0
+        while head < len(q):
+            (x, y), d = q[head]
+            head += 1
+            if d >= limit:
+                continue
+            nd = d + 1
+            for dx, dy in deltas:
+                nx, ny = x + dx, y + dy
+                if inb(nx, ny) and (nx, ny) not in obstacles and (nx, ny) not in seen:
+                    if (nx, ny) in tgt_set:
+                        return nd
+                    seen.add((nx, ny))
+                    q.append(((nx, ny), nd))
+        return None
+
+    legal = []
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            legal.append((dx, dy, nx, ny))
+    if not legal:
+        return [0, 0]
+
+    # Choose resource subset that opponent is not "already closer to" by Chebyshev.
+    my0 = (sx, sy)
+    opp0 = (ox, oy)
+    if resources:
+        cand = []
+        for r in resources:
+            if r in obstacles:
+                continue
+            if cheb(my0, r) <= cheb(opp0, r) + 0:  # include equal or better
+                cand.append(r)
+        targets = cand if cand else resources
+    else:
+        targets = []
+
+    # Evaluate each move by BFS proximity to resources plus safety margin vs opponent.
+    best = None
+    for dx, dy, nx, ny in legal:
+        my_next = (nx, ny)
+        dist_to_res = bfs_min_dist(my_next, targets, limit=10) if targets else None
+        # Smaller dist_to_res is better; None treated as large.
+        res_term = 0
+        if dist_to_res is None:
+            res_term = -999
+        else:
+            # Prefer sooner, but also prefer moves that keep future flexibility.
+            res_term = -(dist_to_res * 10 + cheb(my_next, opp0) // 2)
+
+        # Safety: increase distance from opponent (Chebyshev).
+        safe_term = cheb(my_next, opp0)
+        # If resources exist, also bias toward resources while preventing race.
+        race_term = 0
+        if targets:
+            opp_dist = bfs_min_dist(opp0, targets, limit=10)
+            if opp_dist is None:
+                opp_dist = 999
+            race_term = (opp_dist - (dist_to_res if dist_to_res is not None else 999))
+
+        # Deterministic tie-break: prefer moves that reduce distance to a fixed center.
+        center = (w // 2, h // 2)
+        center_term = -cheb(my_next, center)
+
+        key = (res_term, safe_term, race_term, center_term, dx, dy)
+        if best is None or key > best[0]:
+            best = (key, [dx, dy])
+
+    return best[1]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    resources = [tuple(r) for r in observation.get("resources", [])]
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist_cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def best_res_dist(nx, ny):
+        if not resources:
+            return 10**9
+        best = 10**9
+        for rx, ry in resources:
+            d = dist_cheb(nx, ny, rx, ry)
+            if d < best:
+                best = d
+        return best
+
+    best_move = (0, 0)
+    best_score = -10**18
+
+    opp_d_now = dist_cheb(sx, sy, ox, oy)
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        res_d = best_res_dist(nx, ny)
+        opp_d = dist_cheb(nx, ny, ox, oy)
+
+        # Prefer closer resources; prefer not getting too close to opponent.
+        score = (-res_d * 10) + (opp_d * 2)
+        if opp_d <= 1 and opp_d_now > 1:
+            score -= 50
+        if (dx, dy) < best_move and score == best_score:
+            continue
+
+        if score > best_score or (score == best_score and (dx, dy) < best_move):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]

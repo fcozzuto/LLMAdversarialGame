@@ -1,0 +1,61 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = map(int, observation.get("self_position", [0, 0]))
+    ox, oy = map(int, observation.get("opponent_position", [0, 0]))
+    resources = [(int(p[0]), int(p[1])) for p in (observation.get("resources") or [])]
+    obstacles = set((int(p[0]), int(p[1])) for p in (observation.get("obstacles") or []))
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def valid(x, y): return inb(x, y) and (x, y) not in obstacles
+    INF = 10**9
+
+    def bfs(x0, y0):
+        dist = [[INF] * h for _ in range(w)]
+        if not valid(x0, y0): return dist
+        dist[x0][y0] = 0
+        q = [(x0, y0)]
+        qi = 0
+        while qi < len(q):
+            x, y = q[qi]; qi += 1
+            nd = dist[x][y] + 1
+            for dx, dy in moves:
+                nx, ny = x + dx, y + dy
+                if valid(nx, ny) and nd < dist[nx][ny]:
+                    dist[nx][ny] = nd
+                    q.append((nx, ny))
+        return dist
+
+    dO = bfs(ox, oy)
+
+    # If no resources exist, just move deterministically toward center-ish.
+    if not resources:
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        best = None
+        bestv = -INF
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny): continue
+            v = -(abs(nx - cx) + abs(ny - cy)) - 0.01 * (dx * dx + dy * dy)
+            if v > bestv:
+                bestv = v; best = (dx, dy)
+        return list(best if best is not None else (0, 0))
+
+    dOres = {}
+    for r in resources:
+        rx, ry = r
+        dOres[r] = dO[rx][ry] if inb(rx, ry) else INF
+
+    def move_value(nx, ny):
+        dS = bfs(nx, ny)
+        best = -INF
+        for rx, ry in resources:
+            dSx = dS[rx][ry]
+            dOx = dOres[(rx, ry)]
+            if dSx >= INF or dOx >= INF: 
+                continue
+            # Prefer resources we can reach sooner and deny opponent access.
+            # Deterministic tie-break by resource coordinate.
+            v = (dOx - dSx) * 12 - dSx
+            v += 0.01 * (rx + 7 - ry)  # stable tie-break

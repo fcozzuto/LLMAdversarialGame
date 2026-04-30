@@ -1,0 +1,3547 @@
+{
+  "agents": [
+    {
+      "max_tokens": 1200,
+      "model": "gpt-5.4-nano",
+      "name": "agent_a",
+      "provider": "openai",
+      "regenerate_each_epoch": true,
+      "system_prompt": "You write deterministic Python for a grid-game agent.",
+      "temperature": 0.2
+    },
+    {
+      "max_tokens": 1200,
+      "model": "gpt-5.4-nano",
+      "name": "agent_b",
+      "provider": "openai",
+      "regenerate_each_epoch": true,
+      "system_prompt": "You write deterministic Python for a grid-game agent.",
+      "temperature": 0.2
+    }
+  ],
+  "codes": {
+    "agent_a": "def choose_move(observation):\n    w = observation[\"grid_width\"]; h = observation[\"grid_height\"]\n    sx, sy = observation[\"self_position\"]; ox, oy = observation[\"opponent_position\"]\n    obstacles = set((x, y) for x, y in observation.get(\"obstacles\", []))\n    resources = list(observation.get(\"resources\", []))\n    if not resources:\n        tx, ty = w // 2, h // 2\n    else:\n        best = None; best_val = -10**9\n        for x, y in resources:\n            d1 = abs(x - sx) + abs(y - sy)\n            d2 = abs(x - ox) + abs(y - oy)\n            val = (d2 - d1) * 3 - d1\n            if val > best_val:\n                best_val = val; best = (x, y)\n        tx, ty = best\n\n    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]\n    def inb(x, y): return 0 <= x < w and 0 <= y < h\n    opp_dist = abs(tx - ox) + abs(ty - oy)\n    best_move = (0, 0); best_score = -10**18\n    for dx, dy in moves:\n        nx, ny = sx + dx, sy + dy\n        if not inb(nx, ny) or (nx, ny) in obstacles:\n            continue\n        d_self = abs(tx - nx) + abs(ty - ny)\n        d_opp_next = abs(tx - ox) + abs(ty - oy)\n        if resources and (nx, ny) in resources:\n            d_self = 0\n        if (nx, ny) == (ox, oy):\n            pen = 40\n        else:\n            pen = 0\n        val = -d_self * 5\n        if resources and (nx, ny) == (tx, ty):\n            val += 200\n        # Block/deny: prefer moves that increase opponent's distance to the target\n        val += (abs(tx - ox) + abs(ty - oy)) - (abs(tx - ox) + abs(ty - oy)) * 0  # deterministic no-op\n        val -= pen\n        # If very close to opponent, slightly prefer moving away\n        d_op = abs(ox - nx) + abs(oy - ny)\n        if d_op <= 2:\n            val += d_op * 2\n        # Tiny tie-breaker toward staying near target line\n        val += -((abs((tx - nx) - (ty - ny)) % 7))\n        if val > best_score:\n            best_score = val; best_move = (dx, dy)\n    dx, dy = best_move\n    if dx < -1 or dx > 1 or dy < -1 or dy > 1:\n        return [0, 0]\n    return [int(dx), int(dy)]",
+    "agent_b": "def choose_move(observation):\n    w = observation[\"grid_width\"]\n    h = observation[\"grid_height\"]\n    x, y = observation[\"self_position\"]\n    ox, oy = observation[\"opponent_position\"]\n    resources = observation[\"resources\"]\n    obstacles = observation[\"obstacles\"]\n    obs = set((a, b) for a, b in obstacles)\n\n    def sgn(v):\n        return -1 if v < 0 else (1 if v > 0 else 0)\n\n    # If no resources, drift toward opponent side deterministically\n    if not resources:\n        dx = sgn(ox - x)\n        dy = sgn(oy - y)\n        nx, ny = x + dx, y + dy\n        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:\n            return [dx, dy]\n        # fallback: try staying or single-axis\n        cand = [(dx, 0), (0, dy), (0, 0)]\n        for cdx, cdy in cand:\n            nx, ny = x + cdx, y + cdy\n            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:\n                return [cdx, cdy]\n        return [0, 0]\n\n    # Target: nearest resource by Manhattan (tie: farther from opponent to reduce contest)\n    best = None\n    bx, by = x, y\n    for rx, ry in resources:\n        d = abs(rx - x) + abs(ry - y)\n        oppd = abs(rx - ox) + abs(ry - oy)\n        key = (d, -oppd, rx, ry)\n        if best is None or key < best:\n            best = key\n            bx, by = rx, ry\n\n    dx0 = sgn(bx - x)\n    dy0 = sgn(by - y)\n\n    # Prefer diagonal; if blocked, try axis steps; otherwise sidestep deterministically\n    candidates = []\n    candidates.append((dx0, dy0))\n    candidates.append((dx0, 0))\n    candidates.append((0, dy0))\n    # Sidestep options: swap order and minor perturbations\n    candidates.append((dx0, -dy0))\n    candidates.append((-dx0, dy0))\n    candidates.append((-dx0, 0))\n    candidates.append((0, -dy0))\n    candidates.append((0, 0))\n\n    # Deterministic avoidance: also disfavor moves that increase distance to the nearest resource too much\n    def score_move(cdx, cdy):\n        nx, ny = x + cdx, y + cdy\n        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obs:\n            return 10**9\n        # main objective: decrease distance to target\n        dt_before = abs(bx - x) + abs(by - y)\n        dt_after = abs(bx - nx) + abs(by - ny)\n        # secondary: avoid moving into adjacency with opponent deterministically\n        adj = (abs(ox - nx) <= 1 and abs(oy - ny) <= 1)\n        # tertiary: slight preference to reduce max coordinate movement (stability)\n        stability = abs(cdx) + abs(cdy)\n        return (dt_after - dt_before, 1 if adj else 0, stability, nx, ny)\n\n    best_c = None\n    best_val = None\n    for cdx, cdy in candidates:\n        val = score_move(cdx, cdy)\n        if best_val is None or val < best_val:\n            best_val = val\n            best_c = (cdx, cdy)\n\n    if best_c is None:\n        return [0, 0]\n    return [int(best_c[0]), int(best_c[1])]"
+  },
+  "epoch_index": 32,
+  "feedback": {
+    "code_history_window": 0,
+    "history_window": 0,
+    "include_codes": true,
+    "include_grid_state": true,
+    "include_opponent_code": true,
+    "include_paths": true,
+    "include_runtime_events": true,
+    "include_scores": true
+  },
+  "generation_errors": {
+    "agent_a": null,
+    "agent_b": null
+  },
+  "generation_policy": {
+    "pre_execution_validation": true,
+    "repair_invalid_submissions": true
+  },
+  "generation_reused": {
+    "agent_a": false,
+    "agent_b": false
+  },
+  "generation_used_fallback": {
+    "agent_a": false,
+    "agent_b": false
+  },
+  "generation_validation_issues": {
+    "agent_a": [],
+    "agent_b": []
+  },
+  "initial_resources": [
+    [
+      0,
+      2
+    ],
+    [
+      0,
+      6
+    ],
+    [
+      2,
+      6
+    ],
+    [
+      3,
+      5
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      4,
+      7
+    ],
+    [
+      6,
+      0
+    ],
+    [
+      6,
+      1
+    ],
+    [
+      6,
+      6
+    ],
+    [
+      6,
+      7
+    ],
+    [
+      7,
+      1
+    ],
+    [
+      7,
+      3
+    ]
+  ],
+  "map_seed": 34693,
+  "metadata": {
+    "campaign": "full_suite_from_scratch",
+    "factor_level": "0",
+    "factor_name": "history_window",
+    "replicate_id": "C",
+    "suite_family": "ablations",
+    "suite_type": "research_ablation"
+  },
+  "obstacles": [
+    [
+      0,
+      5
+    ],
+    [
+      3,
+      4
+    ]
+  ],
+  "paths": {
+    "agent_a": [
+      [
+        0,
+        0
+      ],
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        4
+      ]
+    ],
+    "agent_b": [
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ],
+      [
+        7,
+        7
+      ]
+    ]
+  },
+  "prompts": {
+    "agent_a": "You are agent_a in a deterministic two-agent grid competition.\nReturn only raw Python source code.\nThe first line must be exactly: def choose_move(observation):\nDo not use markdown fences.\nDo not include any explanation before or after the function.\n\nGame rules:\n- Grid size: 8 x 8\n- Resources per game: 12\n- Obstacles per game: 2\n- Agents start in opposite corners.\n- Your function is called every turn and must return one move delta [dx, dy].\n- Allowed dx/dy values are -1, 0, or 1. Diagonal moves are allowed.\n- Staying still is allowed.\n- The engine rejects invalid moves by keeping the agent in place.\n- Code must be deterministic. Do not use randomness.\n- Keep the solution self-contained inside choose_move(observation) using only local deterministic logic derived from the observation.\n- Use only the documented observation fields listed below.\n- Do not write import statements of any kind.\n- Do not use names beginning with __.\n- Do not depend on external files, external services, subprocesses, or hidden state.\n- Every control path must end by returning [dx, dy] with integer dx and dy in {-1, 0, 1}.\n- Do not leave placeholder logic, unfinished branches, or helper code without a final return path.\n- Return exactly one top-level function named choose_move.\n- Prefer concise heuristics over large helper stacks or full-grid search if brevity is at risk.\n- Use at most 60 non-empty lines.\n- Keep the function under 4000 characters.\n- If you cannot fit, simplify the strategy instead of adding more code.\n\nObservation schema:\n- turn_index: int\n- grid_width, grid_height: ints\n- self_name, opponent_name: strings\n- self_position, opponent_position: [x, y]\n- resources: list[[x, y], ...]\n- obstacles: list[[x, y], ...]\n- remaining_resource_count: int\n- scores: included each turn = True\n- self_path/opponent_path included each turn = False\n\nDesign goal:\n- Maximize your final score against the opponent.\n- Favor clear deterministic logic over brittle shortcuts.\n- If recent feedback does not show improvement or a decisive win, make a meaningful strategic change instead of repeating the same policy with cosmetic edits.\n- Keep innovating until you are winning decisively and consistently, then preserve the strong core and only refine obvious weaknesses.\n\nEpoch: 32\n\nRecent performance signal:\n- Most recent score margin: -1.000\n- Your score change vs previous epoch: -4.500\n- Adaptation note: your score did not improve last epoch, so do not reuse the same policy unless you can justify a real strategic advantage.\n- Adaptation note: you were not ahead last epoch, so prefer a materially different targeting, obstacle-handling, or opponent-response strategy.\n\nOutput only raw Python source code.",
+    "agent_b": "You are agent_b in a deterministic two-agent grid competition.\nReturn only raw Python source code.\nThe first line must be exactly: def choose_move(observation):\nDo not use markdown fences.\nDo not include any explanation before or after the function.\n\nGame rules:\n- Grid size: 8 x 8\n- Resources per game: 12\n- Obstacles per game: 2\n- Agents start in opposite corners.\n- Your function is called every turn and must return one move delta [dx, dy].\n- Allowed dx/dy values are -1, 0, or 1. Diagonal moves are allowed.\n- Staying still is allowed.\n- The engine rejects invalid moves by keeping the agent in place.\n- Code must be deterministic. Do not use randomness.\n- Keep the solution self-contained inside choose_move(observation) using only local deterministic logic derived from the observation.\n- Use only the documented observation fields listed below.\n- Do not write import statements of any kind.\n- Do not use names beginning with __.\n- Do not depend on external files, external services, subprocesses, or hidden state.\n- Every control path must end by returning [dx, dy] with integer dx and dy in {-1, 0, 1}.\n- Do not leave placeholder logic, unfinished branches, or helper code without a final return path.\n- Return exactly one top-level function named choose_move.\n- Prefer concise heuristics over large helper stacks or full-grid search if brevity is at risk.\n- Use at most 60 non-empty lines.\n- Keep the function under 4000 characters.\n- If you cannot fit, simplify the strategy instead of adding more code.\n\nObservation schema:\n- turn_index: int\n- grid_width, grid_height: ints\n- self_name, opponent_name: strings\n- self_position, opponent_position: [x, y]\n- resources: list[[x, y], ...]\n- obstacles: list[[x, y], ...]\n- remaining_resource_count: int\n- scores: included each turn = True\n- self_path/opponent_path included each turn = False\n\nDesign goal:\n- Maximize your final score against the opponent.\n- Favor clear deterministic logic over brittle shortcuts.\n- If recent feedback does not show improvement or a decisive win, make a meaningful strategic change instead of repeating the same policy with cosmetic edits.\n- Keep innovating until you are winning decisively and consistently, then preserve the strong core and only refine obvious weaknesses.\n\nEpoch: 32\n\nRecent performance signal:\n- Most recent score margin: +1.000\n- Your score change vs previous epoch: +4.500\n\nOutput only raw Python source code."
+  },
+  "raw_responses": {
+    "agent_a": "def choose_move(observation):\n    w = observation[\"grid_width\"]; h = observation[\"grid_height\"]\n    sx, sy = observation[\"self_position\"]; ox, oy = observation[\"opponent_position\"]\n    obstacles = set((x, y) for x, y in observation.get(\"obstacles\", []))\n    resources = list(observation.get(\"resources\", []))\n    if not resources:\n        tx, ty = w // 2, h // 2\n    else:\n        best = None; best_val = -10**9\n        for x, y in resources:\n            d1 = abs(x - sx) + abs(y - sy)\n            d2 = abs(x - ox) + abs(y - oy)\n            val = (d2 - d1) * 3 - d1\n            if val > best_val:\n                best_val = val; best = (x, y)\n        tx, ty = best\n\n    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]\n    def inb(x, y): return 0 <= x < w and 0 <= y < h\n    opp_dist = abs(tx - ox) + abs(ty - oy)\n    best_move = (0, 0); best_score = -10**18\n    for dx, dy in moves:\n        nx, ny = sx + dx, sy + dy\n        if not inb(nx, ny) or (nx, ny) in obstacles:\n            continue\n        d_self = abs(tx - nx) + abs(ty - ny)\n        d_opp_next = abs(tx - ox) + abs(ty - oy)\n        if resources and (nx, ny) in resources:\n            d_self = 0\n        if (nx, ny) == (ox, oy):\n            pen = 40\n        else:\n            pen = 0\n        val = -d_self * 5\n        if resources and (nx, ny) == (tx, ty):\n            val += 200\n        # Block/deny: prefer moves that increase opponent's distance to the target\n        val += (abs(tx - ox) + abs(ty - oy)) - (abs(tx - ox) + abs(ty - oy)) * 0  # deterministic no-op\n        val -= pen\n        # If very close to opponent, slightly prefer moving away\n        d_op = abs(ox - nx) + abs(oy - ny)\n        if d_op <= 2:\n            val += d_op * 2\n        # Tiny tie-breaker toward staying near target line\n        val += -((abs((tx - nx) - (ty - ny)) % 7))\n        if val > best_score:\n            best_score = val; best_move = (dx, dy)\n    dx, dy = best_move\n    if dx < -1 or dx > 1 or dy < -1 or dy > 1:\n        return [0, 0]\n    return [int(dx), int(dy)]",
+    "agent_b": "def choose_move(observation):\n    w = observation[\"grid_width\"]\n    h = observation[\"grid_height\"]\n    x, y = observation[\"self_position\"]\n    ox, oy = observation[\"opponent_position\"]\n    resources = observation[\"resources\"]\n    obstacles = observation[\"obstacles\"]\n    obs = set((a, b) for a, b in obstacles)\n\n    def sgn(v):\n        return -1 if v < 0 else (1 if v > 0 else 0)\n\n    # If no resources, drift toward opponent side deterministically\n    if not resources:\n        dx = sgn(ox - x)\n        dy = sgn(oy - y)\n        nx, ny = x + dx, y + dy\n        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:\n            return [dx, dy]\n        # fallback: try staying or single-axis\n        cand = [(dx, 0), (0, dy), (0, 0)]\n        for cdx, cdy in cand:\n            nx, ny = x + cdx, y + cdy\n            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:\n                return [cdx, cdy]\n        return [0, 0]\n\n    # Target: nearest resource by Manhattan (tie: farther from opponent to reduce contest)\n    best = None\n    bx, by = x, y\n    for rx, ry in resources:\n        d = abs(rx - x) + abs(ry - y)\n        oppd = abs(rx - ox) + abs(ry - oy)\n        key = (d, -oppd, rx, ry)\n        if best is None or key < best:\n            best = key\n            bx, by = rx, ry\n\n    dx0 = sgn(bx - x)\n    dy0 = sgn(by - y)\n\n    # Prefer diagonal; if blocked, try axis steps; otherwise sidestep deterministically\n    candidates = []\n    candidates.append((dx0, dy0))\n    candidates.append((dx0, 0))\n    candidates.append((0, dy0))\n    # Sidestep options: swap order and minor perturbations\n    candidates.append((dx0, -dy0))\n    candidates.append((-dx0, dy0))\n    candidates.append((-dx0, 0))\n    candidates.append((0, -dy0))\n    candidates.append((0, 0))\n\n    # Deterministic avoidance: also disfavor moves that increase distance to the nearest resource too much\n    def score_move(cdx, cdy):\n        nx, ny = x + cdx, y + cdy\n        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obs:\n            return 10**9\n        # main objective: decrease distance to target\n        dt_before = abs(bx - x) + abs(by - y)\n        dt_after = abs(bx - nx) + abs(by - ny)\n        # secondary: avoid moving into adjacency with opponent deterministically\n        adj = (abs(ox - nx) <= 1 and abs(oy - ny) <= 1)\n        # tertiary: slight preference to reduce max coordinate movement (stability)\n        stability = abs(cdx) + abs(cdy)\n        return (dt_after - dt_before, 1 if adj else 0, stability, nx, ny)\n\n    best_c = None\n    best_val = None\n    for cdx, cdy in candidates:\n        val = score_move(cdx, cdy)\n        if best_val is None or val < best_val:\n            best_val = val\n            best_c = (cdx, cdy)\n\n    if best_c is None:\n        return [0, 0]\n    return [int(best_c[0]), int(best_c[1])]"
+  },
+  "runtime_events": {
+    "agent_a": [],
+    "agent_b": [
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'",
+      "runtime_error:'<' not supported between instances of 'int' and 'tuple'"
+    ]
+  },
+  "sandbox_reports": {
+    "agent_a": {
+      "executed_code": "def choose_move(observation):\n    w = observation[\"grid_width\"]; h = observation[\"grid_height\"]\n    sx, sy = observation[\"self_position\"]; ox, oy = observation[\"opponent_position\"]\n    obstacles = set((x, y) for x, y in observation.get(\"obstacles\", []))\n    resources = list(observation.get(\"resources\", []))\n    if not resources:\n        tx, ty = w // 2, h // 2\n    else:\n        best = None; best_val = -10**9\n        for x, y in resources:\n            d1 = abs(x - sx) + abs(y - sy)\n            d2 = abs(x - ox) + abs(y - oy)\n            val = (d2 - d1) * 3 - d1\n            if val > best_val:\n                best_val = val; best = (x, y)\n        tx, ty = best\n\n    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]\n    def inb(x, y): return 0 <= x < w and 0 <= y < h\n    opp_dist = abs(tx - ox) + abs(ty - oy)\n    best_move = (0, 0); best_score = -10**18\n    for dx, dy in moves:\n        nx, ny = sx + dx, sy + dy\n        if not inb(nx, ny) or (nx, ny) in obstacles:\n            continue\n        d_self = abs(tx - nx) + abs(ty - ny)\n        d_opp_next = abs(tx - ox) + abs(ty - oy)\n        if resources and (nx, ny) in resources:\n            d_self = 0\n        if (nx, ny) == (ox, oy):\n            pen = 40\n        else:\n            pen = 0\n        val = -d_self * 5\n        if resources and (nx, ny) == (tx, ty):\n            val += 200\n        # Block/deny: prefer moves that increase opponent's distance to the target\n        val += (abs(tx - ox) + abs(ty - oy)) - (abs(tx - ox) + abs(ty - oy)) * 0  # deterministic no-op\n        val -= pen\n        # If very close to opponent, slightly prefer moving away\n        d_op = abs(ox - nx) + abs(oy - ny)\n        if d_op <= 2:\n            val += d_op * 2\n        # Tiny tie-breaker toward staying near target line\n        val += -((abs((tx - nx) - (ty - ny)) % 7))\n        if val > best_score:\n            best_score = val; best_move = (dx, dy)\n    dx, dy = best_move\n    if dx < -1 or dx > 1 or dy < -1 or dy > 1:\n        return [0, 0]\n    return [int(dx), int(dy)]",
+      "init_error": null,
+      "issues": [],
+      "used_fallback": false
+    },
+    "agent_b": {
+      "executed_code": "def choose_move(observation):\n    w = observation[\"grid_width\"]\n    h = observation[\"grid_height\"]\n    x, y = observation[\"self_position\"]\n    ox, oy = observation[\"opponent_position\"]\n    resources = observation[\"resources\"]\n    obstacles = observation[\"obstacles\"]\n    obs = set((a, b) for a, b in obstacles)\n\n    def sgn(v):\n        return -1 if v < 0 else (1 if v > 0 else 0)\n\n    # If no resources, drift toward opponent side deterministically\n    if not resources:\n        dx = sgn(ox - x)\n        dy = sgn(oy - y)\n        nx, ny = x + dx, y + dy\n        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:\n            return [dx, dy]\n        # fallback: try staying or single-axis\n        cand = [(dx, 0), (0, dy), (0, 0)]\n        for cdx, cdy in cand:\n            nx, ny = x + cdx, y + cdy\n            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:\n                return [cdx, cdy]\n        return [0, 0]\n\n    # Target: nearest resource by Manhattan (tie: farther from opponent to reduce contest)\n    best = None\n    bx, by = x, y\n    for rx, ry in resources:\n        d = abs(rx - x) + abs(ry - y)\n        oppd = abs(rx - ox) + abs(ry - oy)\n        key = (d, -oppd, rx, ry)\n        if best is None or key < best:\n            best = key\n            bx, by = rx, ry\n\n    dx0 = sgn(bx - x)\n    dy0 = sgn(by - y)\n\n    # Prefer diagonal; if blocked, try axis steps; otherwise sidestep deterministically\n    candidates = []\n    candidates.append((dx0, dy0))\n    candidates.append((dx0, 0))\n    candidates.append((0, dy0))\n    # Sidestep options: swap order and minor perturbations\n    candidates.append((dx0, -dy0))\n    candidates.append((-dx0, dy0))\n    candidates.append((-dx0, 0))\n    candidates.append((0, -dy0))\n    candidates.append((0, 0))\n\n    # Deterministic avoidance: also disfavor moves that increase distance to the nearest resource too much\n    def score_move(cdx, cdy):\n        nx, ny = x + cdx, y + cdy\n        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obs:\n            return 10**9\n        # main objective: decrease distance to target\n        dt_before = abs(bx - x) + abs(by - y)\n        dt_after = abs(bx - nx) + abs(by - ny)\n        # secondary: avoid moving into adjacency with opponent deterministically\n        adj = (abs(ox - nx) <= 1 and abs(oy - ny) <= 1)\n        # tertiary: slight preference to reduce max coordinate movement (stability)\n        stability = abs(cdx) + abs(cdy)\n        return (dt_after - dt_before, 1 if adj else 0, stability, nx, ny)\n\n    best_c = None\n    best_val = None\n    for cdx, cdy in candidates:\n        val = score_move(cdx, cdy)\n        if best_val is None or val < best_val:\n            best_val = val\n            best_c = (cdx, cdy)\n\n    if best_c is None:\n        return [0, 0]\n    return [int(best_c[0]), int(best_c[1])]",
+      "init_error": null,
+      "issues": [],
+      "used_fallback": false
+    }
+  },
+  "scores": {
+    "agent_a": 1.0,
+    "agent_b": 0.0
+  },
+  "submitted_codes": {
+    "agent_a": "def choose_move(observation):\n    w = observation[\"grid_width\"]; h = observation[\"grid_height\"]\n    sx, sy = observation[\"self_position\"]; ox, oy = observation[\"opponent_position\"]\n    obstacles = set((x, y) for x, y in observation.get(\"obstacles\", []))\n    resources = list(observation.get(\"resources\", []))\n    if not resources:\n        tx, ty = w // 2, h // 2\n    else:\n        best = None; best_val = -10**9\n        for x, y in resources:\n            d1 = abs(x - sx) + abs(y - sy)\n            d2 = abs(x - ox) + abs(y - oy)\n            val = (d2 - d1) * 3 - d1\n            if val > best_val:\n                best_val = val; best = (x, y)\n        tx, ty = best\n\n    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]\n    def inb(x, y): return 0 <= x < w and 0 <= y < h\n    opp_dist = abs(tx - ox) + abs(ty - oy)\n    best_move = (0, 0); best_score = -10**18\n    for dx, dy in moves:\n        nx, ny = sx + dx, sy + dy\n        if not inb(nx, ny) or (nx, ny) in obstacles:\n            continue\n        d_self = abs(tx - nx) + abs(ty - ny)\n        d_opp_next = abs(tx - ox) + abs(ty - oy)\n        if resources and (nx, ny) in resources:\n            d_self = 0\n        if (nx, ny) == (ox, oy):\n            pen = 40\n        else:\n            pen = 0\n        val = -d_self * 5\n        if resources and (nx, ny) == (tx, ty):\n            val += 200\n        # Block/deny: prefer moves that increase opponent's distance to the target\n        val += (abs(tx - ox) + abs(ty - oy)) - (abs(tx - ox) + abs(ty - oy)) * 0  # deterministic no-op\n        val -= pen\n        # If very close to opponent, slightly prefer moving away\n        d_op = abs(ox - nx) + abs(oy - ny)\n        if d_op <= 2:\n            val += d_op * 2\n        # Tiny tie-breaker toward staying near target line\n        val += -((abs((tx - nx) - (ty - ny)) % 7))\n        if val > best_score:\n            best_score = val; best_move = (dx, dy)\n    dx, dy = best_move\n    if dx < -1 or dx > 1 or dy < -1 or dy > 1:\n        return [0, 0]\n    return [int(dx), int(dy)]",
+    "agent_b": "def choose_move(observation):\n    w = observation[\"grid_width\"]\n    h = observation[\"grid_height\"]\n    x, y = observation[\"self_position\"]\n    ox, oy = observation[\"opponent_position\"]\n    resources = observation[\"resources\"]\n    obstacles = observation[\"obstacles\"]\n    obs = set((a, b) for a, b in obstacles)\n\n    def sgn(v):\n        return -1 if v < 0 else (1 if v > 0 else 0)\n\n    # If no resources, drift toward opponent side deterministically\n    if not resources:\n        dx = sgn(ox - x)\n        dy = sgn(oy - y)\n        nx, ny = x + dx, y + dy\n        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:\n            return [dx, dy]\n        # fallback: try staying or single-axis\n        cand = [(dx, 0), (0, dy), (0, 0)]\n        for cdx, cdy in cand:\n            nx, ny = x + cdx, y + cdy\n            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:\n                return [cdx, cdy]\n        return [0, 0]\n\n    # Target: nearest resource by Manhattan (tie: farther from opponent to reduce contest)\n    best = None\n    bx, by = x, y\n    for rx, ry in resources:\n        d = abs(rx - x) + abs(ry - y)\n        oppd = abs(rx - ox) + abs(ry - oy)\n        key = (d, -oppd, rx, ry)\n        if best is None or key < best:\n            best = key\n            bx, by = rx, ry\n\n    dx0 = sgn(bx - x)\n    dy0 = sgn(by - y)\n\n    # Prefer diagonal; if blocked, try axis steps; otherwise sidestep deterministically\n    candidates = []\n    candidates.append((dx0, dy0))\n    candidates.append((dx0, 0))\n    candidates.append((0, dy0))\n    # Sidestep options: swap order and minor perturbations\n    candidates.append((dx0, -dy0))\n    candidates.append((-dx0, dy0))\n    candidates.append((-dx0, 0))\n    candidates.append((0, -dy0))\n    candidates.append((0, 0))\n\n    # Deterministic avoidance: also disfavor moves that increase distance to the nearest resource too much\n    def score_move(cdx, cdy):\n        nx, ny = x + cdx, y + cdy\n        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obs:\n            return 10**9\n        # main objective: decrease distance to target\n        dt_before = abs(bx - x) + abs(by - y)\n        dt_after = abs(bx - nx) + abs(by - ny)\n        # secondary: avoid moving into adjacency with opponent deterministically\n        adj = (abs(ox - nx) <= 1 and abs(oy - ny) <= 1)\n        # tertiary: slight preference to reduce max coordinate movement (stability)\n        stability = abs(cdx) + abs(cdy)\n        return (dt_after - dt_before, 1 if adj else 0, stability, nx, ny)\n\n    best_c = None\n    best_val = None\n    for cdx, cdy in candidates:\n        val = score_move(cdx, cdy)\n        if best_val is None or val < best_val:\n            best_val = val\n            best_c = (cdx, cdy)\n\n    if best_c is None:\n        return [0, 0]\n    return [int(best_c[0]), int(best_c[1])]"
+  },
+  "turn_log": [
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          1
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 12,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          1
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 0.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 0
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            0,
+            2
+          ],
+          "winner": "agent_a"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          2
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          1
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 1
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          3
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          1
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 2
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          1
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 3
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 4
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 5
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 6
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 7
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 8
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 9
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 10
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 11
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 12
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 13
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 14
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 15
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 16
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 17
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 18
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 19
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 20
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 21
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 22
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 23
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 24
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 25
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 26
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 27
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 28
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 29
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 30
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 31
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 32
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 33
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 34
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 35
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 36
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 37
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 38
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 39
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 40
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 41
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 42
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 43
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 44
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 45
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 46
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 47
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 48
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 49
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 50
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 51
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 52
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 53
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 54
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 55
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 56
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 57
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 58
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 59
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 60
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 61
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 62
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 63
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 64
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 65
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 66
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 67
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 68
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 69
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 70
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 71
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 72
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 73
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 74
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 75
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 76
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 77
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 78
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          7,
+          7
+        ]
+      },
+      "remaining_resource_count": 11,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          0
+        ],
+        "agent_b": [
+          0,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 0.0
+      },
+      "turn_index": 79
+    }
+  ],
+  "winner": "agent_a"
+}

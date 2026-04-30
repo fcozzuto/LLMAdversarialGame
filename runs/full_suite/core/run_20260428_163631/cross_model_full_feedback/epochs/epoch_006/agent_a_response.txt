@@ -1,0 +1,163 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    resources = [tuple(r) for r in observation.get("resources", [])]
+
+    deltas = [(-1, -1), (0, -1), (1, -1),
+              (-1, 0), (0, 0), (1, 0),
+              (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(a, b):
+        ax, ay = a
+        bx, by = b
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy  # Chebyshev: diagonal steps cost 1
+
+    def neighbors_free(x, y):
+        c = 0
+        for dx, dy in deltas:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                c += 1
+        return c
+
+    def best_resource_for(pos_self, pos_opp):
+        # maximize (opp closer? - me closer?) i.e., win likelihood
+        best = None
+        best_key = None
+        for r in resources:
+            if r in obstacles:
+                continue
+            dm = dist(pos_self, r)
+            do = dist(pos_opp, r)
+            key = (do - dm, -do, -r[1], -r[0])  # deterministic tie-break
+            if best_key is None or key > best_key:
+                best_key = key
+                best = r
+        return best
+
+    # If no resources, just move to densest area / away from opponent
+    if not resources:
+        best = (0, 0)
+        best_key = None
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            key = (neighbors_free(nx, ny), dist((nx, ny), (ox, oy)), -nx, -ny)
+            if best_key is None or key > best_key:
+                best_key = key
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    # Predict opponent target (greedy best for opponent)
+    opp_target = best_resource_for((ox, oy), (sx, sy))
+
+    best_move = (0, 0)
+    best_val = None
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        # Evaluate: can we beat opponent on the opponent's current likely target?
+        # If opp_target unknown, fallback to best resource overall.
+        target = opp_target if opp_target is not None else best_resource_for((ox, oy), (sx, sy))
+        if target is None:
+            target = resources[0]
+
+        my_d = dist((nx, ny), target)
+        opp_d = dist((ox, oy), target)
+        win_margin = opp_d - my_d  # positive means we are closer or equal
+
+        # Also consider overall resource pressure
+        my_target = best_resource_for((nx, ny), (ox, oy))
+        if my_target is None:
+            pressure = 0
+        else:
+            pressure = (dist((ox, oy), my_target) - dist((nx, ny), my_target))
+
+        # Encourage mobility and slight anti-blocking vs opponent direction
+        key = (win_margin, pressure, neighbors_free(nx, ny), dist((ox, oy), (nx, ny)), -nx, -ny)
+        if best_val is None or key > best_val:
+            best_val = key
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    resources = [tuple(r) for r in observation.get("resources", [])]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(a, b):
+        ax, ay = a
+        bx, by = b
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    legal = []
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            legal.append((dx, dy, nx, ny))
+
+    if not resources:
+        tx, ty = w // 2, h // 2
+        best = None
+        for dx, dy, nx, ny in legal:
+            d = cheb((nx, ny), (tx, ty))
+            key = (-d, cheb((nx, ny), (ox, oy)) - cheb((sx, sy), (ox, oy)))
+            if best is None or key > best[0]:
+                best = (key, (dx, dy))
+        return best[1] if best else [0, 0]
+
+    opp = (ox, oy)
+    me = (sx, sy)
+    best_r = None
+    best_key = None
+    for r in resources:
+        if r in obstacles:
+            continue
+        dm = cheb(me, r)
+        do = cheb(opp, r)
+        key = (do - dm, -do, -dm, -r[0], -r[1])
+        if best_key is None or key > best_key:
+            best_key = key
+            best_r = r
+
+    tx, ty = best_r
+    cur_do = cheb(opp, (sx, sy))
+    best = None
+    for dx, dy, nx, ny in legal:
+        dm_new = cheb((nx, ny), (tx, ty))
+        do_new = cheb(opp, (tx, ty))
+        key = (do_new - dm_new, -dm_new, -cheb((nx, ny), opp), -((nx, ny) != opp and cheb((nx, ny), opp) < cur_do))
+        if best is None or key > best[0]:
+            best = (key, (dx, dy))
+    return best[1] if best else [0, 0]

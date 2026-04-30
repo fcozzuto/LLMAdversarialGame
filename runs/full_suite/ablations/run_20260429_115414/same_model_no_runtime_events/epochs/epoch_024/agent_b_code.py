@@ -1,0 +1,74 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in (observation.get("resources") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    if not resources:
+        return [0, 0]
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    remaining = observation.get("remaining_resource_count")
+    if remaining is None:
+        remaining = len(resources)
+    remaining = int(remaining)
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    # Pick a deterministic target among remaining resources: nearest (then smallest coord).
+    scored = []
+    for x, y in resources:
+        d = cheb(sx, sy, x, y)
+        # Slight preference to avoid opponent when close.
+        close_pen = 0
+        if cheb(ox, oy, x, y) <= cheb(sx, sy, x, y):
+            close_pen = 1
+        scored.append((d + close_pen * (0 if remaining > 6 else 1), x, y))
+    scored.sort()
+    tx, ty = scored[0][1], scored[0][2]
+
+    # Choose best immediate move toward target; avoid obstacles/bounds.
+    best = None  # (score, dx, dy)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        dist = cheb(nx, ny, tx, ty)
+        # If ending on a resource cell, strongly prefer.
+        hit = 0 if (nx, ny) in resources else 1
+        # Slightly discourage moving into opponent proximity.
+        opp_dist = cheb(nx, ny, ox, oy)
+        score = dist * 10 + hit * 1000 - (0 if remaining > 6 else (1 if opp_dist <= 2 else 0))
+        cand = (score, dx, dy)
+        if best is None or cand < best:
+            best = cand
+
+    if best is None:
+        return [0, 0]
+    return [best[1], best[2]]

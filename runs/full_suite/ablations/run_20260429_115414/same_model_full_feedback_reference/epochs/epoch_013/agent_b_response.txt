@@ -1,0 +1,174 @@
+def choose_move(observation):
+    W = observation["grid_width"]
+    H = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = observation.get("obstacles") or []
+    resources = observation.get("resources") or []
+
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    res = []
+    seen = set()
+    for p in resources:
+        if p and len(p) >= 2:
+            t = (p[0], p[1])
+            if t not in obs and t not in seen:
+                seen.add(t)
+                res.append(t)
+
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    def inb(x, y):
+        return 0 <= x < W and 0 <= y < H
+
+    def legal(x, y):
+        return inb(x, y) and (x, y) not in obs
+
+    def md(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def step_cost_to_resource(px, py, rx, ry):
+        dx = rx - px
+        dy = ry - py
+        sxm = 1 if dx > 0 else (-1 if dx < 0 else 0)
+        sym = 1 if dy > 0 else (-1 if dy < 0 else 0)
+        # Prefer reducing Manhattan; slight preference to diagonal if it moves toward both.
+        return -((1 if sxm else 0) + (1 if sym else 0)) + (abs(dx) + abs(dy))
+
+    best = (0, 0)
+    bestv = -10**18
+
+    if res:
+        # Choose a contested target by maximizing (opp closer?) and then evaluate one-step best.
+        # First determine top candidate(s) from current state for deterministic focus.
+        candidates = []
+        for rx, ry in res:
+            myd = md(sx, sy, rx, ry)
+            opd = md(ox, oy, rx, ry)
+            # Lower score means better for me; use transformed to maximize value.
+            val = (opd - myd) * 1000 - myd
+            # Add a small deterministic bias to prefer resources more toward my side.
+            val += -(rx + ry)
+            candidates.append((val, rx, ry))
+        candidates.sort(reverse=True)
+        top = candidates[:min(4, len(candidates))]
+
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not legal(nx, ny):
+                continue
+            v = 0
+            # Soft penalty if stepping adjacent to obstacle (more "detour-like" play).
+            for ax, ay in obs:
+                if abs(ax - nx) <= 1 and abs(ay - ny) <= 1:
+                    v -= 2
+                    break
+
+            if (nx, ny) == (ox, oy):
+                v -= 10**6
+
+            # Evaluate against the best target among top candidates.
+            local_best = -10**18
+            for _, rx, ry in top:
+                myd2 = md(nx, ny, rx, ry)
+                opd2 = md(ox, oy, rx, ry)
+                # Contention: maximize distance advantage and closeness.
+                cont = (opd2 - myd2) * 1200 - myd2
+                # Additional bias: reduce direction changes.
+                cont += -step_cost_to_resource(nx, ny, rx, ry)
+                local_best = max(local_best, cont)
+            v += local_best
+            # Tie-break: prefer moves that get closer to the globally nearest resource.
+            gnr = min(res, key=lambda r: md(sx, sy, r[0], r[1]))
+            if md(nx, ny, gnr[0], gnr[1]) == md(sx, sy, gnr[0], gnr[1]) and (dx, dy) != (0, 0):
+                v -= 1
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+    else:
+        # No visible resources: head toward center while avoiding obstacles and not chasing opponent directly.
+        cx, cy = (W - 1) // 2, (H - 1) // 2
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not legal(nx, ny):
+                continue
+            d0 = md(nx, ny, cx, cy)
+            d1 = md(nx, ny, ox, oy)
+            v = -d0 * 3 + d1
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+
+    return [best[0], best[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    W = observation.get("grid_width", 0)
+    H = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    obstacles = observation.get("obstacles") or []
+    resources = observation.get("resources") or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    res = []
+    for p in resources:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if (x, y) not in obs:
+                res.append((x, y))
+
+    def inb(x, y):
+        return (W == 0 or (0 <= x < W)) and (H == 0 or (0 <= y < H))
+
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def pick_target():
+        if not res:
+            return None
+        best = None
+        bestv = -10**18
+        for rx, ry in res:
+            dv = -man(sx, sy, rx, ry) + 0.35 * man(ox, oy, rx, ry)
+            if best is None or dv > bestv or (dv == bestv and (rx, ry) < best):
+                bestv = dv
+                best = (rx, ry)
+        return best
+
+    target = pick_target()
+    if target is None:
+        tx, ty = ox, oy
+    else:
+        tx, ty = target
+
+    best_move = (0, 0)
+    best_cost = 10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        if target is None:
+            cost = man(nx, ny, tx, ty)
+        else:
+            cost = man(nx, ny, tx, ty) - 0.05 * man(nx, ny, ox, oy)
+        if cost < best_cost or (cost == best_cost and (dx, dy) < best_move):
+            best_cost = cost
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    if dx < -1 or dx > 1 or dy < -1 or dy > 1:
+        return [0, 0]
+    return [int(dx), int(dy)]

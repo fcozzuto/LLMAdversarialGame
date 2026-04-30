@@ -1,0 +1,69 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    res = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                res.append((x, y))
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def md(ax, ay, bx, by): return abs(ax - bx) + abs(ay - by)
+    def valid(nx, ny): return inb(nx, ny) and (nx, ny) not in obstacles
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not res:
+        tx, ty = (w - 1) // 2, (h - 1) // 2
+        best = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny): 
+                continue
+            score = -md(nx, ny, tx, ty) - 2 * md(nx, ny, ox, oy)
+            if best is None or score > best[0]:
+                best = (score, dx, dy)
+        if best is None:
+            return [0, 0]
+        return [best[1], best[2]]
+
+    # Deterministic target: resource that favors us most based on distance advantage.
+    best_r = None
+    best_key = None
+    for rx, ry in res:
+        ds = md(sx, sy, rx, ry)
+        do = md(ox, oy, rx, ry)
+        key = (ds - do, ds, -(rx + 31 * ry))
+        if best_key is None or key < best_key:
+            best_key = key
+            best_r = (rx, ry)
+
+    rx, ry = best_r
+    best = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        # If we get closer to target, prefer; also block opponent if they are near.
+        my = md(nx, ny, rx, ry)
+        opp = md(ox, oy, rx, ry)
+        # Evaluate after move with a simple tie-break favoring larger distance for opponent.
+        score = -(my) + (opp - md(ox, oy, nx, ny)) * 0.01 - md(nx, ny, ox, oy) * 0.001
+        if best is None or score > best[0]:
+            best = (score, dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[1]), int(best[2])]

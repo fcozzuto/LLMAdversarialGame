@@ -1,0 +1,138 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    if not resources:
+        # Fallback: move to center while staying safe
+        tx, ty = (w - 1) // 2, (h - 1) // 2
+    else:
+        # Pick a target resource that we can reach sooner than opponent (or next best)
+        def dist(a, b):
+            return abs(a[0]-b[0]) + abs(a[1]-b[1])
+        best = None
+        bs = -10**18
+        for rx, ry in resources:
+            dS = dist((sx, sy), (rx, ry))
+            dO = dist((ox, oy), (rx, ry))
+            # Prefer resources where we have tempo advantage; otherwise still consider
+            tempo = dO - dS  # positive if we are closer
+            # Also prefer nearer resources to reduce stagnation
+            s = 3.0 * tempo - 1.2 * dS
+            # If we are already on a resource, target it (will collect)
+            if dS == 0:
+                s += 1000
+            # Avoid targets surrounded by obstacles a bit (cheap local penalty)
+            neigh_block = 0
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    nx, ny = rx + dx, ry + dy
+                    if 0 <= nx < w and 0 <= ny < h and (nx, ny) in obstacles:
+                        neigh_block += 1 if (dx, dy) != (0, 0) else 0
+            s -= 0.15 * neigh_block
+            if s > bs:
+                bs = s
+                best = (rx, ry)
+        tx, ty = best if best is not None else resources[0]
+    # Evaluate legal moves
+    deltas = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    def legal(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+    best_move = (0, 0)
+    best_val = -10**18
+    # Small extra: if opponent is very near, prioritize staying farther
+    close_opp = (abs(ox - sx) <= 1 and abs(oy - sy) <= 1)
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        # Distance-based reward to our target
+        dT = abs(nx - tx) + abs(ny - ty)
+        # Avoid opponent to reduce interception risk
+        dO = abs(nx - ox) + abs(ny - oy)
+        avoid = 0
+        if close_opp:
+            avoid += 4.0 * (dO)  # maximize distance
+        else:
+            avoid += 1.2 * (dO)
+        # If we step onto a resource, huge reward (collect)
+        on_res = 0
+        for rx, ry in resources:
+            if rx == nx and ry == ny:
+                on_res = 1
+                break
+        # Also consider blocking: prefer squares that are close to opponent's chosen resource
+        intercept = 0
+        if resources:
+            # pick opponent-leaning target cheaply
+            # (best based on closeness to opponent)
+            near_res = None
+            bdo = 10**9
+            for rx, ry in resources:
+                d = abs(ox - rx) + abs(oy - ry)
+                if d < bdo:
+                    bdo = d
+                    near_res = (rx, ry)
+            rx, ry = near_res
+            intercept = 0.25 * (abs(nx - ox) + abs(ny - oy) == 1) - 0.15 * (abs(nx - rx) + abs(ny - ry))
+        val = -1.35 * dT + avoid + 1200 * on_res + 0.1 * intercept
+        # Deterministic tie-breaker: prefer lower dx, then lower dy
+        if val > best_val or (val == best_val and (dx, dy) < best_move):
+            best_val = val
+            best_move = (dx, dy)
+    return [best_move[0], best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    obst = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obst.add((p[0], p[1]))
+
+    if resources:
+        def dist(ax, ay, bx, by):
+            return abs(ax - bx) + abs(ay - by)
+
+        best_t = resources[0]
+        best_s = -10**18
+        for rx, ry in resources:
+            dS = dist(sx, sy, rx, ry)
+            dO = dist(ox, oy, rx, ry)
+            s = (dO - dS) * 10 - dS
+            if dS == 0:
+                s += 10**9
+            if s > best_s:
+                best_s = s
+                best_t = (rx, ry)
+        tx, ty = best_t
+    else:
+        tx, ty = (w - 1) // 2, (h - 1) // 2
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = (0, 0)
+    best_val = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or ny < 0 or nx >= w or ny >= h:
+            continue
+        if (nx, ny) in obst:
+            continue
+        d = abs(nx - tx) + abs(ny - ty)
+        d_opp = abs(nx - ox) + abs(ny - oy)
+        val = -d + 0.3 * d_opp
+        if resources and (nx, ny) in resources:
+            val += 10**8
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+    return [best_move[0], best_move[1]]

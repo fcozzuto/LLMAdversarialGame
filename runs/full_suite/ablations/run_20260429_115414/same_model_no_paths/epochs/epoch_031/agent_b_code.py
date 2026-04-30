@@ -1,0 +1,56 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    s = observation.get("self_position") or [0, 0]
+    o = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(s[0]), int(s[1])
+    ox, oy = int(o[0]), int(o[1])
+
+    obstacles = set()
+    for b in observation.get("obstacles") or []:
+        try:
+            bx, by = int(b[0]), int(b[1])
+        except Exception:
+            continue
+        if 0 <= bx < w and 0 <= by < h:
+            obstacles.add((bx, by))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        try:
+            rx, ry = int(r[0]), int(r[1])
+        except Exception:
+            continue
+        if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in obstacles:
+            resources.append((rx, ry))
+
+    def man(ax, ay, bx, by):
+        ax -= bx
+        ay -= by
+        if ax < 0: ax = -ax
+        if ay < 0: ay = -ay
+        return ax + ay
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    best_move = (0, 0)
+    best_val = -10**18
+
+    targets = resources if resources else [(ox, oy)]
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obstacles:
+            continue
+        val = 0
+        for tx, ty in targets:
+            myd = man(nx, ny, tx, ty)
+            opd = man(ox, oy, tx, ty)
+            val = max(val, opd - myd)  # prefer closing on resources away from opponent
+        if resources:
+            # break ties by also discouraging getting farther from the best target
+            val -= man(nx, ny, targets[0][0], targets[0][1]) * 0
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

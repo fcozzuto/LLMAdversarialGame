@@ -1,0 +1,162 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    def md(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    def safety(x, y):
+        # Penalize being adjacent (or on) obstacles
+        if (x, y) in obstacles:
+            return -10_000
+        pen = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if (nx, ny) in obstacles:
+                    pen += 1.5 if dx == 0 or dy == 0 else 2.0
+        # Slight preference for center
+        return -(pen) - 0.15 * (abs(x - cx) + abs(y - cy))
+
+    # Choose best target resource deterministically
+    tx, ty = sx, sy
+    best_score = -10**18
+    if resources:
+        for rx, ry in resources:
+            myd = md((sx, sy), (rx, ry))
+            opd = md((ox, oy), (rx, ry))
+            # Race: prefer where opponent is farther (positive means I'm closer)
+            race = opd - myd
+            # Centering: prefer resources near center for continued movement
+            cen = - (abs(rx - cx) + abs(ry - cy))
+            # Tie-break: avoid too-far if race is similar
+            dist_bias = -myd * 0.2
+            score = race * 1000 + cen * 3 + dist_bias
+            # If I can reach in fewer steps than opponent by a margin, add extra
+            if race >= 2:
+                score += 500
+            if score > best_score:
+                best_score = score
+                tx, ty = rx, ry
+    else:
+        tx, ty = int(round(cx)), int(round(cy))
+
+    # Pick move step toward target, avoiding obstacles; include staying if blocked
+    best_move = [0, 0]
+    best = -10**18
+    moves = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        # If step would allow opponent to immediately steal a nearby resource, discourage slightly
+        immediate_risk = 0
+        if resources:
+            for rx, ry in resources:
+                # Consider only resources close to next position
+                if abs(rx - nx) + abs(ry - ny) <= 2:
+                    if md((ox, oy), (rx, ry)) <= md((nx, ny), (rx, ry)):
+                        immediate_risk += 1
+        step_to_target = -md((nx, ny), (tx, ty))
+        # Also prefer increasing advantage vs opponent at target direction
+        myd_next = md((nx, ny), (tx, ty))
+        opd_here = md((ox, oy), (tx, ty))
+        adv = opd_here - myd_next
+        val = step_to_target * 10 + adv * 2 + safety(nx, ny) - immediate_risk * 8
+        if val > best:
+            best = val
+            best_move = [dx, dy]
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    moves = [(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)]
+    best = None
+    best_score = -10**18
+
+    def score_to(nx, ny):
+        if (nx, ny) in obstacles:
+            return -10**12
+        if not (0 <= nx < w and 0 <= ny < h):
+            return -10**12
+        # Prefer moving closer to nearest resource
+        if resources:
+            dmin = min(abs(nx - rx) + abs(ny - ry) for rx, ry in resources)
+            s = -dmin
+        else:
+            cx, cy = (w - 1) // 2, (h - 1) // 2
+            s = -(abs(nx - cx) + abs(ny - cy))
+        # Avoid opponent by preferring farther distance
+        do = abs(nx - ox) + abs(ny - oy)
+        s += do * 0.2
+        # Slightly avoid dead zones near obstacles
+        near = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                tx, ty = nx + dx, ny + dy
+                if (tx, ty) in obstacles:
+                    near += 1
+        s -= near * 0.1
+        return s
+
+    # Deterministic tie-break: fixed move order
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        s = score_to(nx, ny)
+        if s > best_score:
+            best_score = s
+            best = [dx, dy]
+
+    # Fallback (should never be None)
+    if best is None:
+        return [0, 0]
+    return best

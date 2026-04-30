@@ -1,0 +1,63 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    def inb(x, y): 
+        return 0 <= x < w and 0 <= y < h
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        try:
+            x, y = int(p[0]), int(p[1])
+            if inb(x, y):
+                obstacles.add((x, y))
+        except:
+            pass
+
+    resources = []
+    for r in observation.get("resources", []) or []:
+        try:
+            x, y = int(r[0]), int(r[1])
+            if inb(x, y) and (x, y) not in obstacles:
+                resources.append((x, y))
+        except:
+            pass
+
+    deltas = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    legal = []
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            legal.append((dx, dy, nx, ny))
+    if not legal:
+        return [0, 0]
+
+    def man(a, b): 
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    if resources:
+        best = legal[0]
+        bestv = -10**18
+        for dx, dy, nx, ny in legal:
+            d_opp = man((nx, ny), (ox, oy))
+            d_res = min(man((nx, ny), r) for r in resources)
+            # Prefer being closer to resources, while keeping some distance from opponent.
+            v = (-d_res * 3) + (d_opp * 1) + (1 if (nx, ny) in resources else 0)
+            # Tie-break: deterministic by move direction preference.
+            v += -0.001 * (abs(dx) + abs(dy))
+            if v > bestv:
+                bestv, best = v, (dx, dy)
+        return [int(best[0]), int(best[1])]
+
+    # No resources visible: move away from opponent deterministically.
+    best = legal[0]
+    bestv = -10**18
+    for dx, dy, nx, ny in legal:
+        d_opp = man((nx, ny), (ox, oy))
+        v = d_opp * 10 - (abs(dx) + abs(dy)) * 0.01
+        if v > bestv:
+            bestv, best = v, (dx, dy)
+    return [int(best[0]), int(best[1])]

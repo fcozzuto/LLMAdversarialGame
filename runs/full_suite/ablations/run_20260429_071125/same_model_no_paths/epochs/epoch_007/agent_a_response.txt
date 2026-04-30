@@ -1,0 +1,177 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+
+    if w <= 0 or h <= 0:
+        return [0, 0]
+
+    blocked = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                blocked.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    res = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if inb(x, y) and (x, y) not in blocked:
+                res.append((x, y))
+
+    def dist_manh(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    # Deterministic target choice: closest resource to us; tie by lexicographic
+    tx, ty = None, None
+    if res:
+        best = None
+        for (rx, ry) in res:
+            d = dist_manh(sx, sy, rx, ry)
+            key = (d, rx, ry)
+            if best is None or key < best:
+                best = key
+                tx, ty = rx, ry
+
+    # If no resources, drift toward center while avoiding obstacles
+    if tx is None:
+        cx, cy = (w - 1) // 2, (h - 1) // 2
+        best = None
+        bestv = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in blocked:
+                continue
+            v = -max(abs(nx - cx), abs(ny - cy))
+            key = (v, dx, dy)
+            if best is None or key > best:
+                best = key
+                bestv = (dx, dy)
+        return [bestv[0], bestv[1]] if bestv is not None else [0, 0]
+
+    # Scoring: move toward target; also try to be closer than opponent after move
+    # and avoid positions that let opponent become closer by a large margin.
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in blocked:
+            continue
+
+        d_self = dist_manh(nx, ny, tx, ty)
+        d_opp_after = dist_manh(nx, ny, ox, oy)  # how much we separate from opponent
+
+        # Opponent's potential access: approximate by their distance to target
+        d_opp = dist_manh(ox, oy, tx, ty)
+        # If we get within range to contest soon, reward.
+        contest = (d_self <= d_opp)
+
+        # Base: minimize self distance to target
+        score = -2.0 * d_self
+
+        # Reward taking tempo: being closer than opponent by at least 1
+        score += 5.0 if contest and d_self < d_opp else (2.0 if contest else 0.0)
+
+        # Also discourage moves that bring us into opponent vicinity (to reduce their contest chance)
+        # Use manhattan separation from opponent after our move.
+        score += 0.3 * d_opp_after
+
+        # Tie-break deterministically: prefer moves with smaller |dx| then smaller |dy| then lexicographic
+        tiebreak = (-abs(dx), -abs(dy), -dx, -dy)
+
+        key_score = (score, tiebreak)
+        if key_score[0] > best_score or (key_score[0] == best_score and key_score[1] > (None if best_score == -10**18 else (-abs(best_move[0]), -abs(best_move[1]), -best_move[0], -best_move[1]))):
+            best_score = key_score[0]
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+    if w <= 0 or h <= 0:
+        return [0, 0]
+
+    blocked = set()
+    for p in (observation.get("obstacles", []) or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                blocked.add((x, y))
+
+    resources = []
+    for r in (observation.get("resources", []) or []):
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in blocked:
+                resources.append((x, y))
+
+    def md(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best_target = None
+
+    if resources:
+        # Prefer a resource we are closer to than opponent; otherwise fall back to our nearest.
+        best = None
+        for rx, ry in resources:
+            ds = md(sx, sy, rx, ry)
+            do = md(ox, oy, rx, ry)
+            if do <= ds:
+                continue
+            key = (ds - do, ds, rx, ry)
+            if best is None or key < best:
+                best = key
+                best_target = (rx, ry)
+        if best_target is None:
+            best = None
+            for rx, ry in resources:
+                key = (md(sx, sy, rx, ry), rx, ry)
+                if best is None or key < best:
+                    best = key
+                    best_target = (rx, ry)
+
+    tx, ty = (best_target if best_target is not None else (sx, sy))
+    if best_target is None:
+        # No resources: move to reduce distance to opponent deterministically, avoiding obstacles.
+        tx, ty = ox, oy
+
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in blocked:
+            continue
+        # Score: prioritize moving closer to target; also prefer moves that keep/restore advantage over opponent.
+        ds = md(nx, ny, tx, ty)
+        dn = md(ox, oy, tx, ty)
+        opp_adv = ds - dn
+        score = (opp_adv, ds, -dx, -dy)
+        if best_score is None or score < best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

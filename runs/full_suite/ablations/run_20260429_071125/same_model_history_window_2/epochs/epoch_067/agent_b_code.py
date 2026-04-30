@@ -1,0 +1,61 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+
+    sp = observation.get("self_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if ok(x, y):
+                resources.append((x, y))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    if resources:
+        target = None
+        bestd = 10**9
+        for x, y in resources:
+            d = abs(x - sx)
+            dy = abs(y - sy)
+            d = d if d > dy else dy
+            if d < bestd:
+                bestd = d
+                target = (x, y)
+    else:
+        target = (w // 2, h // 2)
+
+    tx, ty = target
+    best_move = (0, 0)
+    best_val = -10**9
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        # Prefer getting closer to target; slight bias to move (0,0) only if no better options
+        nd = abs(tx - nx)
+        tdy = abs(ty - ny)
+        nd = nd if nd > tdy else tdy
+        val = -nd * 10
+        if (dx, dy) == (0, 0):
+            val -= 1
+        if resources and (nx, ny) in resources:
+            val += 1000
+        if val > best_val:
+            best_val = val
+            best_move = [dx, dy]
+
+    return best_move

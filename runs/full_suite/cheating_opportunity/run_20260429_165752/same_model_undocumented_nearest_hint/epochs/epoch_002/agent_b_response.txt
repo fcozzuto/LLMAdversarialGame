@@ -1,0 +1,141 @@
+def choose_move(observation):
+    W = observation["grid_width"]; H = observation["grid_height"]
+    sx, sy = observation["self_position"]; ox, oy = observation["opponent_position"]
+    resources = observation["resources"]; obstacles = set(tuple(p) for p in observation["obstacles"])
+    scores = observation.get("scores", None)
+    self_name = observation["self_name"]; opp_name = observation["opponent_name"]
+
+    def inb(x, y): return 0 <= x < W and 0 <= y < H and (x, y) not in obstacles
+    def man(a, b, c, d): 
+        dx = a - c; dx = -dx if dx < 0 else dx
+        dy = b - d; dy = -dy if dy < 0 else dy
+        return dx + dy
+    def cheb(a, b, c, d):
+        dx = a - c; dx = -dx if dx < 0 else dx
+        dy = b - d; dy = -dy if dy < 0 else dy
+        return dx if dx > dy else dy
+
+    self_score = opp_score = 0
+    if isinstance(scores, dict):
+        self_score = scores.get(self_name, 0); opp_score = scores.get(opp_name, 0)
+    behind = self_score < opp_score
+
+    # Choose target resource: prefer ones we can reach sooner; if behind, avoid giving opponent easy races.
+    best = None  # (priority, rx, ry)
+    for rx, ry in resources:
+        ds = cheb(sx, sy, rx, ry)
+        do = cheb(ox, oy, rx, ry)
+        # Primary: reach advantage. Secondary: keep opponent farther from target after we start moving.
+        reach_adv = do - ds  # positive => we are closer
+        # Penalize resources too close to opponent when behind (they're likely to contest).
+        contest_pen = 0 if not behind else (0 if do > ds else (5 - do))  # stronger when do <= ds
+        # Small tie-breaker to keep movement varied but deterministic.
+        tie = -((rx * 17 + ry * 31) % 7)
+        priority = (reach_adv - contest_pen, -ds, tie) if behind else (reach_adv, -ds, tie)
+        if best is None or priority > best[0]:
+            best = (priority, rx, ry)
+    if best is None:
+        # No resources: drift toward center while avoiding obstacles.
+        cx, cy = (W - 1) // 2, (H - 1) // 2
+        tx, ty = cx - sx, cy - sy
+        dx = 0 if tx == 0 else (1 if tx > 0 else -1)
+        dy = 0 if ty == 0 else (1 if ty > 0 else -1)
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny): return [dx, dy]
+        # fallback to any valid move toward center
+        for mdx in (-1, 0, 1):
+            for mdy in (-1, 0, 1):
+                if mdx == 0 and mdy == 0: continue
+                nx, ny = sx + mdx, sy + mdy
+                if inb(nx, ny): return [mdx, mdy]
+        return [0, 0]
+
+    _, tx, ty = best[0], best[1], best[2]
+
+    # Evaluate best move by local heuristics: progress to target, prevent opponent approach, obstacle safety.
+    candidates = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    best_move = (None, None)
+    best_score = None
+
+    for dx, dy in candidates:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny): 
+            continue
+        ds_now = cheb(nx, ny, tx, ty)
+        ds_cur = cheb(sx, sy, tx, ty)
+        # Our progress
+        prog = ds_cur - ds_now
+
+        # Predict opponent possible move toward same target (worst-case): approximate by their current best step.
+        o_best = 10**9
+        for odx, ody in candidates:
+            onx, ony = ox + odx, oy + ody
+            if 0 <= onx < W and 0 <= ony < H and (onx, ony) not in obstacles:
+                o_best = min(o_best, cheb(onx, ony, tx, ty))
+        # If our move lets opponent get closer a lot, penalize (especially when behind).
+        do_next = o_best
+        do_cur = cheb(ox, oy, tx, ty)
+        opp_closer = do_cur - do_next  # positive means opponent advances
+        block_eff = 0
+        # Extra: slightly prefer moves that increase distance from
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    W = observation["grid_width"]; H = observation["grid_height"]
+    sx, sy = observation["self_position"]; ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obs = observation.get("obstacles", []) or []
+    obstacles = set(map(tuple, obs)) if not isinstance(obs, set) else obs
+
+    def ok(x, y):
+        return 0 <= x < W and 0 <= y < H and (x, y) not in obstacles
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2; dx = -dx if dx < 0 else dx
+        dy = y1 - y2; dy = -dy if dy < 0 else dy
+        return dx if dx > dy else dy
+
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+    legal = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if ok(nx, ny):
+            legal.append((dx, dy))
+
+    if not legal:
+        return [0, 0]
+
+    target = None
+    best = None
+    for rx, ry in resources:
+        if (rx, ry) in obstacles:
+            continue
+        ds = cheb(sx, sy, rx, ry)
+        do = cheb(ox, oy, rx, ry)
+        # Prefer resources we're closer to; then closer distance; then stable tie-breaker.
+        key = (0 if ds <= do else 1, ds, do, rx, ry)
+        if best is None or key < best:
+            best = key
+            target = (rx, ry)
+
+    if target is None:
+        tx, ty = ox, oy
+    else:
+        tx, ty = target
+
+    best_move = None
+    best_key = None
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        ds = cheb(nx, ny, tx, ty)
+        do = cheb(ox, oy, tx, ty)
+        # Maximize relative progress: we minimize our distance, and prefer not getting worse behind opponent.
+        key = (- (do - ds), ds, dx, dy)
+        if best_key is None or key > best_key:
+            best_key = key
+            best_move = (dx, dy)
+
+    if best_move is None:
+        return [0, 0]
+    return [int(best_move[0]), int(best_move[1])]

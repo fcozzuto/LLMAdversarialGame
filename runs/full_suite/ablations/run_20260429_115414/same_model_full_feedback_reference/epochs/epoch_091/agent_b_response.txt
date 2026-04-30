@@ -1,0 +1,166 @@
+def choose_move(observation):
+    W = int(observation.get("grid_width") or 8)
+    H = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [W - 1, H - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < W and 0 <= y < H:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < W and 0 <= y < H and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def legal(x, y):
+        return 0 <= x < W and 0 <= y < H and (x, y) not in obstacles
+
+    # Immediate resource capture (adjacent)
+    best_moves = []
+    best_d = 10**9
+    best_adj = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        if (nx, ny) in set(resources):
+            d = 0
+            if d < best_d:
+                best_d = d
+                best_moves = [(dx, dy)]
+                best_adj = (nx, ny)
+            elif d == best_d:
+                best_moves.append((dx, dy))
+    if best_moves:
+        # deterministic tie-break: prefer move that is "more toward opponent" if equal
+        tx, ty = ox, oy
+        chosen = best_moves[0]
+        cd = cheb(sx + chosen[0], sy + chosen[1], tx, ty)
+        for m in best_moves[1:]:
+            d = cheb(sx + m[0], sy + m[1], tx, ty)
+            if d < cd:
+                cd = d
+                chosen = m
+        return [int(chosen[0]), int(chosen[1])]
+
+    # Choose target resource likely to be taken by us: minimize (self_dist - 0.7*opp_dist)
+    target = None
+    best_val = 10**18
+    if resources:
+        for rx, ry in resources:
+            ds = cheb(sx, sy, rx, ry)
+            do = cheb(ox, oy, rx, ry)
+            val = ds - 0.7 * do
+            if val < best_val:
+                best_val = val
+                target = (rx, ry)
+    else:
+        target = ((W - 1) // 2, (H - 1) // 2)
+
+    tx, ty = target
+    # Evaluate candidate next positions: prefer approaching target, slightly avoid giving opponent too much advantage
+    chosen = (0, 0)
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        d_self = cheb(nx, ny, tx, ty)
+        d_opp = cheb(ox, oy, tx, ty)
+        # Score higher is better: closer to target, and if we are closer than opponent, boost.
+        score = -d_self + 0.25 * (cheb(nx, ny, ox, oy)) + 0.35 * (d_opp - d_self)
+        # Small deterministic bias to reduce oscillations: prefer moves
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    W = int(observation.get("grid_width") or 8)
+    H = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [W - 1, H - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < W and 0 <= y < H:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < W and 0 <= y < H and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    def legal(x, y):
+        return 0 <= x < W and 0 <= y < H and (x, y) not in obstacles
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not legal(sx, sy):
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if legal(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    def dist(a, b, c, d):
+        dx = a - c
+        if dx < 0: dx = -dx
+        dy = b - d
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    # Prefer capturing nearby resources; otherwise head toward nearest resource,
+    # and if none exist, move toward the opponent.
+    has_resources = bool(resources)
+    best = None
+    best_key = None
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        if has_resources:
+            mind = 10**9
+            for rx, ry in resources:
+                if (rx, ry) != (nx, ny):
+                    d = dist(nx, ny, rx, ry)
+                else:
+                    d = 0
+                if d < mind:
+                    mind = d
+            # Greedy score: closest resource; break ties toward opponent; then prefer (0,0) deterministically by move order.
+            key = (mind, dist(nx, ny, ox, oy), 0 if (dx, dy) == (0, 0) else 1)
+        else:
+            key = (dist(nx, ny, ox, oy), 0 if (dx, dy) == (0, 0) else 1)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

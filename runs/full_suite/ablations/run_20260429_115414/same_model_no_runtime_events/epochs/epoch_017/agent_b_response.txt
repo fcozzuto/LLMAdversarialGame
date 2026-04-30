@@ -1,0 +1,165 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    obs = set()
+    for p in (observation.get("obstacles") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if inb(x, y):
+                obs.add((x, y))
+
+    resources = []
+    for r in (observation.get("resources") or []):
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = r[0], r[1]
+            if inb(x, y) and (x, y) not in obs:
+                resources.append((x, y))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    if not resources:
+        # Move toward center to reduce distance variance deterministically
+        tx, ty = (w - 1) / 2.0, (h - 1) / 2.0
+        best = (0, 0)
+        bestv = -10**18
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obs:
+                continue
+            v = -((nx - tx) * (nx - tx) + (ny - ty) * (ny - ty))
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    # Main heuristic: for candidate move, maximize (opp_advantage) on closest few resources,
+    # while still preferring proximity to avoid missing.
+    best = (0, 0)
+    best_val = -10**30
+
+    # Precompute resource order by current self distance for faster scoring.
+    res_sorted = sorted(resources, key=lambda p: cheb(sx, sy, p[0], p[1]))
+    top = res_sorted[:6] if len(res_sorted) > 6 else res_sorted
+
+    curr_unsafe = (sx, sy) in obs
+    if curr_unsafe:
+        # If somehow on obstacle, force a safe deterministic move.
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and (nx, ny) not in obs:
+                return [dx, dy]
+        return [0, 0]
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+
+        val = 0
+        self_close = cheb(nx, ny, top[0][0], top[0][1])
+        val += 50 / (1 + self_close)
+
+        # Contest resources: prefer moves that reduce our distance more than opponent's.
+        for i, (rx, ry) in enumerate(top):
+            ds = cheb(nx, ny, rx, ry)
+            do = cheb(ox, oy, rx, ry)
+            adv = do - ds
+            # Stronger weight for nearer resources in our current ordering.
+            wgt = (6 - i)
+            val += wgt * (adv * 8 - ds)
+
+        # If opponent is closer to the nearest resource, try to block by moving toward the
+        # closest point to that same resource (already covered, but boost).
+        nrx, nry = top[0]
+        if cheb(ox, oy, nrx, nry) < cheb(sx, sy, nrx, nry):
+            val += 30 / (1 + cheb(nx, ny, nrx, nry))
+
+        # Deterministic tie-break: prefer staying still only if equal score.
+        if val > best_val:
+            best_val = val
+            best = (dx, dy)
+
+    # If all moves invalid, must stay in place.
+    if best is None:
+        best = (0, 0)
+    return [best[0], best[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    obs = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = r[0], r[1]
+            if inb(x, y) and (x, y) not in obs:
+                resources.append((x, y))
+
+    dxs = [-1, 0, 1]
+    dys = [-1, 0, 1]
+    dirs = [(dx, dy) for dy in dys for dx in dxs]  # deterministic order
+
+    def man(a, b, c, d):
+        v = a - c
+        if v < 0: v = -v
+        t = b - d
+        if t < 0: t = -t
+        return v + t
+
+    if resources and (observation.get("remaining_resource_count", len(resources)) != 0):
+        tx, ty = min(resources, key=lambda p: (man(sx, sy, p[0], p[1]), p[0], p[1]))
+    else:
+        # If no resources, head toward opponent to gain points/pressure; else center.
+        # Use opponent unless it is out of bounds (shouldn't be).
+        if inb(ox, oy):
+            tx, ty = ox, oy
+        else:
+            tx, ty = (w - 1) // 2, (h - 1) // 2
+
+    best = None
+    bestv = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        v = man(nx, ny, tx, ty)
+        # Prefer moves that would land on a resource (if any), and break ties deterministically
+        if resources:
+            if (nx, ny) in obs:
+                pass
+            else:
+                if (nx, ny) == (tx, ty):
+                    v -= 10
+        if bestv is None or v < bestv or (v == bestv and (dx, dy) < best):
+            bestv = v
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[0], best[1]]

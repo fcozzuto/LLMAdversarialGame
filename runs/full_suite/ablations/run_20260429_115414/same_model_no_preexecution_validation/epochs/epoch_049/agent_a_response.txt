@@ -1,0 +1,83 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for r in observation.get("resources", []) or []:
+        if r and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    if resources:
+        best_t = None
+        best_diff = -10**9
+        best_selft = 10**9
+        for tx, ty in resources:
+            st = cheb(sx, sy, tx, ty)
+            ot = cheb(ox, oy, tx, ty)
+            diff = ot - st  # positive => we are closer
+            # Prefer resources where we arrive strictly earlier; otherwise still best diff, then earlier self.
+            key_diff = diff * 1000 + (1 if st < ot else 0) * 10
+            if key_diff > best_diff or (key_diff == best_diff and st < best_selft):
+                best_diff = key_diff
+                best_selft = st
+                best_t = (tx, ty)
+        tx, ty = best_t
+        best_move = (0, 0)
+        best_val = -10**18
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not inside(nx, ny):
+                continue
+            self_to = cheb(nx, ny, tx, ty)
+            opp_to = cheb(nx, ny, ox, oy)
+            # Avoid moving next to opponent unless it reduces distance to target.
+            # Penalize paths that let opponent get closer faster than we do.
+            my_st = cheb(nx, ny, tx, ty)
+            opp_st = cheb(ox, oy, tx, ty)
+            closer = 1 if my_st < best_selft else 0
+            val = -self_to
+            if (abs(nx - ox) <= 1 and abs(ny - oy) <= 1) and not closer:
+                val -= 20
+            val -= 0 if opp_st - cheb(ox, oy, tx, ty) == 0 else 0
+            # Mildly prefer moves that increase distance from opponent.
+            val += 0.5 * opp_to
+            # Tie-break deterministically towards target direction, then towards increasing x,y lexicographically.
+            if self_to < cheb(sx, sy, tx, ty) or (self_to == cheb(sx, sy, tx, ty) and opp_to >= cheb(sx, sy, ox, oy)):
+                val += 1
+            if val > best_val or (val == best_val and (dx, dy) < best_move):
+                best_val = val
+                best_move = (dx, dy)
+        return [int(best_move[0]), int(best_move[1])]
+
+    # No resources: deterministically go to a safe central-ish point while keeping away from opponent.
+    target = (w // 2, h // 2)
+    best_move = (0, 0)
+    best_val = -10**18
+    cx, cy = target
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy

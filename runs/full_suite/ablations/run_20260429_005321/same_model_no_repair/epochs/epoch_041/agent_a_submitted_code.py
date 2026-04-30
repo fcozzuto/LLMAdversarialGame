@@ -1,0 +1,97 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    gw = observation.get("grid_width", 8)
+    gh = observation.get("grid_height", 8)
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+    obs = set((x, y) for x, y in obstacles)
+
+    def inb(x, y):
+        return 0 <= x < gw and 0 <= y < gh
+
+    def blocked(x, y):
+        return (not inb(x, y)) or ((x, y) in obs)
+
+    # Deterministic move order (prefer forward-ish diagonals later)
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    move_to_delta = {m: [m[0], m[1]] for m in moves}
+
+    # Multi-target BFS to nearest reachable resource; captures a meaningful strategic change from wall-hitting.
+    if resources:
+        res_set = set((x, y) for x, y in resources if inb(x, y) and (x, y) not in obs)
+        if (sx, sy) in res_set:
+            return [0, 0]
+        from collections import deque  # local import forbidden by rules; so avoid. We'll implement queue manually.
+
+        max_depth = 6
+        qx = [sx]
+        qy = [sy]
+        depth = [0]
+        head = 0
+        seen = {(sx, sy)}
+        first_step = {(sx, sy): None}
+
+        found = None
+        while head < len(qx):
+            x, y = qx[head], qy[head]
+            d = depth[head]
+            head += 1
+            if d > max_depth:
+                continue
+            if (x, y) in res_set and not (x == sx and y == sy):
+                found = first_step[(x, y)]
+                break
+            if d == max_depth:
+                continue
+            for dx, dy in moves:
+                nx, ny = x + dx, y + dy
+                if blocked(nx, ny):
+                    continue
+                if (nx, ny) in seen:
+                    continue
+                seen.add((nx, ny))
+                qx.append(nx)
+                qy.append(ny)
+                depth.append(d + 1)
+                if first_step[(x, y)] is None:
+                    first_step[(nx, ny)] = (dx, dy)
+                else:
+                    first_step[(nx, ny)] = first_step[(x, y)]
+
+        if found is not None:
+            dx, dy = found
+            return move_to_delta[(dx, dy)]
+
+    # Fallback greedy: minimize (distance to closest resource + obstacle risk) while avoiding collisions.
+    resources_list = resources if resources else []
+    best = None
+    best_score = None
+
+    def man(ax, ay, bx, by):
+        v = ax - bx
+        if v < 0:
+            v = -v
+        u = ay - by
+        if u < 0:
+            u = -u
+        return v + u
+
+    def obstacle_risk(x, y):
+        # Penalize adjacency to obstacles so we stop repeatedly "bumping" walls.
+        r = 0
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)):
+            nx, ny = x + dx, y + dy
+            if (nx, ny) in obs:
+                r += 1
+        return r
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        if resources_list:
+            cr = min(man(nx, ny, rx, ry) for rx, ry in resources_list)
+        else:
+            # If no resources, drift away from opponent slightly (deterministic)
+            cr = man(nx, ny, ox, oy)

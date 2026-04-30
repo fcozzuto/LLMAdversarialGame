@@ -1,0 +1,92 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    resources = observation.get("resources", []) or []
+    obs_list = observation.get("obstacles", []) or []
+    obstacles = set((x, y) for x, y in obs_list)
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1),
+            (0, -1), (0, 0), (0, 1),
+            (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def passable(x, y):
+        return inb(x, y) and (x, y) not in obstacles
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    cx, cy = w // 2, h // 2
+
+    if not resources:
+        best_score = -10**18
+        best_move = [0, 0]
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not passable(nx, ny):
+                continue
+            obst_pen = 0
+            for ax, ay in obstacles:
+                d = cheb(nx, ny, ax, ay)
+                if d == 0:
+                    obst_pen = 10**6
+                    break
+                if d < 3:
+                    obst_pen += (3 - d)
+            score = (cheb(ox, oy, nx, ny) - cheb(nx, ny, cx, cy)) - 2 * obst_pen
+            if score > best_score or (score == best_score and (dx, dy) < tuple(best_move)):
+                best_score = score
+                best_move = [dx, dy]
+        return best_move
+
+    # Choose a target: prefer resources where we have advantage; if none, pick one to deny.
+    best_target = None
+    best_adv = -10**18
+    for rx, ry in resources:
+        ds = cheb(sx, sy, rx, ry)
+        do = cheb(ox, oy, rx, ry)
+        adv = do - ds
+        if adv > best_adv or (adv == best_adv and (rx, ry) < best_target if best_target is not None else False):
+            best_adv = adv
+            best_target = (rx, ry)
+    tx, ty = best_target
+
+    # If we are not ahead on any resource, deny: pick resource with minimal opponent distance.
+    if best_adv <= 0:
+        best_opp = 10**18
+        best_target = None
+        for rx, ry in resources:
+            do = cheb(ox, oy, rx, ry)
+            if do < best_opp or (do == best_opp and (rx, ry) < best_target if best_target is not None else False):
+                best_opp = do
+                best_target = (rx, ry)
+        tx, ty = best_target
+
+    best_score = -10**18
+    best_move = [0, 0]
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not passable(nx, ny):
+            continue
+
+        # Core: maximize advantage in reaching target from next step.
+        self_d = cheb(nx, ny, tx, ty)
+        opp_d = cheb(ox, oy, tx, ty)
+        score = (opp_d - self_d)
+
+        # If contesting (we weren't ahead), also reduce opponent's future approach to the target.
+        if cheb(sx, sy, tx, ty) >= cheb(ox, oy, tx, ty):
+            # Compare how much closer opponent would be after their best immediate move.
+            best_opp_next = 10**18
+            for odx, ody in dirs:
+                ex, ey = ox + odx, oy + ody

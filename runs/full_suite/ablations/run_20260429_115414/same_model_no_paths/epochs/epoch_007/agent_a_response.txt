@@ -1,0 +1,164 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(o) for o in (observation.get("obstacles", []) or []))
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def blocked(x, y):
+        return x < 0 or y < 0 or x >= w or y >= h or (x, y) in obstacles
+
+    def adj_obst_pen(x, y):
+        if not obstacles:
+            return 0
+        best = 999
+        for px, py in obstacles:
+            d = cheb(x, y, px, py)
+            if d < best:
+                best = d
+        # worse near obstacles
+        if best == 0:
+            return 50
+        if best == 1:
+            return 10
+        if best == 2:
+            return 4
+        return 0
+
+    legal = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not blocked(nx, ny):
+            legal.append((dx, dy))
+    if not legal:
+        return [0, 0]
+
+    # Precompute viable resources
+    rs = []
+    for rx, ry in resources:
+        if (rx, ry) not in obstacles:
+            rs.append((rx, ry))
+
+    def pick_target_from(x, y):
+        # choose resource maximizing advantage over opponent; tie-break by closeness to us
+        best_key = None
+        best_r = None
+        for rx, ry in rs:
+            sd = cheb(x, y, rx, ry)
+            od = cheb(ox, oy, rx, ry)
+            # primary: how much closer we are than opponent (prefer >=0)
+            key = (od - sd, -sd)
+            if best_key is None or key > best_key:
+                best_key = key
+                best_r = (rx, ry)
+        return best_r
+
+    best_move = None
+    best_score = None
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        target = pick_target_from(nx, ny)
+        if target is None:
+            score = -adj_obst_pen(nx, ny)
+        else:
+            rx, ry = target
+            sd = cheb(nx, ny, rx, ry)
+            od = cheb(ox, oy, rx, ry)
+            # Encourage winning the race; also slightly avoid letting opponent get closer.
+            # If we can't get advantage, still move to reduce our distance.
+            score = (od - sd) * 6 - sd
+            score += (1 if sd == 0 else 0) * 20
+            score -= adj_obst_pen(nx, ny) * 1.0
+            # If moving also reduces opponent's advantage, give extra credit
+            prev_sd = cheb(sx, sy, rx, ry)
+            prev_delta = cheb(ox, oy, rx, ry) - prev_sd
+            new_delta = od - sd
+            score += (new_delta - prev_delta) * 2
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(o) for o in (observation.get("obstacles", []) or []))
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def blocked(x, y):
+        return x < 0 or y < 0 or x >= w or y >= h or (x, y) in obstacles
+
+    def md(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    legal = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not blocked(nx, ny):
+            legal.append((dx, dy))
+    if not legal:
+        return [0, 0]
+
+    res = [tuple(r) for r in resources if tuple(r) not in obstacles]
+    best_move = legal[0]
+    best_val = -10**18
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        val = 0
+
+        # avoid getting too close to opponent
+        dO = md(nx, ny, ox, oy)
+        if dO == 0:
+            val -= 10000
+        else:
+            val -= 200 // dO
+
+        # prefer immediate resource
+        if (nx, ny) in obstacles:
+            val -= 10000
+        else:
+            val += 1200 if (nx, ny) in res else 0
+
+        # aim toward best resource by relative advantage
+        if res:
+            nearest_diff = None
+            for rx, ry in res:
+                dS = md(nx, ny, rx, ry)
+                dP = md(ox, oy, rx, ry)
+                diff = dP - dS  # positive means we are closer
+                if nearest_diff is None or diff > nearest_diff:
+                    nearest_diff = diff
+            # convert advantage into score, plus slight preference for closeness
+            val += (nearest_diff if nearest_diff is not None else 0) * 30
+            # also nudge toward some resource generally
+            d_any = min(md(nx, ny, rx, ry) for (rx, ry) in res)
+            val += max(0, 24 - d_any)
+
+        # slight penalty for near obstacles (local only)
+        for ax, ay in obstacles:
+            if abs(ax - nx) <= 1 and abs(ay - ny) <= 1 and (ax, ay) != (nx, ny):
+                val -= 5
+
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+    return [int(best_move[0]), int(best_move[1])]

@@ -1,0 +1,63 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    def dist(a, b, c, d):
+        dx = a - c
+        if dx < 0:
+            dx = -dx
+        dy = b - d
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    candidates = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_res = None
+    best_d = None
+    for (rx, ry) in resources:
+        d = dist(sx, sy, rx, ry)
+        if best_d is None or d < best_d or (d == best_d and (rx, ry) < best_res):
+            best_d, best_res = d, (rx, ry)
+
+    if best_res is None:
+        best = None
+        best_score = None
+        for dx, dy in candidates:
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                s = dist(nx, ny, ox, oy)
+                if best_score is None or s < best_score or (s == best_score and (dx, dy) < best):
+                    best_score, best = s, (dx, dy)
+        return [best[0], best[1]] if best is not None else [0, 0]
+
+    tx, ty = best_res
+    best_move = None
+    best_score = None
+    for dx, dy in candidates:
+        nx, ny = sx + dx, sy + dy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+            cur = dist(nx, ny, tx, ty)
+            opp_d = dist(nx, ny, ox, oy)
+            score = (cur, -opp_d, dx, dy)
+            if best_score is None or score < best_score:
+                best_score, best_move = score, (dx, dy)
+
+    return [best_move[0], best_move[1]] if best_move is not None else [0, 0]

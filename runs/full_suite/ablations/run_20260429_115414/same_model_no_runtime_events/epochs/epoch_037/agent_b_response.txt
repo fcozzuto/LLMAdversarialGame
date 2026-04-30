@@ -1,0 +1,170 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    if not resources:
+        return [0, 0]
+
+    try:
+        rem = int(observation.get("remaining_resource_count"))
+    except:
+        rem = len(resources)
+    late = rem <= 4
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def near_obs(x, y):
+        p = 0
+        for bx, by in obstacles:
+            if cheb(x, y, bx, by) <= 1:
+                p += 2
+        return p
+
+    def best_target():
+        if late:
+            # commit: nearest to us
+            best = resources[0]
+            bd = cheb(sx, sy, best[0], best[1])
+            for r in resources[1:]:
+                d = cheb(sx, sy, r[0], r[1])
+                if d < bd:
+                    bd = d
+                    best = r
+            return best
+        # contest: pick resource where we are relatively closer
+        best = resources[0]
+        bscore = None
+        for r in resources:
+            d_us = cheb(sx, sy, r[0], r[1])
+            d_op = cheb(ox, oy, r[0], r[1])
+            score = (d_op - d_us) - (0.2 * d_us)
+            if bscore is None or score > bscore:
+                bscore = score
+                best = r
+        return best
+
+    tx, ty = best_target()
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = [0, 0]
+    best_val = None
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            nx, ny = sx, sy  # engine would keep us in place
+        d = cheb(nx, ny, tx, ty)
+        collect = 0
+        if (nx, ny) == (tx, ty):
+            collect = 1000 if not late else 2000
+        # pressure: if we are moving away from opponent's advantage on this same target
+        d_op_after = cheb(ox, oy, tx, ty)
+        opp_pressure = (d_op_after - d)
+        val = collect + (200 - 10 * d) + opp_pressure - near_obs(nx, ny)
+        if best_val is None or val > best_val:
+            best_val = val
+            best_move = [dx, dy]
+
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sp = observation.get("self_position", [0, 0])
+    op = observation.get("opponent_position", [w - 1, h - 1])
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    if not resources:
+        return [0, 0]
+
+    rem = observation.get("remaining_resource_count")
+    try:
+        late = int(rem) <= 4
+    except:
+        late = False
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    dirs = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+    best = None
+    best_sc = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        dres = 10**9
+        for rx, ry in resources:
+            dd = cheb(nx, ny, rx, ry)
+            if dd < dres:
+                dres = dd
+
+        dop = cheb(nx, ny, ox, oy)
+        # Prefer getting closer to the nearest resource.
+        sc = -dres
+        # Avoid opponent; in late game, reduce avoidance a bit to contest.
+        sc += (dop if not late else dop * 0.3)
+        # Small preference to stay toward center-ish to break ties deterministically.
+        sc += -abs(nx - (w - 1) / 2) * 0.01 - abs(ny - (h - 1) / 2) * 0.01
+
+        if sc > best_sc or (sc == best_sc and (dx, dy) < best):
+            best_sc = sc
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

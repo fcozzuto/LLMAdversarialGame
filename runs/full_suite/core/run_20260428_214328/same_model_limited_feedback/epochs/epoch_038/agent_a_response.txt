@@ -1,0 +1,140 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation["resources"]
+    obstacles = set(tuple(p) for p in observation["obstacles"])
+    center = (w // 2, h // 2)
+
+    def dist(a, b):
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+    def best_target():
+        if resources:
+            best = None
+            for rx, ry in resources:
+                if (rx, ry) in obstacles:
+                    continue
+                md = dist((sx, sy), (rx, ry))
+                od = dist((ox, oy), (rx, ry))
+                # Prefer resources I can reach sooner; break ties by closer, then by position deterministically.
+                key = (-(1 if md <= od else 0), md - od, md, rx, ry)
+                if best is None or key < best[0]:
+                    best = (key, (rx, ry))
+            return best[1] if best else (center[0], center[1])
+        return (ox, oy)
+
+    tx, ty = best_target()
+
+    deltas = [(0,0), (1,0), (-1,0), (0,1), (0,-1), (1,1), (1,-1), (-1,1), (-1,-1)]
+    # Primary direction toward target
+    dx = 0 if tx == sx else (1 if tx > sx else -1)
+    dy = 0 if ty == sy else (1 if ty > sy else -1)
+
+    def valid_move(ddx, ddy):
+        nx, ny = sx + ddx, sy + ddy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            return False
+        if (nx, ny) in obstacles:
+            return False
+        return True
+
+    # Try preferred move first, then fallback among deterministic options toward target and slightly away from opponent.
+    preferred = (dx, dy)
+    order = []
+    if preferred in deltas:
+        order.append(preferred)
+    for d in deltas:
+        if d not in order and valid_move(d):
+            order.append(d)
+
+    # If preferred is invalid, choose best feasible by heuristic.
+    if not valid_move(*preferred):
+        chosen = None
+        for ddx, ddy in order:
+            nx, ny = sx + ddx, sy + ddy
+            score = (dist((nx, ny), (tx, ty)), -dist((nx, ny), (ox, oy)), nx, ny)
+            if chosen is None or score < chosen[0]:
+                chosen = (score, (ddx, ddy))
+        return [chosen[1][0], chosen[1][1]]
+
+    # Preferred move is valid; but if it would allow opponent to immediately take a resource nearer to them, deviate.
+    nx, ny = sx + dx, sy + dy
+    if resources:
+        # Check opponent "next step" advantage on any resource after our move (deterministic, shallow).
+        for rx, ry in resources:
+            if (rx, ry) in obstacles:
+                continue
+            my_after = dist((nx, ny), (rx, ry))
+            opp_after = dist((ox, oy), (rx, ry))  # opponent position unchanged this turn
+            if my_after > opp_after and my_after <= 1:
+                # Small adjustment: pick alternative that reduces gap
+                chosen = None
+                for ddx, ddy in order:
+                    if (ddx, ddy) == preferred:
+                        continue
+                    mx, my = sx + ddx, sy + ddy
+                    my_after2 = dist((mx, my), (rx, ry))
+                    opp_after2 = dist((ox, oy), (rx, ry))
+                    score = (my_after2 - opp_after2, dist((mx, my), (tx, ty)), mx, my)
+                    if chosen is None or score < chosen[0]:
+                        chosen = (score, (ddx, ddy))
+                if chosen is not None:
+                    return [chosen[1][0], chosen[1][1]]
+                break
+
+    return [dx, dy]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+
+    def cheb(a, b):
+        return abs(a[0] - b[0]) if abs(a[0] - b[0]) > abs(a[1] - b[1]) else abs(a[1] - b[1])
+
+    dirs = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+    best_move = [0, 0]
+    best_key = None
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        my_pos = (nx, ny)
+        my_to_opp = cheb(my_pos, (ox, oy))
+
+        if resources:
+            best_res_key = None
+            for rx, ry in resources:
+                if (rx, ry) in obstacles:
+                    continue
+                md = cheb(my_pos, (rx, ry))
+                od = cheb((ox, oy), (rx, ry))
+                # Prefer resources I can reach at least as fast; then maximize advantage; then closer.
+                key = (0 if md <= od else 1, md - od, -md, rx, ry)
+                if best_res_key is None or key < best_res_key:
+                    best_res_key = key
+            if best_res_key is None:
+                res_score = (1, 0)
+            else:
+                res_score = (best_res_key[0], best_res_key[1])
+            key = (res_score[0], res_score[1], my_to_opp, -nx, -ny)
+        else:
+            # No resources: try to reduce distance to opponent deterministically.
+            key = (1, my_to_opp, nx, ny)
+
+        if best_key is None or key < best_key:
+            best_key = key
+            best_move = [dx, dy]
+
+    return best_move

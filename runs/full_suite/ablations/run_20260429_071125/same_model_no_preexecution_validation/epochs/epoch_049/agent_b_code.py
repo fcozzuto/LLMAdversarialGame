@@ -1,0 +1,103 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set((int(p[0]), int(p[1])) for p in (observation.get("obstacles") or []))
+    resources = [(int(p[0]), int(p[1])) for p in (observation.get("resources") or [])]
+    if not resources:
+        return [0, 0]
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    INF = 10**9
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def valid(x, y):
+        return inb(x, y) and (x, y) not in obstacles
+
+    if not valid(sx, sy):
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if valid(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    dist = [[INF] * h for _ in range(w)]
+    q = [(sx, sy)]
+    dist[sx][sy] = 0
+    qi = 0
+    while qi < len(q):
+        x, y = q[qi]
+        qi += 1
+        nd = dist[x][y] + 1
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if valid(nx, ny) and nd < dist[nx][ny]:
+                dist[nx][ny] = nd
+                q.append((nx, ny))
+
+    best_t = None
+    best_d = INF
+    for tx, ty in resources:
+        d = dist[tx][ty]
+        if d < best_d:
+            best_d = d
+            best_t = (tx, ty)
+
+    if best_t is None or best_d >= INF:
+        # Fallback: move that maximizes progress away from obstacles and toward center/opponent deterministically
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        best_move = [0, 0]
+        best_score = -INF
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            score = -abs(nx - cx) - abs(ny - cy) - 0.1 * abs(nx - ox) - 0.1 * abs(ny - oy)
+            # Prefer staying if no better
+            if score > best_score:
+                best_score = score
+                best_move = [dx, dy]
+        return best_move
+
+    tx, ty = best_t
+    if (sx, sy) == (tx, ty):
+        return [0, 0]
+
+    curd = dist[sx][sy]
+    # Prefer move that strictly reduces BFS distance to target; tie-break deterministically
+    best_move = [0, 0]
+    best_nd = INF
+    tie = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        nd = dist[nx][ny]
+        if nd < best_nd:
+            best_nd = nd
+            best_move = [dx, dy]
+            tie = (nx, ny)
+        elif nd == best_nd:
+            # deterministic tie-break: smaller dx, then smaller dy, then closer to target by direct distance
+            if (dx, dy) < (best_move[0], best_move[1]):
+                best_move = [dx, dy]
+                tie = (nx, ny)
+
+    # If all reachable distances equal (shouldn't), do one step toward target by sign of delta
+    if best_nd == INF:
+        dx = 0 if tx == sx else (1 if tx > sx else -1)
+        dy = 0 if ty == sy else (1 if ty > sy else -1)
+        nx, ny = sx + dx, sy + dy
+        if valid(nx, ny):
+            return [dx, dy]
+        # otherwise pick any valid move with deterministic order
+        for mdx, mdy in moves:
+            nx, ny = sx + mdx, sy + mdy
+            if valid(nx, ny):
+                return [mdx, mdy]
+        return [0,

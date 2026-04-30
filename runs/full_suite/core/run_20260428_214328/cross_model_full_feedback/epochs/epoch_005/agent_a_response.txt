@@ -1,0 +1,153 @@
+def choose_move(observation):
+    w = observation["grid_width"]; h = observation["grid_height"]
+    sx, sy = observation["self_position"]; ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+    def man(ax, ay, bx, by): return abs(ax - bx) + abs(ay - by)
+    moves = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+
+    # Defensive swing: if opponent can grab a resource next move, rush that resource.
+    imminent = None
+    best_im = 10**9
+    for rx, ry in resources:
+        if (rx, ry) in obstacles: 
+            continue
+        od = man(ox, oy, rx, ry)
+        if od == 1:
+            sd = man(sx, sy, rx, ry)
+            key = (sd, rx, ry)
+            if key < (best_im, -1, -1):
+                best_im = sd
+                imminent = (rx, ry)
+    if imminent is not None:
+        tx, ty = imminent
+        dx = 0 if tx == sx else (1 if tx > sx else -1)
+        dy = 0 if ty == sy else (1 if ty > sy else -1)
+        # Choose a valid step toward (tx,ty); if blocked, pick best among remaining moves.
+        if dx != 0 and dy != 0:
+            primary = (dx, dy)
+        else:
+            primary = (dx, dy)
+        def ok(nx, ny): return inside(nx, ny) and (nx, ny) not in obstacles and (nx, ny) != (ox, oy)
+        nx, ny = sx + primary[0], sy + primary[1]
+        if ok(nx, ny): 
+            return [primary[0], primary[1]]
+        best = (0,0); bestv = -10**18
+        for mx, my in moves:
+            cx, cy = sx + mx, sy + my
+            if not ok(cx, cy): 
+                continue
+            v = -man(cx, cy, tx, ty) - 0.1 * man(ox, oy, tx, ty)
+            if v > bestv or (v == bestv and (mx, my) < best):
+                bestv = v; best = (mx, my)
+        return [best[0], best[1]]
+
+    # Offensive move: evaluate each legal move by (opponent distance - our distance) to the best resource,
+    # also discouraging being far from resources.
+    best_move = (0, 0); best_val = -10**18
+    for mx, my in moves:
+        nx, ny = sx + mx, sy + my
+        if not inside(nx, ny) or (nx, ny) in obstacles or (nx, ny) == (ox, oy):
+            continue
+        best_adv = -10**9
+        best_sd = 10**9
+        for rx, ry in resources:
+            if (rx, ry) in obstacles: 
+                continue
+            sd = man(nx, ny, rx, ry)
+            od = man(ox, oy, rx, ry)
+            adv = od - sd
+            if adv > best_adv or (adv == best_adv and (sd < best_sd or (sd == best_sd and (rx, ry) < (0,0)))):
+                best_adv = adv
+            if sd < best_sd:
+                best_sd = sd
+        if resources:
+            val = best_adv
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]; h = observation["grid_height"]
+    sx, sy = observation["self_position"]; ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obs_list = observation.get("obstacles", []) or []
+    obstacles = set(map(tuple, obs_list))
+    moves = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(ax, ay, bx, by):
+        d = ax - bx
+        if d < 0: d = -d
+        e = ay - by
+        if e < 0: e = -e
+        return d + e
+
+    def step_toward(tx, ty):
+        dx = 0 if tx == sx else (1 if tx > sx else -1)
+        dy = 0 if ty == sy else (1 if ty > sy else -1)
+        cand = [(dx, dy)]
+        # also allow axis-only to avoid diagonal issues
+        cand += [(dx, 0), (0, dy)]
+        for mx, my in cand:
+            nx, ny = sx + mx, sy + my
+            if inside(nx, ny) and (nx, ny) not in obstacles:
+                return [mx, my]
+        # fallback to any valid move
+        for mx, my in moves:
+            nx, ny = sx + mx, sy + my
+            if inside(nx, ny) and (nx, ny) not in obstacles:
+                return [mx, my]
+        return [0, 0]
+
+    best = None
+    best_score = -10**18
+    for rx, ry in resources:
+        if (rx, ry) in obstacles:
+            continue
+        sd = man(sx, sy, rx, ry)
+        od = man(ox, oy, rx, ry)
+        # Prefer resources that we can reach first; otherwise still consider closest.
+        win_bonus = 6 if sd <= od else 0
+        score = win_bonus - sd + 0.1 * (od - sd)
+        if score > best_score:
+            best_score = score
+            best = (rx, ry)
+
+    if best is None:
+        # No resources: move away from opponent if possible.
+        best_move = [0, 0]
+        best_val = -10**18
+        for mx, my in moves:
+            nx, ny = sx + mx, sy + my
+            if not inside(nx, ny) or (nx, ny) in obstacles:
+                continue
+            val = man(nx, ny, ox, oy)
+            if val > best_val:
+                best_val = val
+                best_move = [mx, my]
+        return best_move
+
+    rx, ry = best
+    # If opponent is about to reach a resource sooner, prioritize blocking that resource.
+    if man(ox, oy, rx, ry) <= 1:
+        return step_toward(rx, ry)
+
+    # Otherwise choose move that minimizes distance to target and keeps away from opponent.
+    best_move = [0, 0]
+    best_val = -10**18
+    for mx, my in moves:
+        nx, ny = sx + mx, sy + my
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        d_to = man(nx, ny, rx, ry)
+        d_opp = man(nx, ny, ox, oy)
+        # Slight tie-breaker toward reducing opponent access to the target.
+        val = -d_to + 0.2 * d_opp - 0.05 * man(ox, oy, rx, ry)
+        if val > best_val:
+            best_val = val
+            best_move = [mx, my]
+    return best_move

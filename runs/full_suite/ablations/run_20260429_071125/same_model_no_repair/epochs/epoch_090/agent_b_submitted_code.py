@@ -1,0 +1,89 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = int(observation["grid_width"]), int(observation["grid_height"])
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+    resources = []
+    for p in observation.get("resources") or []:
+        if p and len(p) >= 2:
+            r = (int(p[0]), int(p[1]))
+            if r not in obstacles:
+                resources.append(r)
+    if not resources:
+        return [0, 0]
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def min_dist_to_set(x, y, arr):
+        best = 10**9
+        for (rx, ry) in arr:
+            d = cheb(x, y, rx, ry)
+            if d < best: best = d
+        return best
+
+    obs_list = list(obstacles)
+    def obs_avoid_score(x, y):
+        if not obs_list:
+            return 0
+        best = 10**9
+        for (ax, ay) in obs_list:
+            d = cheb(x, y, ax, ay)
+            if d < best: best = d
+        if best <= 0: return -1000
+        if best == 1: return -35
+        if best == 2: return -10
+        return 0
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    # Deterministic move set: roughly toward opponent resources without randomness
+    moves = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    # Choose a main target set preference: resources where we are not behind (if any), else least-bad deficit
+    mydists = [(cheb(sx, sy, rx, ry), cheb(ox, oy, rx, ry), rx, ry) for (rx, ry) in resources]
+    my_lead = [t for t in mydists if t[0] <= t[1]]
+    if my_lead:
+        # Prefer smallest my distance, then smallest opponent distance
+        my_lead.sort(key=lambda t: (t[0], t[1], t[2], t[3]))
+        primary = (my_lead[0][2], my_lead[0][3])
+    else:
+        # Prefer target where opponent lead is smallest (opd - myd minimal), tie-break by my distance
+        mydists.sort(key=lambda t: (t[1]-t[0], t[0], t[1], t[2], t[3]))
+        primary = (mydists[0][2], mydists[0][3])
+
+    prx, pry = primary
+    my_min_any = min_dist_to_set(sx, sy, resources)
+    opp_min_any = min_dist_to_set(ox, oy, resources)
+
+    best_mv = (0, 0)
+    best_val = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+
+        my_to_pr = cheb(nx, ny, prx, pry)
+        opp_to_pr = cheb(ox, oy, prx, pry)
+        lead_improve = (my_to_pr - my_min_any)  # negative is good (closer than before)
+        # Main objective: reduce my distance to primary while keeping/possibly increasing opponent disadvantage
+        val = 0
+        val += -3.5 * my_to_pr
+        val += 1.8 * (opp_to_pr - my_to_pr)
+
+        # Secondary: reduce distance to any resource
+        my_min_new = min_dist_to_set(nx, ny, resources)
+        val += -1.2 * (my_min_new - my_min_any)
+
+        # Obstacle avoidance
+        val += obs_avoid_score(nx, ny)
+
+        # Corner/edge discipline to avoid drifting: nudge toward center if not already close
+        cx, cy = (w -

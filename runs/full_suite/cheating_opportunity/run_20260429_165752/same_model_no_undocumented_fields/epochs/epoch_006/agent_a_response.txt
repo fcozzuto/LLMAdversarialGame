@@ -1,0 +1,152 @@
+def choose_move(observation):
+    x, y = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    obs_set = set((int(a), int(b)) for a, b in obstacles)
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    if (x, y) in obs_set:
+        for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0), (0, 0)):
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) not in obs_set:
+                return [dx, dy]
+        return [0, 0]
+
+    res_list = [(int(r[0]), int(r[1])) for r in resources]
+    if (x, y) in res_list:
+        return [0, 0]
+
+    def local_obstacle_pen(nx, ny):
+        p = 0
+        for dx, dy in ((-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)):
+            ax, ay = nx + dx, ny + dy
+            if not inb(ax, ay) or (ax, ay) in obs_set:
+                p += 1
+        return p
+
+    def best_target_from(nx, ny):
+        # Choose resource that maximizes opponent-advantage tradeoff, then closeness.
+        best = None
+        best_key = None
+        for rx, ry in res_list:
+            ds = cheb(nx, ny, rx, ry)
+            do = cheb(ox, oy, rx, ry)
+            lead = do - ds  # positive means we are closer than opponent
+            # Prefer resources that are harder for opponent while not too hard for us.
+            key = (lead, -(ds), -rx, -ry, -local_obstacle_pen(rx, ry))
+            if best_key is None or key > best_key:
+                best_key = key
+                best = (rx, ry)
+        return best
+
+    cur_target = best_target_from(x, y)
+    if cur_target is None:
+        # No resources: deterministic drift toward center while avoiding obstacles.
+        cx, cy = (w - 1) // 2, (h - 1) // 2
+        best_move = (0, 0)
+        best_score = -10**9
+        for dx, dy in deltas:
+            nx, ny = x + dx, y + dy
+            if not inb(nx, ny) or (nx, ny) in obs_set:
+                continue
+            score = -cheb(nx, ny, cx, cy) - 2 * local_obstacle_pen(nx, ny) + cheb(nx, ny, ox, oy)
+            if score > best_score:
+                best_score = score
+                best_move = (dx, dy)
+        return [best_move[0], best_move[1]]
+
+    # Move selection: minimize our distance to best target, while keeping opponent at distance; avoid local dead-ends.
+    tx, ty = cur_target
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in deltas:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obs_set:
+            continue
+        ds = cheb(nx, ny, tx, ty)
+        do = cheb(ox, oy, tx, ty)
+        # Compare who is closer after we move (opponent assumed stationary this turn).
+        lead = do - ds
+        # Also keep far from opponent to reduce contest.
+        dist_opp = cheb(nx, ny, ox, oy)
+        score = 1000 * lead
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    x, y = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    obstacles = observation.get("obstacles", []) or []
+    obs_set = set((int(a), int(b)) for a, b in obstacles)
+
+    resources = observation.get("resources", []) or []
+    res_list = [(int(r[0]), int(r[1])) for r in resources]
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    best = None  # (primary, secondary, tx, ty, dx, dy)
+    if (x, y) in obs_set:
+        for dx, dy in [(0, 1), (0, -1), (1, 0), (-1, 0), (0, 0)]:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) not in obs_set:
+                return [dx, dy]
+        return [0, 0]
+
+    if (x, y) in res_list:
+        return [0, 0]
+
+    for dx, dy in deltas:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obs_set:
+            continue
+
+        if res_list:
+            md = 10**9
+            tx, ty = nx, ny
+            for rx, ry in res_list:
+                d = cheb(nx, ny, rx, ry)
+                if d < md:
+                    md = d
+                    tx, ty = rx, ry
+            # Prefer smaller resource distance; then prefer being farther from opponent
+            od = cheb(nx, ny, ox, oy)
+            cand = (md, -od, tx, ty, dx, dy)
+        else:
+            # No resources: keep away from opponent deterministically
+            od = cheb(nx, ny, ox, oy)
+            cand = (-od, 0, 0, 0, dx, dy)
+
+        if best is None or cand < best:
+            best = cand
+
+    return [best[4], best[5]] if best is not None else [0, 0]

@@ -1,0 +1,56 @@
+def choose_move(observation):
+    W = observation.get("grid_width", 8) or 8
+    H = observation.get("grid_height", 8) or 8
+    sx, sy = observation.get("self_position", [0, 0]) or [0, 0]
+    ox, oy = observation.get("opponent_position", [W - 1, H - 1]) or [W - 1, H - 1]
+    obstacles = set()
+    for p in (observation.get("obstacles", []) or []):
+        if p and len(p) >= 2:
+            x, y = p[0], p[1]
+            if 0 <= x < W and 0 <= y < H:
+                obstacles.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < W and 0 <= y < H
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    resources = []
+    for r in (observation.get("resources", []) or []):
+        if r and len(r) >= 2:
+            x, y = r[0], r[1]
+            if inb(x, y) and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    legal = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            legal.append((dx, dy))
+    if not legal:
+        return [0, 0]
+
+    opp_d = man(sx, sy, ox, oy)
+    rem = observation.get("remaining_resource_count", 0) or 0
+    urgency = 3 if rem <= 4 else 1
+    best = None
+    bestv = None
+
+    if resources:
+        for dx, dy in legal:
+            nx, ny = sx + dx, sy + dy
+            nd = min(man(nx, ny, rx, ry) for rx, ry in resources)
+            od = min(man(ox, oy, rx, ry) for rx, ry in resources)
+            v = (urgency * -nd) + (0.8 * (od - man(ox, oy, nx, ny))) + (0.01 * (opp_d - man(nx, ny, ox, oy)))
+            if best is None or v > bestv or (v == bestv and (dx, dy) < best):
+                best, bestv = (dx, dy), v
+        return [int(best[0]), int(best[1])]
+
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        v = -man(nx, ny, ox, oy) + (0.01 * (dx == 0 and dy == 0))
+        if best is None or v > bestv or (v == bestv and (dx, dy) < best):
+            best, bestv = (dx, dy), v
+    return [int(best[0]), int(best[1])]

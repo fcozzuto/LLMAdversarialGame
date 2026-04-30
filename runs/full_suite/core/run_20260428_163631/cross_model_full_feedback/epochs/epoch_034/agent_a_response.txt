@@ -1,0 +1,155 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx = int(sx); sy = int(sy); ox = int(ox); oy = int(oy)
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+
+    obst = set()
+    for p in (observation.get("obstacles", []) or []):
+        try:
+            x, y = int(p[0]), int(p[1])
+            if inb(x, y): obst.add((x, y))
+        except: 
+            pass
+
+    resources = []
+    for r in (observation.get("resources", []) or []):
+        try:
+            x, y = int(r[0]), int(r[1])
+            if inb(x, y) and (x, y) not in obst:
+                resources.append((x, y))
+        except:
+            pass
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    legal = []
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obst:
+            legal.append((dx, dy))
+    if not legal:
+        return [0, 0]
+
+    def cheb(a, b):
+        ax, ay = a; bx, by = b
+        dx = ax - bx; dy = ay - by
+        if dx < 0: dx = -dx
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def dist(a, b):
+        ax, ay = a; bx, by = b
+        return abs(ax - bx) + abs(ay - by)
+
+    # If a few resources exist, greedily compete for the one with best "reach lead".
+    # Otherwise, push toward opponent side while keeping some separation from them.
+    my = (sx, sy)
+    opp = (ox, oy)
+    best = None
+    best_val = None
+
+    if resources:
+        # Choose candidate resource(s) deterministically by minimal cheb then dist then coordinates.
+        candidates = sorted(resources, key=lambda r: (cheb(my, r), dist(my, r), r[0], r[1]))[:4]
+        for dx, dy in legal:
+            nx, ny = sx + dx, sy + dy
+            pos = (nx, ny)
+            # Prefer moving into a resource; then maximize (opp_dist - my_dist) lead, with slight safety.
+            val = 0
+            for r in candidates:
+                if pos == r:
+                    val = 10_000
+                    break
+                my_d = cheb(pos, r)
+                opp_d = cheb(opp, r)
+                lead = opp_d - my_d  # positive => you're closer (good)
+                # Encourage nearer target overall; penalize getting too close to opponent.
+                val += (lead * 120) - (my_d * 20) - (dist(pos, opp) * 2)
+            # Tie-break: closer to best candidate by cheb, then lexicographic move
+            key = (val, -cheb(pos, candidates[0]), -dist(pos, candidates[0]), -abs((nx + ny) - (sx + sy)), -dx, -dy)
+            if best_val is None or key > best_val:
+                best_val = key
+                best = (dx, dy)
+    else:
+        # No resources visible: move to opponent direction; avoid collisions with minimal separation.
+        # Use deterministic "push" vector toward opponent with cheb minimization.
+        for dx, dy in legal:
+            pos = (sx + dx, sy + dy)
+            # Main goal: reduce cheb to opponent.
+            goal = cheb(pos, opp)
+            # Secondary: keep at least 2 cheb distance if possible.
+            sep = cheb(pos, opp)
+            val = (-goal * 300) - (0 if sep >= 2 else (2 - sep) * 500)
+            # Tertiary: prefer staying on grid center-ish to avoid obstacles edges.
+            center = (w // 2, h // 2)
+            val -= cheb(pos, center) * 2
+            key = (val, -goal, -sep, dx, dy)
+            if best_val is None or key > best_val:
+                best_val = key
+                best = (dx, dy)
+
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx = int(sx); sy = int(sy); ox = int(ox); oy = int(oy)
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+
+    obst = set()
+    for p in (observation.get("obstacles", []) or []):
+        try:
+            x, y = int(p[0]), int(p[1])
+            if inb(x, y): obst.add((x, y))
+        except: 
+            pass
+
+    resources = []
+    for r in (observation.get("resources", []) or []):
+        try:
+            x, y = int(r[0]), int(r[1])
+            if inb(x, y) and (x, y) not in obst: resources.append((x, y))
+        except:
+            pass
+
+    deltas = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    legal = [(dx, dy) for dx, dy in deltas if inb(sx + dx, sy + dy) and (sx + dx, sy + dy) not in obst]
+    if not legal: 
+        return [0, 0]
+
+    def manh(a, b): return abs(a[0]-b[0]) + abs(a[1]-b[1])
+
+    opp = (ox, oy)
+    best = None
+    bestv = -10**18
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        me = (nx, ny)
+        # If resources exist, prefer those we can reach no later than opponent; otherwise drift to maximize separation.
+        if resources:
+            dmin = 10**9
+            dopp = 10**9
+            for rx, ry in resources:
+                rr = (rx, ry)
+                d1 = manh(me, rr)
+                d2 = manh(opp, rr)
+                if d1 < dmin: dmin = d1
+                if d2 < dopp: dopp = d2
+            # Encourage getting closer to nearest resource; discourage opponent being closer to same region.
+            # Cheaper reach control term uses nearest resource.
+            v = -2 * dmin + (dopp - dmin)
+        else:
+            v = manh(me, opp)  # maximize distance when no resources
+        # Tie-break deterministically toward staying (0,0), then smaller dx, then smaller dy
+        if best is None or v > bestv or (v == bestv and (dx, dy) < best):
+            bestv = v
+            best = (dx, dy)
+    return [int(best[0]), int(best[1])]

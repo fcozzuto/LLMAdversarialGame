@@ -1,0 +1,57 @@
+def choose_move(observation):
+    w = observation.get("grid_width")
+    h = observation.get("grid_height")
+    sp = observation.get("self_position") or (0, 0)
+    op = observation.get("opponent_position") or (0, 0)
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    resources = observation.get("resources") or []
+    obs_list = observation.get("obstacles") or []
+    obstacles = set()
+    for p in obs_list:
+        try:
+            obstacles.add((int(p[0]), int(p[1])))
+        except Exception:
+            pass
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    if resources:
+        best = None
+        for rx, ry in resources:
+            myd = cheb(sx, sy, rx, ry)
+            od = cheb(ox, oy, rx, ry)
+            adv = myd - od
+            # Prefer resources we are closer to; tie-break by smaller my distance.
+            key = (0 if adv <= 0 else 1, myd)
+            if best is None or key < best[0]:
+                best = (key, rx, ry)
+        tx, ty = best[1], best[2]
+    else:
+        # No resources: go to center-ish deterministically.
+        tx, ty = w // 2, h // 2
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    bestm = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        dist_to = cheb(nx, ny, tx, ty)
+        dist_opp = cheb(nx, ny, ox, oy)
+        # Primary: reduce distance to target; Secondary: increase distance from opponent.
+        key = (dist_to, -dist_opp, abs(dx) + abs(dy))
+        if bestm is None or key < bestm[0]:
+            bestm = (key, dx, dy)
+
+    if bestm is None:
+        return [0, 0]
+    return [int(bestm[1]), int(bestm[2])]

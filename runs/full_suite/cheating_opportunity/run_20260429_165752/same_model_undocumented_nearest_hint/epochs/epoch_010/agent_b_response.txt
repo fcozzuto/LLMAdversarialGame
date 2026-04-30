@@ -1,0 +1,183 @@
+def choose_move(observation):
+    W = int(observation.get("grid_width", 8) or 8)
+    H = int(observation.get("grid_height", 8) or 8)
+    s = observation.get("self_position", [0, 0]) or [0, 0]
+    o = observation.get("opponent_position", [W - 1, H - 1]) or [W - 1, H - 1]
+    sx, sy, ox, oy = int(s[0]), int(s[1]), int(o[0]), int(o[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < W and 0 <= y < H:
+                obstacles.add((x, y))
+
+    resources = []
+    for r in observation.get("resources", []) or []:
+        if r and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if 0 <= x < W and 0 <= y < H and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    def inb(x, y):
+        return 0 <= x < W and 0 <= y < H
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def legal_moves(x, y):
+        out = []
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                out.append((dx, dy))
+        return out
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    def opp_step(tx, ty):
+        # deterministic greedy for opponent: minimize distance to closest resource, with tie-break to reduce distance to our position
+        if not resources:
+            return (0, 0)
+        best = None
+        best_key = None
+        for dx, dy in legal_moves(tx, ty):
+            nx, ny = tx + dx, ty + dy
+            md = 10**9
+            for rx, ry in resources:
+                d = man(nx, ny, rx, ry)
+                if d < md:
+                    md = d
+            key = (md, man(nx, ny, sx, sy), dx, dy)
+            if best_key is None or key < best_key:
+                best_key = key
+                best = (dx, dy)
+        return best if best is not None else (0, 0)
+
+    legal = legal_moves(sx, sy)
+    if not legal:
+        return [0, 0]
+
+    rem = int(observation.get("remaining_resource_count", 0) or 0)
+    endgame = rem <= 4
+    # if endgame, focus hard on capturing closest resource; otherwise also try to prevent opponent from being closer on key resources
+    w_self = 3.0 if endgame else 1.3
+    w_rel = 5.0 if endgame else 2.2
+    w_opp_future = 1.1 if endgame else 0.6
+
+    # Precompute my-candidate next positions to avoid recomputation
+    best_move = None
+    best_score = None
+
+    # Opponent projected next position depends on our move only through our position; recompute each candidate.
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        # If we move onto a resource, heavily reward.
+        onto = 1.0 if (nx, ny) in set(resources) else 0.0
+
+        # Evaluate best contested resource: maximize (op_dist - my_dist) for the resource opponent is best at,
+        # but also ensure we can reach something soon.
+        my_best = 10**9
+        # For opponent projection, assume opponent also acts greedily this turn.
+        odx, ody = opp_step(ox, oy)
+        onx, ony = ox + odx, oy + ody
+
+        # If opponent also lands on a resource, we should prioritize blocking by relative progress.
+        opp_onto = 1.0 if (onx, ony) in set(resources) else 0.0
+
+        my_key_dist = 10**9
+        rel_best = -10**9
+        opp_future_gap = -10**9
+
+        for rx, ry in resources:
+            dm = man(nx, ny, rx, ry)
+            do = man(onx, ony, rx, ry)
+            if dm < my_best:
+                my_best = dm
+            gap = do - dm  # positive means we are closer than opponent
+            # key choice: focus on resources where we are relatively ahead
+            if gap > rel_best:
+                rel_best = gap
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    W = int(observation.get("grid_width") or 8)
+    H = int(observation.get("grid_height") or 8)
+    s = observation.get("self_position") or [0, 0]
+    o = observation.get("opponent_position") or [W - 1, H - 1]
+    sx, sy = int(s[0]), int(s[1])
+    ox, oy = int(o[0]), int(o[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < W and 0 <= y < H:
+                obstacles.add((x, y))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if r and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if 0 <= x < W and 0 <= y < H and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < W and 0 <= y < H and (x, y) not in obstacles
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    best = (10**9, -10**9, (0, 0))
+    has_res = bool(resources)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if has_res:
+            # Prefer resources where we are at least as close as opponent; otherwise, just nearest.
+            my_first = 10**9
+            opp_first = 10**9
+            for rx, ry in resources:
+                dm = man(nx, ny, rx, ry)
+                do = man(ox, oy, rx, ry)
+                if dm <= do:
+                    if dm < my_first:
+                        my_first, opp_first = dm, do
+            if my_first == 10**9:
+                for rx, ry in resources:
+                    dm = man(nx, ny, rx, ry)
+                    do = man(ox, oy, rx, ry)
+                    if dm < my_first:
+                        my_first, opp_first = dm, do
+            # Lower distance to target, lower opponent distance, and keep away from opponent.
+            score1 = my_first
+            score2 = opp_first
+            score3 = man(nx, ny, ox, oy)
+            key = (score1, score2, -score3)
+        else:
+            # No resources: move away from opponent deterministically.
+            d2 = man(nx, ny, ox, oy)
+            key = ( -d2, 0, 0 )
+        if key < best[:3] if isinstance(key, tuple) else False:
+            pass
+        # Compare with fixed tuple ordering
+        if key < best[0:3]:
+            best = (key[0], key[2] if len(key) > 2 else 0, (dx, dy))
+        else:
+            # handle tuple lengths consistently without extra imports
+            if has_res:
+                # compare using computed tuple directly
+                if key[0] < best[0] or (key[0] == best[0] and key[2] > best[1]):
+                    best = (key[0], key[2], (dx, dy))
+            else:
+                if -key[0] > best[1]:
+                    best = (key[0], -key[0], (dx, dy))
+
+    dx, dy = best[2]
+    if not inb(sx + dx, sy + dy):
+        return [0, 0]
+    return [int(dx), int(dy)]

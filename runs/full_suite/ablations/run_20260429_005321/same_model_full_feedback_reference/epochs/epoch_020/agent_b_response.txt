@@ -1,0 +1,147 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def mindist(px, py, targets):
+        if not targets:
+            return 10**9
+        best = 10**9
+        for tx, ty in targets:
+            d = abs(px - tx) + abs(py - ty)
+            if d < best:
+                best = d
+        return best
+
+    res_set = set(resources)
+    # If no resources, drift toward opponent side (deterministic)
+    if not resources:
+        target_x = w - 1 if sx <= ox else 0
+        target_y = h - 1 if sy <= oy else 0
+        best_move = (0, 0)
+        best_d = 10**9
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            d = abs(nx - target_x) + abs(ny - target_y)
+            if d < best_d or (d == best_d and (dx, dy) < best_move):
+                best_d = d
+                best_move = (dx, dy)
+        return [int(best_move[0]), int(best_move[1])]
+
+    # Main heuristic: minimize our nearest-resource distance while maximizing opponent delay
+    # and strongly prefer stepping onto a resource.
+    best_move = (0, 0)
+    best_score = -10**18
+    nearest_res_for_op = None
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        d_self = mindist(nx, ny, resources)
+        d_op = mindist(ox, oy, resources)
+
+        # Compute opponent's nearest distance after this move as if we don't move opponent (static),
+        # but include a small "competition pressure" term based on relative positioning to the closest target.
+        # Choose a representative target for this pressure: nearest to opponent currently; deterministic tie-break.
+        if nearest_res_for_op is None:
+            best = None
+            bestd = 10**9
+            for tx, ty in resources:
+                dd = abs(ox - tx) + abs(oy - ty)
+                if dd < bestd or (dd == bestd and (tx, ty) < best):
+                    bestd = dd
+                    best = (tx, ty)
+            nearest_res_for_op = best
+        tx, ty = nearest_res_for_op
+
+        # If we are closer to that key target than the opponent, we likely "own" it soon.
+        rel = (abs(nx - tx) + abs(ny - ty)) - (abs(ox - tx) + abs(oy - ty))
+
+        score = 0
+        # Prefer capturing immediately
+        if (nx, ny) in res_set:
+            score += 10000
+        # Primary: get closer
+        score += -6 * d_self
+        # Secondary: if we improve, do more; if we move away, penalize
+        d_self_now = mindist(sx, sy, resources)
+        score += 2 * (d_self_now - d_self)
+        # Competition: lower relative distance to key target helps
+        score += -1.5 * rel
+        #
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    inb = lambda x, y: 0 <= x < w and 0 <= y < h
+
+    if resources:
+        tx, ty = min(resources, key=lambda r: abs(sx - r[0]) + abs(sy - r[1]))
+    else:
+        tx, ty = ox, oy
+
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        # Prefer reducing distance to target; slight preference for continuing forward toward it
+        dist = abs(nx - tx) + abs(ny - ty)
+        # If opponent is near target side, add a tiny push toward opponent to break ties
+        opp_push = -0.01 * (abs(nx - ox) + abs(ny - oy))
+        score = -dist + opp_push
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    return [int(dx), int(dy)]

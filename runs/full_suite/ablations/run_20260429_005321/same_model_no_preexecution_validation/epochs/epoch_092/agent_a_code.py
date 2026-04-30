@@ -1,0 +1,79 @@
+def choose_move(observation):
+    w = int(observation["grid_width"]); h = int(observation["grid_height"])
+    sx, sy = int(observation["self_position"][0]), int(observation["self_position"][1])
+    ox, oy = int(observation["opponent_position"][0]), int(observation["opponent_position"][1])
+    obstacles = set((int(p[0]), int(p[1])) for p in (observation.get("obstacles") or []))
+    resources = [(int(p[0]), int(p[1])) for p in (observation.get("resources") or [])]
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def free(x, y): return inb(x, y) and (x, y) not in obstacles
+    def bfs(start):
+        INF = 10**8
+        dist = [[INF] * h for _ in range(w)]
+        if not free(start[0], start[1]): return dist
+        x0, y0 = start
+        dist[x0][y0] = 0
+        qx = [x0]; qy = [y0]; qi = 0
+        while qi < len(qx):
+            x, y = qx[qi], qy[qi]; qi += 1
+            nd = dist[x][y] + 1
+            for dx, dy in dirs:
+                nx, ny = x + dx, y + dy
+                if free(nx, ny) and nd < dist[nx][ny]:
+                    dist[nx][ny] = nd
+                    qx.append(nx); qy.append(ny)
+        return dist
+    myd = bfs((sx, sy))
+    opd = bfs((ox, oy))
+
+    # If resources unknown/empty, drift toward opponent side by minimizing distance to center bias.
+    if not resources:
+        best = (0, 0); bestv = 10**18
+        tx, ty = (w - 1 if ox > (w - 1) // 2 else 0), (h - 1 if oy > (h - 1) // 2 else 0)
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not free(nx, ny): continue
+            v = abs(nx - tx) + abs(ny - ty) + 0.2 * ((nx - (w-1)/2.0)**2 + (ny - (h-1)/2.0)**2)
+            if v < bestv: bestv = v; best = (dx, dy)
+        return [int(best[0]), int(best[1])]
+
+    # Choose a target resource where we are strictly closer than opponent when possible.
+    best_target = None
+    best_key = None
+    for rx, ry in resources:
+        d1 = myd[rx][ry]; d2 = opd[rx][ry]
+        if d1 >= 10**7:  # unreachable
+            continue
+        # Key: prefer winning resources; then faster; then higher "density" proxy (closer to opponent path length)
+        win = 1 if d1 < d2 else 0
+        # Secondary: avoid targets behind obstacles by preferring smaller d1 and smaller d2 when close.
+        key = (-win, d1, d2, abs(rx - (w-1)/2.0) + abs(ry - (h-1)/2.0))
+        if best_key is None or key < best_key:
+            best_key = key
+            best_target = (rx, ry)
+
+    if best_target is None:
+        # Fallback: go toward any reachable resource.
+        tx, ty = resources[0][0], resources[0][1]
+        best_target = (tx, ty)
+        for rx, ry in resources:
+            if myd[rx][ry] < myd[tx][ty]:
+                tx, ty = rx, ry
+        best_target = (tx, ty)
+
+    tx, ty = best_target
+
+    # Select move that greedily reduces our distance to target, but avoids giving opponent an immediate advantage.
+    best_move = (0, 0); bestv = 10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny):
+            continue
+        my_next = myd[nx][ny]
+        opp_next = opd[nx][ny]
+        # Estimate: after we move, assume opponent also pressures target; prefer keeping our lead.
+        d1_now = myd[tx][ty]
+        d2_now = opd[tx][ty]
+        # If opponent can reach target very soon, value slightly favor moves that increase separation in distance-to-target.
+        lead_now = (d2_now - d1_now)
+        lead_next = (d2_now - my_next)

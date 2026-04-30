@@ -1,0 +1,156 @@
+def choose_move(observation):
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    resources = [tuple(r) for r in observation.get("resources", [])]
+    obstacles = set(tuple(o) for o in observation.get("obstacles", []))
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    if (x, y) in resources:
+        return [0, 0]
+
+    # If opponent is close, try to disrupt by moving toward their next position (greedy) when we can't secure a clear resource.
+    op_next = (ox, oy)
+    best_dx = (0, 0)
+    if resources:
+        target = min(resources, key=lambda r: (cheb(ox, oy, r[0], r[1]), r[0], r[1]))
+        tx, ty = target
+        best_d = 10**9
+        for dx, dy in moves:
+            nx, ny = ox + dx, oy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            d = cheb(nx, ny, tx, ty)
+            if d < best_d or (d == best_d and (dx, dy) < best_dx):
+                best_d = d
+                op_next = (nx, ny)
+                best_dx = (dx, dy)
+
+    best_move = (0, 0)
+    best_val = -10**18
+
+    # Evaluate move by whether we can secure a resource earlier, plus a small bias to reduce our distance.
+    # Also include obstacle proximity penalty via a light "step into blocked-adjacent" discouragement.
+    def step_pen(nx, ny):
+        if (nx, ny) in obstacles:
+            return 10**6
+        p = 0
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            ax, ay = nx + dx, ny + dy
+            if inb(ax, ay) and (ax, ay) in obstacles:
+                p += 1
+        return p
+
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        my_best = (10**9, None)  # (gap_adv, resource)
+        for rx, ry in resources:
+            ds = cheb(nx, ny, rx, ry)
+            do = cheb(ox, oy, rx, ry)
+            gap = do - ds  # positive means we are closer to this resource
+            # Prefer resources we can reach at least as fast; break ties by faster ds, then stable coords.
+            if my_best[1] is None:
+                my_best = (gap, (rx, ry, ds, do))
+            else:
+                cur_gap = my_best[0]
+                cur_ds = my_best[1][2]
+                cur = my_best[1]
+                better = (gap > cur_gap) or (gap == cur_gap and (ds < cur_ds or (ds == cur_ds and (rx, ry) < (cur[0], cur[1]))))
+                if better:
+                    my_best = (gap, (rx, ry, ds, do))
+
+        # Base value: secure early if gap positive; otherwise head to closest resource.
+        if resources:
+            gap, info = my_best
+            rx, ry, ds, do = info
+            # If we can't secure, we might still deny by approaching opponent (only when no good gap exists).
+            if gap > 0:
+                # Prefer larger advantage and lower ds.
+                val = 1000 * gap - 3 * ds - 0.5 * step_pen(nx, ny)
+            else:
+                # No clear win on resources: go for our nearest but add deny pressure if opponent is moving toward a resource.
+                nearest_ds = min(cheb(nx, ny, r[0], r[1]) for r in resources)
+                deny = -0.7 * cheb(nx, ny, op_next[0], op_next[1])
+                val = 50 * (-nearest_ds) + deny - 0.5 * step_pen(nx, ny)
+        else:
+            # No
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    resources = [tuple(r) for r in observation.get("resources", [])]
+    obstacles = set(tuple(o) for o in observation.get("obstacles", []))
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    best = (10**9, 0, 0)
+    chose_resource = False
+    if resources:
+        chose_resource = True
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            target = min(resources, key=lambda r: (cheb(nx, ny, r[0], r[1]), r[0], r[1]))
+            d = cheb(nx, ny, target[0], target[1])
+            score = d * 2 + cheb(nx, ny, ox, oy)
+            if score < best[0] or (score == best[0] and (dx, dy) < (best[1], best[2])):
+                best = (score, dx, dy)
+
+    if not chose_resource:
+        # No resources visible: move to increase distance from opponent while staying safe
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            score = -cheb(nx, ny, ox, oy)
+            if score < best[0] or (score == best[0] and (dx, dy) < (best[1], best[2])):
+                best = (score, dx, dy)
+
+    if chose_resource:
+        # If we are already on a resource, stay (or nearest safe step to it if blocked)
+        if (x, y) in resources:
+            return [0, 0]
+        dx, dy = best[1], best[2]
+        nx, ny = x + dx, y + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            return [dx, dy]
+
+    # Fallback: any legal move, deterministic
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            return [dx, dy]
+    return [0, 0]

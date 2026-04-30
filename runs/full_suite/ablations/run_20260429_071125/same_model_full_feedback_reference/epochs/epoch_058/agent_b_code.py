@@ -1,0 +1,73 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+    obs = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+    resources = []
+    for p in observation.get("resources") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if ok(x, y):
+                resources.append((x, y))
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+    def scores_order():
+        sc = observation.get("scores")
+        if isinstance(sc, (list, tuple)) and len(sc) >= 2:
+            return sc[0], sc[1]
+        if isinstance(sc, dict):
+            s = sc.get("self", sc.get("player", sc.get("us", 0)))
+            o = sc.get("opponent", sc.get("enemy", sc.get("them", 0)))
+            return s, o
+        return 0, 0
+    self_sc, opp_sc = scores_order()
+    prefer_avoid_opp = self_sc <= opp_sc
+    if not ok(sx, sy):
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if ok(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+    if resources:
+        best = resources[0]
+        bestd = cheb(sx, sy, best[0], best[1])
+        for r in resources[1:]:
+            d = cheb(sx, sy, r[0], r[1])
+            if d < bestd or (d == bestd and (r[0], r[1]) < best):
+                bestd, best = d, r
+        tx, ty = best
+    else:
+        tx, ty = ox, oy
+    best_move = [0, 0]
+    best_key = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        d_to = cheb(nx, ny, tx, ty)
+        d_opp = cheb(nx, ny, ox, oy)
+        lead = 0
+        if resources:
+            key = (d_to, d_opp if prefer_avoid_opp else -d_opp, dx, dy)
+        else:
+            key = (d_to if prefer_avoid_opp else -d_to, d_opp if prefer_avoid_opp else -d_opp, dx, dy)
+            lead = 0
+        if best_key is None or key < best_key:
+            best_key = key
+            best_move = [dx, dy]
+    return best_move

@@ -1,0 +1,154 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    # If no resources, drift toward center and keep away from obstacles/opponent.
+    if not resources:
+        tx, ty = (w - 1) / 2.0, (h - 1) / 2.0
+        best = None
+        bestv = None
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not in_bounds(nx, ny) or (nx, ny) in obstacles:
+                continue
+            v = (dist((nx, ny), (tx, ty)), dist((nx, ny), (ox, oy)))
+            if bestv is None or v < bestv:
+                bestv, best = v, (dx, dy)
+        return list(best if best is not None else (0, 0))
+
+    opp_dist = lambda r: dist((ox, oy), r)
+    self_dist = lambda r: dist((sx, sy), r)
+
+    # Choose target: prefer closer resources and penalize those the opponent is closer to.
+    # Alternate slight interception behavior to create materially different targeting.
+    chase = (observation.get("turn_index", 0) % 2 == 0)
+    if chase:
+        best_r = None
+        best_score = None
+        for r in resources:
+            if tuple(r) in obstacles:
+                continue
+            rs = tuple(r)
+            ds = self_dist(rs)
+            do = opp_dist(rs)
+            # Small bias against opponent proximity to avoid being "shadowed".
+            score = ds - 0.85 * do
+            # Prefer nearer resources when margins are similar.
+            score += 0.02 * ds
+            if best_score is None or score < best_score:
+                best_score, best_r = score, rs
+    else:
+        # Interception: move toward a point near opponent's closest resource if that is actionable.
+        # Approx: target is opponent position if resources are contested; else fallback to normal.
+        # Find contested resource opponent is best at, and move toward it from our side.
+        closest_opp_r = None
+        closest_opp_d = None
+        for r in resources:
+            if tuple(r) in obstacles:
+                continue
+            rs = tuple(r)
+            d = opp_dist(rs)
+            if closest_opp_d is None or d < closest_opp_d:
+                closest_opp_d, closest_opp_r = d, rs
+        # If opponent is much closer to that resource, intercept by heading there.
+        if closest_opp_r is not None and (self_dist(closest_opp_r) - closest_opp_d) > 2:
+            best_r = closest_opp_r
+        else:
+            best_r = min((tuple(r) for r in resources if tuple(r) not in obstacles),
+                          key=lambda rr: self_dist(rr) - 0.85 * opp_dist(rr))
+
+    tx, ty = best_r
+
+    # Pick move that best reduces distance to target while remaining valid.
+    best_move = (0, 0)
+    best_val = None
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not in_bounds(nx, ny) or (nx, ny) in obstacles:
+            continue
+        d_to_t = dist((nx, ny), (tx, ty))
+        d_from_o = dist((nx, ny), (ox, oy))
+        # If adjacent to opponent, slightly prioritize staying farther to reduce immediate contest swings.
+        penalty = -0.15 * d_from_o if d_from_o <= 2 else 0.0
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    resources = observation.get("resources") or []
+    obs = observation.get("obstacles") or []
+    obstacles = set(map(tuple, obs))
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(x1, y1, x2, y2):
+        d = x1 - x2
+        e = y1 - y2
+        if d < 0:
+            d = -d
+        if e < 0:
+            e = -e
+        return d + e
+
+    def best_valid_neighbors():
+        best = []
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if in_bounds(nx, ny) and (nx, ny) not in obstacles:
+                best.append((dx, dy, nx, ny))
+        return best
+
+    nbrs = best_valid_neighbors()
+    if not nbrs:
+        return [0, 0]
+
+    if not resources:
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        best = None
+        bestv = None
+        for dx, dy, nx, ny in nbrs:
+            v = dist(nx, ny, ox, oy) - 0.01 * dist(nx, ny, cx, cy)
+            if bestv is None or v > bestv:
+                bestv, best = v, (dx, dy)
+        return list(best)
+
+    resources_t = [tuple(r) for r in resources]
+    resources_t.sort()
+
+    best = None
+    bestv = None
+    for dx, dy, nx, ny in nbrs:
+        v = 0.0
+        dself = min(dist(nx, ny, rx, ry) for rx, ry in resources_t)
+        dov = min(dist(ox, oy, rx, ry) for rx, ry in resources_t)
+        v = dself - 0.6 * dov
+
+        # Small deterministic tie-break: prefer moves that get closer to the closest resource.
+        r0 = resources_t[0]
+        v += 0.001 * dist(nx, ny, r0[0], r0[1])
+
+        # Prevent drifting into likely opponent adjacency.
+        v += 0.05 * dist(nx, ny, ox, oy)
+        if bestv is None or v < bestv:
+            bestv, best = v, (dx, dy)
+
+    return list(best if best is not None else (0, 0))

@@ -1,0 +1,156 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set((p[0], p[1]) for p in (observation.get("obstacles", []) or []))
+    deltas = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def md(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    if not resources:
+        best = None
+        bestm = (0, 0)
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inside(nx, ny):
+                continue
+            d = md(nx, ny, ox, oy)
+            key = (d, dx == 0 and dy == 0, nx + ny)
+            if best is None or key < best:
+                best = key
+                bestm = (dx, dy)
+        return [int(bestm[0]), int(bestm[1])]
+
+    best_key = None
+    bestm = (0, 0)
+
+    # Directional tie-break: prefer moving toward resources that are on the same half as resources
+    self_half = 0 if sx < w // 2 else 1
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+
+        # Evaluate best target after this move
+        move_score = -10**9
+        closest_dist = None
+        for rx, ry in resources:
+            d_our = md(nx, ny, rx, ry)
+            d_opp = md(ox, oy, rx, ry)
+
+            # Advantage: how much closer we are than opponent
+            adv = d_opp - d_our
+
+            # Encourage reaching soon; strongly prefer becoming strictly closer
+            reach_bonus = 0
+            if d_our <= d_opp:
+                reach_bonus += 8
+                if d_our == 0:
+                    reach_bonus += 1000
+
+            # Mild spread penalty to avoid oscillating between far targets
+            dist_pen = d_our
+
+            # Tie-break preference toward resources in our half
+            half_pref = 0
+            if (rx < w // 2) == (self_half == 0):
+                half_pref = 1
+
+            key_local = (-(adv + reach_bonus), dist_pen, half_pref, (rx, ry))
+            # convert to scalar for max by using negative tuple ordering carefully
+            # Here: smaller tuple is better, so we map to a score
+            score = -(adv + reach_bonus) * 1000 - dist_pen + half_pref
+
+            if score > move_score:
+                move_score = score
+                closest_dist = d_our
+
+        # Prefer moves that reduce our distance to the chosen nearest resource and reduce risk of opponent contest
+        # Also penalize staying if any progress move exists.
+        stay_pen = 2 if (dx == 0 and dy == 0) else 0
+        # Extra anti-contest: if we move but adv is not improved, penalize slightly
+        # (measured vs current position)
+        current_best = None
+        for rx, ry in resources:
+            d_our0 = md(sx, sy, rx, ry)
+            d_opp0 = md(ox, oy, rx, ry)
+            adv0 = d_opp0 - d_our0
+            if current_best is None or adv0 > current_best:
+                current_best = adv0
+        adv_after_best = None
+        for rx, ry in resources:
+            d_our1 = md(nx, ny, rx, ry)
+            d_opp1 = md(ox, oy, rx, ry)
+            adv1 = d_opp1 - d_our1
+            if adv_after_best is None or adv1 > adv_after_best:
+                adv_after_best = adv1
+        anti = 0 if adv_after_best is not None and current_best is not None and adv_after_best >= current_best else 1
+
+        key = (-(move_score - stay_pen - anti * 3), closest_dist if closest_dist is not None else 10**9, nx, ny)
+        if best_key is None or key < best_key:
+            best_key = key
+            bestm = (dx, dy)
+
+    return [int(bestm[0]), int(bestm[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set((p[0], p[1]) for p in (observation.get("obstacles", []) or []))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def md(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    # Deterministic safe default: stay if no legal moves
+    best_move = (0, 0)
+    best_val = -10**18
+
+    # If there are resources, chase the nearest one (by current manhattan)
+    if resources:
+        tgt = min(resources, key=lambda r: md(sx, sy, r[0], r[1]))
+        tx, ty = tgt
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inside(nx, ny):
+                continue
+            val = 0
+            d_self = md(nx, ny, tx, ty)
+            d_opp = md(nx, ny, ox, oy)
+            val += -2 * d_self
+            val += 0.5 * d_opp
+            val += (1 if (nx, ny) == (tx, ty) else 0)
+            if val > best_val or (val == best_val and (dx, dy) < best_move):
+                best_val = val
+                best_move = (dx, dy)
+    else:
+        # Otherwise, maximize distance from opponent while staying legal/deterministic
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inside(nx, ny):
+                continue
+            d_opp = md(nx, ny, ox, oy)
+            val = d_opp
+            val += (1 if (nx, ny) == (sx, sy) else 0)  # deterministic preference to stay on ties
+            if val > best_val or (val == best_val and (dx, dy) < best_move):
+                best_val = val
+                best_move = (dx, dy)
+
+    dx, dy = best_move
+    return [int(dx), int(dy)]

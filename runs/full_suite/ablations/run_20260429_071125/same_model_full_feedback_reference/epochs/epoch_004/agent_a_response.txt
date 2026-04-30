@@ -1,0 +1,174 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles_in = observation.get("obstacles", []) or []
+    obstacles = set()
+    for p in obstacles_in:
+        if p is not None and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not inb(sx, sy) or w <= 0 or h <= 0:
+        return [0, 0]
+
+    if not resources:
+        best = (0, 0, -10**9)
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            adj = 0
+            for ax in (-1, 0, 1):
+                for ay in (-1, 0, 1):
+                    if ax == 0 and ay == 0:
+                        continue
+                    xx, yy = nx + ax, ny + ay
+                    if inb(xx, yy) and (xx, yy) in obstacles:
+                        adj += 1
+            score = -adj - (abs(nx - ox) + abs(ny - oy)) * 0.01
+            if score > best[2]:
+                best = (dx, dy, score)
+        return [best[0], best[1]]
+
+    best_move = (0, 0)
+    best_score = -10**18
+    # Choose a target that we can reach earlier than opponent; if none, block by moving toward opponent's likely target.
+    targets = resources[:]
+    targets.sort(key=lambda r: (-(abs(r[0] - sx) + abs(r[1] - sy)) + (abs(r[0] - ox) + abs(r[1] - oy)), r[0], r[1]))
+
+    target = targets[0]
+    best_gap = -10**18
+    for r in targets[:6]:
+        myd = abs(r[0] - sx) + abs(r[1] - sy)
+        opd = abs(r[0] - ox) + abs(r[1] - oy)
+        gap = opd - myd
+        if gap > best_gap or (gap == best_gap and (r[0], r[1]) < (target[0], target[1])):
+            best_gap = gap
+            target = r
+
+    tx, ty = target
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        myd = abs(tx - nx) + abs(ty - ny)
+        opd = abs(tx - ox) + abs(ty - oy)
+        # Lead score: prefer reducing our distance to the chosen target relative to opponent's distance baseline.
+        score = (opd - myd) * 10
+
+        # Resource capture if stepping onto it (strongly incentivize).
+        if (nx, ny) in resources:
+            score += 100000
+
+        # Repel from obstacles to reduce getting trapped.
+        rep = 0
+        for obx, oby in obstacles:
+            ddx = obx - nx
+            ddy = oby - ny
+            d2 = ddx * ddx + ddy * ddy
+            if d2 == 0:
+                rep -= 10**6
+            elif d2 <= 4:
+                rep -= 6
+            else:
+                rep -= 1 / d2
+        score += rep * 5
+
+        # Small deterministic tie-breaker: prefer moves that also move away from opponent when gaps are small.
+        gap_now = (abs(tx - ox) + abs(ty - oy)) - myd
+        if best_gap <= 0:
+            score += (abs(nx - ox) + abs(ny - oy)) * 0.1
+        score += -(abs(nx - sx) + abs(ny - sy)) * 0.001
+
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    s = observation.get("self_position", [0, 0]) or [0, 0]
+    o = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(s[0]), int(s[1])
+    ox, oy = int(o[0]), int(o[1])
+
+    obstacles_in = observation.get("obstacles", []) or []
+    obs = set()
+    for p in obstacles_in:
+        if p is not None and len(p) >= 2:
+            x, y = p[0], p[1]
+            if x is not None and y is not None:
+                obs.add((int(x), int(y)))
+
+    resources = observation.get("resources", []) or []
+    res = []
+    for p in resources:
+        if p is not None and len(p) >= 2:
+            x, y = p[0], p[1]
+            if x is not None and y is not None:
+                tx, ty = int(x), int(y)
+                if 0 <= tx < w and 0 <= ty < h and (tx, ty) not in obs:
+                    res.append((tx, ty))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    deltas = [(-1, 0), (0, -1), (1, 0), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 0)]
+    if not inb(sx, sy) or w <= 0 or h <= 0:
+        return [0, 0]
+
+    def valid(nx, ny):
+        return inb(nx, ny) and (nx, ny) not in obs
+
+    # Prefer stepping onto a resource if possible; else go to nearest resource; else approach opponent.
+    target = None
+    if res:
+        bestd = 10**9
+        for rx, ry in res:
+            d = abs(rx - sx) + abs(ry - sy)
+            if d < bestd:
+                bestd = d
+                target = (rx, ry)
+
+    best = (0, 0, -10**18)
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+
+        if target is not None:
+            base = -(abs(target[0] - nx) + abs(target[1] - ny))
+        else:
+            base = -(abs(ox - nx) + abs(oy - ny))
+
+        # Small penalty for being adjacent to obstacles to reduce getting stuck.
+        adj = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                if ax == 0 and ay == 0:
+                    continue
+                x2, y2 = nx + ax, ny + ay
+                if inb(x2, y2) and (x2, y2) in obs:
+                    adj += 1
+
+        # Big bonus if landing on a resource.
+        res_bonus = 0
+        if target is not None and (nx, ny) == target:
+            res_bonus = 10**6
+
+        score = base * 100 - adj + res_bonus
+        if score > best[2]:
+            best = (dx, dy, score)
+
+    return [int(best[0]), int(best[1])]

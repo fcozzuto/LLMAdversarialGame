@@ -1,0 +1,169 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    blocked = set()
+    for b in observation.get("obstacles") or []:
+        if b and len(b) >= 2:
+            bx, by = int(b[0]), int(b[1])
+            if 0 <= bx < w and 0 <= by < h:
+                blocked.add((bx, by))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if r and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in blocked:
+                resources.append((rx, ry))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in blocked
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    # Materially different from "race-to-closest": balance (capture progress) vs (denying proximity to opponent).
+    # Deterministic tie-break by move order.
+    best_mv = (0, 0)
+    best_sc = -10**18
+
+    on_res = (sx, sy) in set(resources)
+    res_set = set(resources)
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+
+        score = 0
+
+        # Immediate pickup incentive
+        if (nx, ny) in res_set:
+            score += 10_000
+        elif on_res:
+            score += 150  # already on a resource, prefer staying
+
+        # Capture progress: prefer reducing distance to the closest resource,
+        # but if opponent is much closer, we bias toward denial.
+        if resources:
+            d_self = 10**9
+            d_opp = 10**9
+            for rx, ry in resources:
+                ds = cheb(nx, ny, rx, ry)
+                if ds < d_self:
+                    d_self = ds
+                do = cheb(ox, oy, rx, ry)
+                if do < d_opp:
+                    d_opp = do
+            # baseline: move toward resources
+            score += 900 - 40 * d_self
+            # denial: keep away from opponent and/or prevent them from being the favored capturer
+            if d_opp <= d_self:
+                score -= 250  # likely opponent is at least as good at capturing
+            else:
+                score += 120
+        else:
+            # No visible resources: head to center to reduce opponent advantage swings
+            cx, cy = w // 2, h // 2
+            score += 80 - 10 * cheb(nx, ny, cx, cy)
+
+        # Deny opponent: maximize distance after move
+        score += 35 * cheb(nx, ny, ox, oy)
+
+        # Small obstacle-pressure avoidance: penalize moves adjacent to obstacles too much
+        if (dx, dy) != (0, 0):
+            adj_pen = 0
+            for ax, ay in moves:
+                tx, ty = nx + ax, ny + ay
+                if 0 <= tx < w and 0 <= ty < h and (tx, ty) in blocked:
+                    adj_pen += 1
+            score -= 15 * adj_pen
+
+        if score > best_sc:
+            best_sc = score
+            best_mv = (dx, dy)
+
+    return [int(best_mv[0]), int(best_mv[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    blocked = set()
+    for b in observation.get("obstacles") or []:
+        if b and len(b) >= 2:
+            bx, by = int(b[0]), int(b[1])
+            if 0 <= bx < w and 0 <= by < h:
+                blocked.add((bx, by))
+
+    res = []
+    for r in observation.get("resources") or []:
+        if r and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in blocked:
+                res.append((rx, ry))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def best_target_distance(x, y):
+        if not res:
+            return 0
+        d = None
+        for (rx, ry) in res:
+            dd = cheb(x, y, rx, ry)
+            if d is None or dd < d:
+                d = dd
+        return d if d is not None else 0
+
+    cur_res_d = best_target_distance(sx, sy)
+
+    res_set = set(res)
+    best_mv = (0, 0)
+    best_sc = -10**18
+
+    for mv in moves:
+        dx, dy = mv
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in blocked:
+            continue
+
+        sc = 0
+        if (nx, ny) in res_set:
+            sc += 1000
+        nd = best_target_distance(nx, ny)
+        if res:
+            sc += (cur_res_d - nd) * 25
+
+        # Deny opponent: avoid giving them immediate proximity advantage.
+        opp_cur = cheb(ox, oy, sx, sy)
+        opp_next = cheb(ox, oy, nx, ny)
+        sc -= (opp_next - opp_cur) * 15
+
+        if sc > best_sc:
+            best_sc = sc
+            best_mv = mv
+
+    return [int(best_mv[0]), int(best_mv[1])]

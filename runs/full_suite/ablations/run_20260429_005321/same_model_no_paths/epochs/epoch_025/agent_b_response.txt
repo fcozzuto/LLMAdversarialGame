@@ -1,0 +1,146 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+    def valid(x, y): return inside(x, y) and (x, y) not in obstacles
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+    if any(len(r) >= 2 and r[0] == sx and r[1] == sy for r in resources):
+        return [0, 0]
+    cx, cy = (w - 1) // 2, (h - 1) // 2
+
+    # Choose a resource where we gain contest advantage (or, if none, minimize our distance).
+    best_t = None  # (score, tx, ty)
+    for r in resources:
+        if len(r) < 2: 
+            continue
+        tx, ty = r[0], r[1]
+        myd = cheb(sx, sy, tx, ty)
+        opd = cheb(ox, oy, tx, ty)
+        if myd == 0:
+            return [0, 0]
+        center_bonus = -cheb(tx, ty, cx, cy) * 0.2
+        # Prefer being closer than opponent; strongly penalize being behind.
+        contest = (opd - myd)
+        score = contest * 80 - myd * 2 + (center_bonus)
+        if best_t is None or score > best_t[0]:
+            best_t = (score, tx, ty)
+
+    if best_t is None:
+        return [0, 0]
+    tx, ty = best_t[1], best_t[2]
+
+    # If opponent is already much closer to all resources, pivot toward the farthest resource from them (still reachable).
+    opp_adv = -10**9
+    for r in resources:
+        if len(r) < 2: 
+            continue
+        rx, ry = r[0], r[1]
+        opp_adv = max(opp_adv, cheb(ox, oy, rx, ry) - cheb(sx, sy, rx, ry))
+    # When opp_adv is negative, we are behind overall; try to reduce their lead by chasing a resource where they are relatively worse.
+    if opp_adv < 0:
+        best_t = None
+        for r in resources:
+            if len(r) < 2:
+                continue
+            rx, ry = r[0], r[1]
+            myd = cheb(sx, sy, rx, ry)
+            opd = cheb(ox, oy, rx, ry)
+            lead = (myd - opd)  # how much worse we are; want large negative
+            # chase where opponent is worst relative to us (most negative lead)
+            score = -lead * 90 - myd * 2 - cheb(rx, ry, cx, cy) * 0.1
+            if best_t is None or score > best_t[0]:
+                best_t = (score, rx, ry)
+        if best_t is not None:
+            tx, ty = best_t[1], best_t[2]
+
+    # Evaluate next move locally, using contest and distance change.
+    best = None  # (score, dx, dy)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        myd = cheb(nx, ny, tx, ty)
+        opd = cheb(ox, oy, tx, ty)
+        if (nx, ny) == (tx, ty):
+            return [dx, dy]
+        new_self_to_center = -cheb(nx, ny, cx, cy) * 0.05
+        # Encourage improving contest immediately; discourage moving away.
+        cur_myd = cheb(sx, sy, tx, ty)
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    resources = observation.get("resources") or []
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def cell_ok(x, y):
+        return inside(x, y) and (x, y) not in obstacles
+
+    targets = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = r[0], r[1]
+            if cell_ok(x, y):
+                targets.append((x, y))
+        elif isinstance(r, dict):
+            x = r.get("x")
+            y = r.get("y")
+            if x is not None and y is not None and cell_ok(x, y):
+                targets.append((int(x), int(y)))
+    if not targets:
+        targets = [(w // 2, h // 2)]
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    # Pick best target by current distance advantage.
+    best = targets[0]
+    best_adv = cheb(ox, oy, best[0], best[1]) - cheb(sx, sy, best[0], best[1])
+    for tx, ty in targets[1:]:
+        adv = cheb(ox, oy, tx, ty) - cheb(sx, sy, tx, ty)
+        if adv > best_adv:
+            best_adv = adv
+            best = (tx, ty)
+    tx, ty = best
+
+    # Evaluate next move: maximize (opponent distance - our distance), break ties by our closer, then fixed order.
+    best_move = (0, 0)
+    best_val = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not cell_ok(nx, ny):
+            continue
+        myd = cheb(nx, ny, tx, ty)
+        opd = cheb(ox, oy, tx, ty)
+        val = (opd - myd, -myd, dx, dy)
+        if best_val is None or val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]

@@ -1,0 +1,83 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    obs = set((p[0], p[1]) for p in obstacles)
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        dy = y1 - y2
+        if dx < 0:
+            dx = -dx
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    if not resources:
+        tx = 1 if sx < w // 2 else -1 if sx > w // 2 else 0
+        ty = 1 if sy < h // 2 else -1 if sy > h // 2 else 0
+        return [tx, ty]
+
+    # Pick target resource with best advantage for us; if tie, prefer closer and deterministic coords.
+    best_r = None
+    best_key = None  # maximize (opp-self advantage)
+    for rx, ry in resources:
+        ds = man(sx, sy, rx, ry)
+        do = man(ox, oy, rx, ry)
+        adv = do - ds  # positive means we are closer
+        key = (adv, -(ds + do), rx, ry)
+        if best_key is None or key > best_key:
+            best_key = key
+            best_r = (rx, ry)
+    tx, ty = best_r
+
+    # If opponent is much closer to all resources, switch to a "denial" target: move to increase their approach.
+    # We'll detect this by checking if chosen target is already unfavorable.
+    ds0 = man(sx, sy, tx, ty)
+    do0 = man(ox, oy, tx, ty)
+    denial_mode = (do0 - ds0) >= 4
+
+    # Evaluate candidate moves with a shallow 2-ply heuristic.
+    best_move = (0, 0)
+    best_val = None
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+
+        # Value if we move: progress to target, plus contest effect against opponent on that same target.
+        if not denial_mode:
+            self_prog = -man(nx, ny, tx, ty)
+            opp_dist = man(ox, oy, tx, ty)
+            # Encourage moves that reduce the opponent's path indirectly by moving away from opponent towards target.
+            # (We only have their current position, so this is a weak but deterministic tie-break.)
+            opp_pen = cheb(ox, oy, tx, ty) - cheb(nx, ny, tx, ty)
+            val = self_prog * 3 + opp_pen - 0.05 * (cheb(nx, ny, ox, oy))
+        else:
+            # Denial: choose a nearby alternative resource (not the current target) that is least favorable to opponent.
+            alt = None
+            alt_key = None
+            for rx, ry in resources:
+                ds = man(nx, ny, rx, ry)
+                do = man(ox, oy, rx, ry)
+                # Prefer resources where we would be relatively closer after our move, or where opponent is worse off.
+                key = ((do - ds), -(ds + do), rx, ry)
+                if alt_key is None or key > alt_key:
+                    alt_key = key
+                    alt = (rx, ry)
+            ax, ay = alt
+            val = -man(nx, ny, ax, ay) * 3 + cheb(ox, oy, ax, ay) - 0.1 * cheb(nx, ny, ox, oy)
+
+        # 2nd ply: approximate our best next progress after this move (one more greedy step).
+        best_next = -10**9
+        for ddx, ddy in deltas:

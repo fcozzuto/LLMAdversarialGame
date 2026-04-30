@@ -1,0 +1,154 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+
+    # Pre-filter targets that are on-board
+    res = []
+    for rx, ry in resources:
+        if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in obstacles:
+            res.append((rx, ry))
+
+    def clamp(nx, ny):
+        if nx < 0: nx = 0
+        elif nx >= w: nx = w - 1
+        if ny < 0: ny = 0
+        elif ny >= h: ny = h - 1
+        return nx, ny
+
+    def dist(a, b):
+        ax, ay = a; bx, by = b
+        return abs(ax - bx) + abs(ay - by)
+
+    def best_goal(pos, avoid=None):
+        if not res:
+            return None
+        best = None
+        best_d = 10**9
+        for r in res:
+            if avoid is not None and r == avoid:
+                continue
+            d = dist(pos, r)
+            if d < best_d:
+                best_d = d
+                best = r
+        return best
+
+    # If resources depleted, just move to center deterministically while avoiding obstacles.
+    if not res:
+        center = (w // 2, h // 2)
+        moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+        best_m = (0, 0)
+        best_s = -10**9
+        for dx, dy in moves:
+            nx, ny = clamp(sx + dx, sy + dy)
+            if (nx, ny) in obstacles:
+                continue
+            d = dist((nx, ny), center)
+            s = -d
+            if s > best_s:
+                best_s = s
+                best_m = (dx, dy)
+        return [best_m[0], best_m[1]]
+
+    my_goal = best_goal((sx, sy))
+    opp_goal = best_goal((ox, oy))
+
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+    # Prefer diagonal unless tied, but deterministic tie-break: lexicographic on (dx,dy).
+    best_move = (0, 0)
+    best_score = -10**18
+
+    for dx, dy in moves:
+        nx, ny = clamp(sx + dx, sy + dy)
+        if (nx, ny) in obstacles:
+            continue
+
+        # Main objective: reduce distance to my goal; large reward if stepping on a resource.
+        my_d = dist((nx, ny), my_goal) if my_goal else 0
+        on_res = 1 if (nx, ny) in res else 0
+        score = 0.0
+        score += (on_res * 1000.0) + (-my_d * 5.0)
+
+        # Blocking objective: increase opponent's distance to their closest resource.
+        if opp_goal:
+            opp_d_now = dist((ox, oy), opp_goal)
+            opp_d_next = dist((ox, oy), opp_goal)  # opponent doesn't move here; use our position as proxy
+            # If we move toward the opponent's goal, reduce; else increase slight.
+            # Proxy: measure whether our move converges toward their goal, which makes it easier for them.
+            converge = dist((nx, ny), opp_goal) - dist((sx, sy), opp_goal)
+            score += (-converge * 1.5)
+
+        # Anti-trap: avoid moving into "resource far corner" when opponent is closer to all resources.
+        if opp_goal:
+            my_to_opp = dist((nx, ny), opp_goal)
+            my_start_to_opp = dist((sx, sy), opp_goal)
+            if my_to_opp > my_start_to_opp + 1:
+                score -= 2.0
+
+        # Mild repulsion from obstacles adjacency to reduce dead ends.
+        rep = 0.0
+        for adx in (-1, 0, 1):
+            for ady in (-1, 0, 1):
+                ax, ay = nx + adx, ny + ady
+                if (ax, ay) in obstacles:
+                    rep -= 1.0
+        score += rep
+
+        # Deterministic tie-break
+        if score > best_score or (score == best_score and (dx, dy) < best_move):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [best_move[0],
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (sx, sy))
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+
+    resources = []
+    for p in observation.get("resources", []):
+        if len(p) >= 2:
+            rx, ry = int(p[0]), int(p[1])
+            if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in obstacles:
+                resources.append((rx, ry))
+
+    neigh = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    def clamp(x, y):
+        if x < 0: x = 0
+        elif x >= w: x = w - 1
+        if y < 0: y = 0
+        elif y >= h: y = h - 1
+        return x, y
+
+    def step_scores(tx, ty):
+        bx = 10**9
+        best = (0, 0)
+        for dx, dy in neigh:
+            nx, ny = clamp(sx + dx, sy + dy)
+            if (nx, ny) in obstacles:
+                continue
+            d = abs(nx - tx) + abs(ny - ty)
+            ed = abs(nx - ox) + abs(ny - oy)
+            score = -d + 0.05 * ed
+            if score > bx:
+                bx = score
+                best = (dx, dy)
+        return best
+
+    if resources:
+        target = min(resources, key=lambda r: abs(r[0] - sx) + abs(r[1] - sy))
+        return list(step_scores(target[0], target[1]))
+
+    cx, cy = w // 2, h // 2
+    dx, dy = step_scores(cx, cy)
+    return [int(dx), int(dy)]

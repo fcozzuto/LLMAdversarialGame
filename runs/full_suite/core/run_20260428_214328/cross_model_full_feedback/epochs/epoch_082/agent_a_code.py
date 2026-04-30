@@ -1,0 +1,71 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obst = set()
+    for p in (observation.get("obstacles") or []):
+        if p is not None and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obst.add((x, y))
+
+    resources = []
+    for p in (observation.get("resources") or []):
+        if p is not None and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obst:
+                resources.append((x, y))
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    # 9-direction moves including stay
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def best_for_target(tx, ty):
+        # choose next step that reduces distance to target, ties favor closer to target and farther from opponent
+        bdx, bdy = 0, 0
+        best = -10**9
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obst:
+                continue
+            d = cheb(nx, ny, tx, ty)
+            od = cheb(nx, ny, ox, oy)
+            # large reward for stepping onto the target cell (resource)
+            reward = 1000 if (nx, ny) == (tx, ty) else 0
+            val = reward - d * 10 + (cheb(sx, sy, ox, oy) - od)
+            if val > best:
+                best = val
+                bdx, bdy = dx, dy
+        return bdx, bdy
+
+    if resources:
+        # pick resource with best "control": we prefer closer resources and those we are likely to reach sooner than opponent
+        best_tx, best_ty = resources[0]
+        best_score = -10**18
+        for tx, ty in resources:
+            d = cheb(sx, sy, tx, ty)
+            od = cheb(ox, oy, tx, ty)
+            # if we can reach earlier than opponent, prioritize strongly; otherwise still prefer proximity
+            score = (od - d) * 50 - d
+            if (tx + ty) % 2 == 0:
+                score += 0.1
+            if score > best_score:
+                best_score = score
+                best_tx, best_ty = tx, ty
+        dx, dy = best_for_target(best_tx, best_ty)
+        return [dx, dy]
+
+    # No resources: move to reduce distance to opponent deterministically
+    target_x, target_y = ox, oy
+    dx, dy = best_for_target(target_x, target_y)
+    return [dx, dy]

@@ -1,0 +1,152 @@
+def choose_move(observation):
+    w = observation["grid_width"]; h = observation["grid_height"]
+    sx, sy = observation["self_position"]; ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    moves = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    dirs = [m for m in moves if m != (0,0)]
+
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+
+    # BFS distance with 8-direction, uniform cost, blocking obstacles and opponent cell
+    def bfs_dist(stx, sty):
+        INF = 10**9
+        dist = [[INF]*h for _ in range(w)]
+        if not inside(stx, sty): return dist
+        from_head = [(stx, sty)]
+        dist[stx][sty] = 0
+        qi = 0
+        while qi < len(from_head):
+            x, y = from_head[qi]; qi += 1
+            nd = dist[x][y] + 1
+            for dx, dy in dirs:
+                nx, ny = x + dx, y + dy
+                if not inside(nx, ny): 
+                    continue
+                if (nx, ny) in obstacles: 
+                    continue
+                # Avoid walking onto opponent current cell to reduce immediate loss
+                if (nx, ny) == (ox, oy):
+                    continue
+                if nd < dist[nx][ny]:
+                    dist[nx][ny] = nd
+                    from_head.append((nx, ny))
+        return dist
+
+    ds = bfs_dist(sx, sy)
+    do = bfs_dist(ox, oy)
+
+    best = None
+    for r in resources:
+        rx, ry = r[0], r[1]
+        if not inside(rx, ry) or (rx, ry) in obstacles:
+            continue
+        sd = ds[rx][ry]; od = do[rx][ry]
+        if sd >= 10**8 and od >= 10**8:
+            continue
+        # Prefer resources we can reach earlier; if both unreachable, skip
+        # Value: advantage in arrival time, then closer self arrival
+        val = od - sd
+        if best is None or val > best[0] or (val == best[0] and sd < best[1]):
+            best = (val, sd, rx, ry)
+
+    # If opponent is clearly faster everywhere, switch to contest: head toward opponent or blocking direction
+    if best is None:
+        tx, ty = ox, oy
+    else:
+        val, sd, tx, ty = best
+        if val < 0:
+            # Contest: move toward opponent's nearest resource if possible, else directly toward opponent
+            opp_best = None
+            for r in resources:
+                rx, ry = r[0], r[1]
+                if not inside(rx, ry) or (rx, ry) in obstacles:
+                    continue
+                od = do[rx][ry]
+                if od >= 10**8:
+                    continue
+                if opp_best is None or od < opp_best[0]:
+                    opp_best = (od, rx, ry)
+            if opp_best is not None:
+                _, tx, ty = opp_best
+            else:
+                tx, ty = ox, oy
+
+    # Choose the move that minimizes our BFS distance to the chosen target, with tie-breaker toward opponent (to contest)
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        # Allow stepping onto opponent only as last resort (usually bad); engine will keep us if invalid
+        nd_to_target = ds[nx][ny][0] if False else None  # dummy to avoid helper stack
+        # compute BFS distance on the fly from precomputed ds lookup to target
+        # Use heuristic: current step reduces Chebyshev/Manhattan toward target, and prefer obstacle-aware closeness by ds to target.
+        d_target = abs(nx - tx) + abs(ny - ty)
+        # approximate obstacle-aware by using ds at target: compare our distance to target from current not available,
+        # so use d_target plus whether current cell is closer to target in our precomputed ds-to-curr?
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    moves = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(a, b, c, d):
+        dx = a - c
+        if dx < 0: dx = -dx
+        dy = b - d
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def is_blocked(x, y):
+        return (x, y) in obstacles or (x, y) == (ox, oy) or not inside(x, y)
+
+    best = None
+    best_key = None
+
+    if not resources:
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if is_blocked(nx, ny):
+                continue
+            key = (cheb(nx, ny, ox, oy), -(dx * dx + dy * dy))
+            if best_key is None or key > best_key:
+                best_key = key
+                best = [dx, dy]
+        return best if best is not None else [0, 0]
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if is_blocked(nx, ny):
+            continue
+
+        on_res = 1 if (nx, ny) in set(tuple(r) for r in resources) else 0
+
+        best_my = 10**9
+        best_opp = 10**9
+        for rx, ry in resources:
+            d_my = cheb(nx, ny, rx, ry)
+            if d_my < best_my:
+                best_my = d_my
+                best_opp = cheb(ox, oy, rx, ry)
+
+        key = (on_res, -best_my, -(best_opp <= best_my), -abs(ox - nx) - abs(oy - ny), -dx * dx - dy * dy)
+        if best_key is None or key > best_key:
+            best_key = key
+            best = [dx, dy]
+
+    return best if best is not None else [0, 0]

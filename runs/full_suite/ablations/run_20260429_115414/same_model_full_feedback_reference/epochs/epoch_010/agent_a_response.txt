@@ -1,0 +1,174 @@
+def choose_move(observation):
+    W = observation["grid_width"]; H = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = observation.get("obstacles") or []
+    resources = observation.get("resources") or []
+
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    res = []
+    for p in resources:
+        if p and len(p) >= 2:
+            t = (p[0], p[1])
+            if t not in obs:
+                res.append(t)
+
+    def inb(x, y): return 0 <= x < W and 0 <= y < H
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2; dx = -dx if dx < 0 else dx
+        dy = y1 - y2; dy = -dy if dy < 0 else dy
+        return dx if dx > dy else dy
+    def legal(x, y): return inb(x, y) and (x, y) not in obs
+
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    # If no resources, drift away to reduce being captured/forced.
+    if not res:
+        best = (-10**9, 0, 0)
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not legal(nx, ny): 
+                continue
+            d = cheb(nx, ny, ox, oy)
+            if d > best[0]:
+                best = (d, dx, dy)
+        return [best[1], best[2]]
+
+    # Resources opponent can take next turn (distance <= 1).
+    opp_next = set()
+    for rx, ry in res:
+        if cheb(ox, oy, rx, ry) <= 1:
+            opp_next.add((rx, ry))
+
+    best = (-10**18, 0, 0)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+
+        # Base: prefer moving onto a resource.
+        score = 0
+        if (nx, ny) in obs:
+            continue
+        if (nx, ny) in res:
+            score += 10**7
+
+        # Contest priority: if a resource is immediately threatened, try to be strictly no worse.
+        contest = 0
+        best_t_my = 10**9
+        best_t_opp = 10**9
+        for rx, ry in (opp_next if opp_next else res):
+            dmy = cheb(nx, ny, rx, ry)
+            dpt = cheb(ox, oy, rx, ry)
+            # Favor winning the race; penalize letting opponent be closer.
+            if dmy == 0:
+                contest += 5 * (10**6)
+            else:
+                win_margin = dpt - dmy  # positive is good
+                contest += (win_margin * 2000)
+                contest += (2 if dmy <= 1 else 0) * 500
+            if dmy < best_t_my or (dmy == best_t_my and dpt < best_t_opp):
+                best_t_my, best_t_opp = dmy, dpt
+
+        # Additional: don't walk into positions that make opponent much closer to ALL resources.
+        opp_pressure = 0
+        for rx, ry in res:
+            dmy = cheb(nx, ny, rx, ry)
+            dpt = cheb(ox, oy, rx, ry)
+            if dpt < dmy:
+                opp_pressure += (dmy - dpt)
+        # Opponent distance (endgame safety / navigation).
+        safety = cheb(nx, ny, ox, oy)
+
+        score += contest
+        score -= opp_pressure * 120
+        score += safety * 3
+
+        # Tie-break deterministically: smaller lex on dx,dy after score.
+        tup = (score, -best_t_my, best_t_opp, dx, dy)
+        best_tup = (best[0], -best[1], best[2], 0, 0)
+        if tup > best_tup:
+            best = (score, -best_t_my, best_t_opp, dx, dy)
+
+    return [best[3], best[4]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    W = observation["grid_width"]; H = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = observation.get("obstacles") or []
+    resources = observation.get("resources") or []
+
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    res = []
+    for p in resources:
+        if p and len(p) >= 2:
+            t = (p[0], p[1])
+            if t not in obs:
+                res.append(t)
+
+    def inb(x, y): return 0 <= x < W and 0 <= y < H
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2; dx = -dx if dx < 0 else dx
+        dy = y1 - y2; dy = -dy if dy < 0 else dy
+        return dx if dx > dy else dy
+    def legal(x, y): return inb(x, y) and (x, y) not in obs
+
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    if res:
+        # Immediate pickup
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if legal(nx, ny) and (nx, ny) in res:
+                return [dx, dy]
+
+        best_score = None
+        best_move = [0, 0]
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not legal(nx, ny):
+                continue
+
+            my_d = cheb(nx, ny, ox, oy)
+            # Prefer moving toward resources that opponent can't reach no later than us
+            min_good = 10**9
+            min_any = 10**9
+            for rx, ry in res:
+                md = cheb(nx, ny, rx, ry)
+                od = cheb(ox, oy, rx, ry)
+                if md < min_any: min_any = md
+                if md < od and md < min_good: min_good = md
+
+            if min_good < 10**9:
+                score = (100 - min_good) + (my_d * 0.1)
+            else:
+                score = (100 - min_any) + (my_d * 0.05)  # just avoid opponent a bit
+
+            if best_score is None or score > best_score:
+                best_score = score
+                best_move = [dx, dy]
+        return best_move
+
+    # No resources: move to maximize distance from opponent
+    best_d = -1
+    best_move = [0, 0]
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        d = cheb(nx, ny, ox, oy)
+        if d > best_d:
+            best_d = d
+            best_move = [dx, dy]
+    return best_move

@@ -1,0 +1,77 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    if not resources:
+        best = (10**9, (0, 0))
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny): 
+                continue
+            s = cheb(nx, ny, ox, oy)
+            key = (-s, dx, dy)
+            if key < best[0:1] or (s > best[0] if best[0] != 10**9 else True):
+                best = (-s, (dx, dy))
+        return best[1]
+
+    # Choose a deterministic target: prefer resources where we are not behind opponent.
+    best_t = resources[0]
+    best_diff = -10**9
+    best_dist = 10**9
+    for rx, ry in resources:
+        ds = cheb(sx, sy, rx, ry)
+        do = cheb(ox, oy, rx, ry)
+        diff = ds - do  # smaller => we are closer/equal
+        # Convert to preference: maximize (-diff), tie-break by smaller ds, then lexicographic.
+        pref = -diff
+        if pref > best_diff or (pref == best_diff and (ds < best_dist or (ds == best_dist and (rx, ry) < best_t))):
+            best_diff = pref
+            best_dist = ds
+            best_t = (rx, ry)
+
+    rx, ry = best_t
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        ds = cheb(nx, ny, rx, ry)
+        do = cheb(nx, ny, ox, oy)
+        # Score: primary reduce distance to target; secondary avoid opponent if close; deterministic tie-break.
+        score = (ds, 0 if do > 1 else (2 - do), dx, dy)
+        if best_score is None or score < best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

@@ -1,0 +1,148 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def nearest_obst_dist(x, y):
+        if not obs:
+            return 99
+        best = 99
+        for (px, py) in obs:
+            d = cheb(x, y, px, py)
+            if d < best:
+                best = d
+        return best
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    if not resources:
+        # Drift away from opponent and slightly toward center if no resources visible
+        cx, cy = w // 2, h // 2
+        best_val = -10**9
+        best = (0, 0)
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obs:
+                continue
+            val = cheb(nx, ny, cx, cy) * -1 + cheb(nx, ny, ox, oy) * 2
+            if val > best_val:
+                best_val = val
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    # Evaluate next step by the best resource we can "outpace"
+    best_val = -10**18
+    best_move = (0, 0)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+
+        dmin = 10**9
+        val = 0
+        for rx, ry in resources:
+            d_me = cheb(nx, ny, rx, ry)
+            d_op = cheb(ox, oy, rx, ry)
+            if d_me < dmin:
+                dmin = d_me
+            # Prefer resources where we are closer than opponent; otherwise try to deny by maximizing (d_op-d_me)
+            gap = d_op - d_me
+            take = 80 - 12 * d_me
+            contest = 40 if gap >= 0 else -20 * (-gap)
+            # Avoid targets deep behind obstacles: penalize being too close to obstacles (soft)
+            obst_pen = 0
+            nd = nearest_obst_dist(nx, ny)
+            if nd <= 1:
+                obst_pen = -35
+            elif nd == 2:
+                obst_pen = -12
+            # Also discourage moving into opponent vicinity while targeting
+            opp_pen = -6 * (d_me == 0) - max(0, 3 - cheb(nx, ny, ox, oy)) * 4
+            score = take + contest + obst_pen + opp_pen + (5 if gap > 1 else 0)
+            # Tie-break deterministically: smaller d_me, then lexicographic resource
+            if score > val:
+                val = score
+                best_score = d_me
+        # Primary: best val, secondary: closer to some resource
+        val2 = (val, -dmin, dx, dy)
+        if val2 > (best_val, 0, best_move[0], best_move[1]):
+            best_val = val
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+
+    obs = set()
+    for p in (observation.get("obstacles") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+        elif isinstance(p, dict) and "x" in p and "y" in p:
+            obs.add((p["x"], p["y"]))
+
+    res = []
+    for p in (observation.get("resources") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            res.append((p[0], p[1]))
+        elif isinstance(p, dict) and "x" in p and "y" in p:
+            res.append((p["x"], p["y"]))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    best = (0, 0)
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        score = 0
+        if res:
+            score += -min(cheb(nx, ny, rx, ry) for (rx, ry) in res)
+        else:
+            score += cheb(nx, ny, ox, oy)  # drift away when no known resources
+        score += -cheb(nx, ny, w // 2, h // 2) * 0.02  # mild center pull
+        if score > best_score:
+            best_score = score
+            best = (dx, dy)
+
+    return [int(best[0]), int(best[1])]

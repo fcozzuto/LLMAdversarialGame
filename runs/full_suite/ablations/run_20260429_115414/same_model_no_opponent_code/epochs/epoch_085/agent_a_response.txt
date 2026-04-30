@@ -1,0 +1,170 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist(a, b, c, d):
+        dx = a - c
+        dy = b - d
+        # Chebyshev for diagonal-allowed movement
+        if dx < 0:
+            dx = -dx
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    # No resources: move to safest line away from opponent while staying valid
+    if not resources:
+        best = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+            dopp = dist(nx, ny, ox, oy)
+            # prefer increasing distance; tie-break by staying closer to center
+            cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+            dcent = abs(nx - cx) + abs(ny - cy)
+            score = (dopp, -dcent, -abs(dx) - abs(dy))
+            if best is None or score > best[0]:
+                best = (score, dx, dy)
+        if best is None:
+            return [0, 0]
+        return [int(best[1]), int(best[2])]
+
+    # Resource targeting: prefer resources we're closer to, otherwise steal farthest from opponent's reach.
+    # Add obstacle-aware local safety to avoid stepping into tight traps.
+    def local_safety(x, y):
+        # count valid neighbors (including staying)
+        cnt = 0
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny):
+                cnt += 1
+        return cnt
+
+    # Choose best move by evaluating next-step positions against all resources with deterministic tie-break.
+    best_move = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        ls = local_safety(nx, ny)
+
+        # Evaluate global objective from this next position.
+        best_for_pos = None
+        for rx, ry in resources:
+            ds = dist(nx, ny, rx, ry)
+            dop = dist(ox, oy, rx, ry)
+            # Want smaller ds; if opponent is closer, penalize heavily.
+            # Also encourage capturing resources that opponent can't reach easily.
+            score = (dop - ds)  # positive means we are at least as fast
+            # prefer nearer resource among same reach advantage
+            tie1 = -ds
+            # tie-break: favor resources "toward our side" (toward opponent increases chance of deadlock)
+            toward = - (dist(rx, ry, ox, oy))
+            # combine: maximize reach advantage, then minimize ds, then maximize ls, then toward (deterministic)
+            cand = (score, tie1, ls, toward, - (abs(dx) + abs(dy)))
+            if best_for_pos is None or cand > best_for_pos:
+                best_for_pos = cand
+        if best_move is None or best_for_pos > best_move[0]:
+            best_move = (best_for_pos, dx, dy)
+
+    if best_move is None:
+        return [0, 0]
+    return [int(best_move[1]), int(best_move[2])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    # Pick target resource (deterministic: lowest opponent-distance, then our-distance, then coords)
+    if resources:
+        bestt = None
+        for rx, ry in resources:
+            td = cheb(sx, sy, rx, ry)
+            od = cheb(ox, oy, rx, ry)
+            key = (od, td, rx, ry)
+            if bestt is None or key < bestt[0]:
+                bestt = (key, (rx, ry))
+        tx, ty = bestt[1]
+    else:
+        # No resources: move to increase distance from opponent while still valid
+        tx, ty = ox, oy
+
+    bestm = None
+    curd = cheb(sx, sy, tx, ty)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        nd = cheb(nx, ny, tx, ty)
+        if resources:
+            # prefer smaller distance to target; tie-break: larger distance from opponent
+            oppd = cheb(nx, ny, ox, oy)
+            mkey = (nd, -oppd, dx, dy)
+        else:
+            # prefer larger distance from opponent
+            oppd = nd
+            mkey = (-oppd, dx, dy)
+        if bestm is None or mkey < bestm[0]:
+            bestm = (mkey, [dx, dy])
+
+    if bestm is None:
+        return [0, 0]
+    return bestm[1]

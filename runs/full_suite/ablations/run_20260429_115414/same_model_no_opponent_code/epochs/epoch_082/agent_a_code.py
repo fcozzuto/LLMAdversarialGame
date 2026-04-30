@@ -1,0 +1,76 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    remaining = observation.get("remaining_resource_count", None)
+    if not resources or (isinstance(remaining, (int, float)) and remaining <= 0):
+        dx = 0 if sx == ox else (1 if ox > sx else -1)
+        dy = 0 if sy == oy else (1 if oy > sy else -1)
+        if (dx, dy) == (0, 0):
+            return [0, 0]
+        nx, ny = sx + dx, sy + dy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+            return [dx, dy]
+        # try any valid move away/toward opponent deterministically
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = sx + dx, sy + dy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                    return [dx, dy]
+        return [0, 0]
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def best_resource_dist(x, y):
+        d = 10**9
+        for rx, ry in resources:
+            dd = cheb(x, y, rx, ry)
+            if dd < d:
+                d = dd
+        return d
+
+    best_move = [0, 0]
+    best_val = -10**18
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obstacles:
+                continue
+            # Prefer reducing distance to nearest resource; tie-break: keep away from opponent.
+            d_self = best_resource_dist(nx, ny)
+            d_opp = cheb(nx, ny, ox, oy)
+            val = -d_self * 1000 + d_opp
+            if val > best_val:
+                best_val = val
+                best_move = [dx, dy]
+            elif val == best_val and [dx, dy] < best_move:
+                best_move = [dx, dy]
+
+    return [int(best_move[0]), int(best_move[1])]

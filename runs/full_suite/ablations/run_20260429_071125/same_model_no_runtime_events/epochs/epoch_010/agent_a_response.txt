@@ -1,0 +1,147 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obs_list = observation.get("obstacles", []) or []
+    obstacles = set((int(p[0]), int(p[1])) for p in obs_list if isinstance(p, (list, tuple)) and len(p) >= 2)
+    res_list = observation.get("resources", []) or []
+    resources = [(int(r[0]), int(r[1])) for r in res_list if isinstance(r, (list, tuple)) and len(r) >= 2]
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    my_corner = min(corners, key=lambda c: abs(sx - c[0]) + abs(sy - c[1]))
+    opp_corner = min(corners, key=lambda c: abs(ox - c[0]) + abs(oy - c[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    moves = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny):
+                moves.append((dx, dy))
+    if not moves:
+        return [0, 0]
+    moves.sort()
+
+    opp_corner_dist = dist((ox, oy), opp_corner)
+    best_move = moves[0]
+    best_val = -10**18
+
+    # If close to the opponent, try to stay between them and the nearest available resource.
+    opp_pressure = 0
+    if resources:
+        nearest_res_for_opp = min(resources, key=lambda r: dist((ox, oy), r))
+        opp_pressure = 1 if dist((ox, oy), nearest_res_for_opp) <= 3 else 0
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+
+        # Baseline: make progress while keeping away from being late vs opponent.
+        if not resources:
+            v = 2.0 * (dist((nx, ny), opp_corner) - opp_corner_dist) - 0.1 * dist((nx, ny), my_corner)
+            if v > best_val:
+                best_val, best_move = v, (dx, dy)
+            continue
+
+        myc = (nx, ny)
+        # Evaluate best resource we could "claim" from next position.
+        best_res_val = -10**18
+        nearest_res_val = None
+
+        for r in resources:
+            my_d = dist(myc, r)
+            op_d = dist((ox, oy), r)
+            # Advantage: larger means we are closer than opponent.
+            adv = (op_d - my_d)
+            # Urgency: prioritize closer targets to finish in time.
+            urgency = -0.35 * my_d
+            # Corner bias: gently prefer staying oriented toward our corner once tied.
+            corner_bias = -0.06 * dist(myc, my_corner)
+            # If opponent is pressuring, prefer resources that are relatively far from opponent next.
+            pressure_bias = 0.18 * (adv) if opp_pressure else 0.0
+            v = 1.2 * adv + urgency + corner_bias + pressure_bias
+
+            # Small deterministic tie-break: lex by resource coordinate then by value.
+            if nearest_res_val is None or (v > best_res_val) or (v == best_res_val and (r, my_d, op_d) < best_res_val):
+                best_res_val = v
+                nearest_res_val = (r, my_d, op_d)
+
+        # Secondary: avoid moving into squares that allow opponent immediate capture of the same resource.
+        # Approx: if opponent next step reduces its distance to our chosen target more than ours.
+        sec = 0.0
+        chosen = nearest_res_val[0] if nearest_res_val is not None else None
+        if chosen is not None:
+            my_d_now = dist((sx, sy), chosen)
+            my_d_next = dist((nx, ny), chosen)
+            # Opponent could move; assume it optimally reduces distance by at most 2 in one turn with diagonals (L1 metric).
+            op_d_next_best = max(0, dist((ox, oy), chosen) - 2)
+            op_gain = dist((ox, oy), chosen) - op
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = observation.get("obstacles", []) or []
+    obst = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obst.add((int(p[0]), int(p[1])))
+    resources = observation.get("resources", []) or []
+    res = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            res.append((int(r[0]), int(r[1])))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obst
+
+    def dist(x1, y1, x2, y2):
+        d = x1 - x2
+        if d < 0: d = -d
+        e = y1 - y2
+        if e < 0: e = -e
+        return d + e
+
+    best = [0, 0]
+    best_score = -10**18
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+
+            target = res[0] if res else (sx, sy)
+            if res:
+                best_target = target
+                best_td = dist(sx, sy, target[0], target[1])
+                for rx, ry in res[1:]:
+                    td = dist(sx, sy, rx, ry)
+                    if td < best_td:
+                        best_td = td
+                        best_target = (rx, ry)
+                target = best_target
+
+            my_to_target = dist(nx, ny, target[0], target[1])
+            my_to_opp = dist(nx, ny, ox, oy)
+            opp_to_my = dist(ox, oy, nx, ny)
+
+            near_resource_bonus = 10 if res and my_to_target == 0 else 0
+            step_toward = 0
+            if res:
+                prev_to_target = dist(sx, sy, target[0], target[1])
+                step_toward = prev_to_target - my_to_target
+
+            score = 3 * step_toward - 0.8 * my_to_opp + 0.6 * opp_to_my + near_resource_bonus
+
+            if score > best_score or (score == best_score and (dx, dy) < (best[0], best[1])):
+                best_score = score
+                best = [dx, dy]
+
+    return best

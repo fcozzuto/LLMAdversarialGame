@@ -1,0 +1,88 @@
+def choose_move(observation):
+    w = observation["grid_width"]; h = observation["grid_height"]
+    sx, sy = observation["self_position"]; ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    resources = observation.get("resources") or []
+    moves = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    dirs = moves
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def bfs(start):
+        INF = 10**9
+        dist = [[INF]*w for _ in range(h)]
+        x0, y0 = start
+        if not inb(x0, y0) or (x0, y0) in obstacles: return dist
+        dist[y0][x0] = 0
+        q = [(x0, y0)]
+        qi = 0
+        while qi < len(q):
+            x, y = q[qi]; qi += 1
+            nd = dist[y][x] + 1
+            for dx, dy in dirs:
+                nx, ny = x + dx, y + dy
+                if not inb(nx, ny) or (nx, ny) in obstacles: continue
+                if nd < dist[ny][nx]:
+                    dist[ny][nx] = nd
+                    q.append((nx, ny))
+        return dist
+
+    INF = 10**9
+    our_dist = bfs((sx, sy))
+    opp_dist = bfs((ox, oy))
+
+    def best_move_for_resources():
+        if not resources:
+            return None
+        # Deterministic ordering for tie-breakers
+        res_sorted = sorted(resources, key=lambda p: (p[0], p[1]))
+        best = (0, 0); bestv = -10**18
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles: continue
+            # Evaluate the best resource we can "race" for after this move.
+            local_best = -10**18
+            for rx, ry in res_sorted:
+                ds = our_dist[ry][rx] + (1 if (nx, ny) != (sx, sy) else 0)
+                do = opp_dist[ry][rx]
+                # Penalize unreachable
+                if ds >= INF or do >= INF: 
+                    continue
+                # Prefer gaining tempo; also bias toward resources that are closer to us (to finish earlier)
+                v = (do - ds) * 1000 - ds
+                # Add slight preference for higher "density" toward which we are closer than opponent
+                if do - ds >= 0: v += 10
+                if v > local_best:
+                    local_best = v
+            if local_best == -10**18:
+                continue
+            # Tie-break: keep move closer to the "race" frontier (larger do-ds), then lexicographic
+            do_here = 0
+            # approximate do_here using nearest resource advantage
+            for rx, ry in res_sorted:
+                do_val = opp_dist[ry][rx]
+                if do_val < INF:
+                    do_here = do_val
+                    break
+            key = (local_best, -do_here, dx, dy)
+            if key > (bestv, 0, -9, -9):
+                bestv = local_best
+                best = (dx, dy)
+        return list(best)
+
+    mv = best_move_for_resources()
+    if mv is not None:
+        return mv
+
+    # No resources: reduce opponent options by moving where we are relatively closer than them.
+    # Deterministic: pick lexicographically best among maximizing (opp_dist - our_dist).
+    best = (0, 0); bestkey = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles: continue
+        # Use distance-to-opponent position as a proxy for tempo control
+        ds_opp = abs(nx - ox) if True else 0
+        # More robust: compute our BFS distance to opponent directly is expensive; use Chebyshev.
+        # (Diagonal moves allowed, obstacles handled by earlier BFS already; this is a proxy.)
+        cheb = lambda a,b,c,d: (abs(a-c) if abs(a-c) >= abs(b-d) else abs(b-d))
+        adv = cheb(nx, ny, ox, oy) - cheb(nx, ny, sx, sy)
+        k = (-adv, -cheb(nx, ny, w//2, h//2), dx, dy)

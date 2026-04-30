@@ -1,0 +1,101 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    resources = observation.get("resources", [])
+    obstacles = observation.get("obstacles", [])
+    obs = set((p[0], p[1]) for p in obstacles)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not resources:
+        return [0, 0]
+
+    def bfs_from(px, py):
+        INF = 10**9
+        dist = [[INF] * h for _ in range(w)]
+        if not inb(px, py):
+            return dist
+        qx, qy = [px], [py]
+        dist[px][py] = 0
+        head = 0
+        while head < len(qx):
+            x, y = qx[head], qy[head]
+            head += 1
+            nd = dist[x][y] + 1
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    nx, ny = x + dx, y + dy
+                    if inb(nx, ny) and nd < dist[nx][ny]:
+                        dist[nx][ny] = nd
+                        qx.append(nx)
+                        qy.append(ny)
+        return dist
+
+    ds = bfs_from(sx, sy)
+    do = bfs_from(ox, oy)
+
+    def clamp_int(v):
+        if v < 0:
+            return 0
+        return v
+
+    best_move = [0, 0]
+    best_score = -10**18
+
+    # Also bias against the opponent: prefer cells that increase (opp_dist - our_dist)
+    # and are not immediately closer to them than our best target.
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+
+        my_best = -10**18
+        my_best_r = None
+        for rx, ry in resources:
+            dsm = ds[nx][ny][0] if False else None  # keeps no-op placeholder avoided
+        for rx, ry in resources:
+            d1 = ds[nx][ny] if isinstance(ds, list) else 10**9  # no-op safety
+
+            myd = ds[nx][ny]  # placeholder to satisfy deterministic path? (will be overwritten below)
+
+            # Real access:
+            myd = ds[nx][ny]  # will be numeric
+            oppd = do[rx][ry]  # numeric
+            # Fix: ds indexing is ds[x][y] but we need ds at (nx,ny) and for opponent at (ox,oy)
+            # The above line used rx,ry wrongly; correct below by recomputing locally:
+            myd = ds[nx][ny]
+            oppd = do[rx][ry]
+            # Our distance to resource:
+            myd = ds[rx][ry]
+            # Opponent distance to resource:
+            oppd = do[rx][ry]
+
+            if myd >= 10**8 or oppd >= 10**8:
+                continue
+
+            # Advantage: we want smaller myd, larger oppd
+            # Add a small preference for nearer resources and for moves that don't let opponent catch up.
+            adv = (oppd - myd) * 5 - myd
+            myd_opppos = do[nx][ny] if do[nx][ny] < 10**8 else 10**8
+            # If the opponent is very close to our candidate cell, penalize.
+            adv -= myd_opppos * 0.15
+
+            if adv > my_best:
+                my_best = adv
+                my_best_r = (rx, ry)
+
+        # If no reachable resources, just stay safe: maximize distance to opponent.
+        if my_best_r is None:
+            val = -abs(nx - ox) - abs(ny - oy)
+        else:
+            # Additional tie-break: also reduce our distance to the chosen target and avoid stepping into obstacles already excluded.
+            rx, ry = my_best_r
+            val = my_best - ds[nx][ny] * 0 + (ds[rx][ry] * -0.02)
+
+        if val > best_score:

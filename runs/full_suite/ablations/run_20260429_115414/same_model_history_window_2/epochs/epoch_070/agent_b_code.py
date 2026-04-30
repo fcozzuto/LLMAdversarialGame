@@ -1,0 +1,79 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    blocked = set()
+    for b in observation.get("obstacles") or []:
+        if b and len(b) >= 2:
+            bx, by = int(b[0]), int(b[1])
+            if 0 <= bx < w and 0 <= by < h:
+                blocked.add((bx, by))
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in blocked
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if r and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if inb(rx, ry):
+                resources.append((rx, ry))
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def mobility(x, y):
+        c = 0
+        for dx, dy in dirs:
+            if inb(x + dx, y + dy):
+                c += 1
+        return c
+
+    candidates = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny):
+            candidates.append((dx, dy, nx, ny))
+
+    if not candidates:
+        return [0, 0]
+
+    def best_key(nx, ny):
+        if resources:
+            dres = min(cheb(nx, ny, rx, ry) for rx, ry in resources)
+        else:
+            cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+            dres = cheb(nx, ny, int(cx), int(cy))
+        dop = cheb(nx, ny, ox, oy)
+        mob = mobility(nx, ny)
+        return (dres, -dop, -mob, dx_pref)
+
+    # Deterministic tie-break: fixed direction preference order
+    pref = {(-1, 0): 0, (0, -1): 1, (1, 0): 2, (0, 1): 3, (-1, -1): 4, (-1, 1): 5, (1, -1): 6, (1, 1): 7}
+    best = None
+    best_val = None
+    for dx, dy, nx, ny in candidates:
+        dx_pref = pref.get((dx, dy), 99)
+        if resources:
+            dres = min(cheb(nx, ny, rx, ry) for rx, ry in resources)
+        else:
+            cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+            dres = cheb(nx, ny, int(cx), int(cy))
+        dop = cheb(nx, ny, ox, oy)
+        mob = mobility(nx, ny)
+        val = (dres, -dop, -mob, dx_pref)
+        if best_val is None or val < best_val:
+            best_val = val
+            best = (dx, dy)
+
+    return [int(best[0]), int(best[1])]

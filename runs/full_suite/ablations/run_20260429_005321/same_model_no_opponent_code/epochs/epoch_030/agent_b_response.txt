@@ -1,0 +1,170 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    x, y = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+    resources = []
+    for r in (observation.get("resources") or []):
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rx, ry = r[0], r[1]
+            if (rx, ry) not in obstacles:
+                resources.append((rx, ry))
+
+    def inside(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def cheb(a, b, c, d):
+        dx = a - c
+        if dx < 0:
+            dx = -dx
+        dy = b - d
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    legal = []
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if inside(nx, ny):
+            legal.append((dx, dy, nx, ny))
+    if not legal:
+        return [0, 0]
+
+    # Choose a contestable resource: prefer where we are closer or only slightly behind opponent.
+    best = None
+    best_key = None
+    for rx, ry in resources:
+        ds = cheb(x, y, rx, ry)
+        do = cheb(ox, oy, rx, ry)
+        behind = ds - do  # <=0 good (we are closer)
+        # Deterministic tie-breaking by coordinates
+        key = (behind, ds, -rx, -ry)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (rx, ry)
+
+    # If no resources, move to safer center while keeping away from opponent.
+    if best is None:
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        def center_score(nx, ny):
+            return -cheb(nx, ny, ox, oy), -abs(nx - cx) - abs(ny - cy), nx, ny
+        bx = legal[0]
+        bscore = None
+        for dx, dy, nx, ny in legal:
+            s = center_score(nx, ny)
+            if bscore is None or s > bscore:
+                bscore = s
+                bx = (dx, dy)
+        return [bx[0], bx[1]]
+
+    rx, ry = best
+    # One-step evaluation: move that best improves our access while discouraging opponent interception.
+    def obstacle_pen(nx, ny):
+        # Penalize being adjacent to obstacles (encourages smoother paths).
+        p = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                if ax == 0 and ay == 0:
+                    continue
+                if (nx + ax, ny + ay) in obstacles:
+                    p += 1
+        return p
+
+    best_move = legal[0]
+    best_score = None
+    for dx, dy, nx, ny in legal:
+        ds = cheb(nx, ny, rx, ry)
+        do = cheb(ox, oy, rx, ry)
+        dso = cheb(nx, ny, ox, oy)
+        # Prefer reaching resource sooner; if opponent already closer, prioritize distancing from them.
+        behind_after = ds - do
+        score = (
+            -ds,  # primary: our distance to target
+            behind_after,  # prefer not-behind (more negative better, but tuple compares)
+            dso,  # prefer to be farther from opponent
+            -obstacle_pen(nx, ny),
+            -nx, -ny  # deterministic
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    x, y = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if (rx, ry) not in obstacles:
+                resources.append((rx, ry))
+
+    def inside(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def dist(a, b, c, d):
+        dx = a - c
+        if dx < 0:
+            dx = -dx
+        dy = b - d
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    legal = []
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if inside(nx, ny):
+            legal.append((dx, dy, nx, ny))
+    if not legal:
+        return [0, 0]
+
+    if resources:
+        best = None
+        for dx, dy, nx, ny in legal:
+            # Prefer moves that get closer to the best "contestable" resource.
+            best_res = None
+            for rx, ry in resources:
+                myd = dist(nx, ny, rx, ry)
+                opd = dist(ox, oy, rx, ry)
+                # contest if we are not far behind; small myd preferred, then lead.
+                score = (myd - opd, myd, rx, ry)
+                if best_res is None or score < best_res:
+                    best_res = score
+            if best is None or best_res < best:
+                best = best_res
+                chosen = (dx, dy)
+        return [int(chosen[0]), int(chosen[1])]
+
+    # No resources: move toward the opponent (to enable capturing/contesting later).
+    dx0 = 0
+    if ox > x:
+        dx0 = 1
+    elif ox < x:
+        dx0 = -1
+    dy0 = 0
+    if oy > y:
+        dy0 = 1
+    elif oy < y:
+        dy0 = -1
+    # Choose the legal move that most reduces Chebyshev distance to opponent.
+    bestd = None
+    bestm = (0, 0)
+    for dx, dy, nx, ny in legal:
+        d = dist(nx, ny, ox, oy)
+        if bestd is None or d < bestd or (d == bestd and (dx, dy) == (dx0, dy0)):
+            bestd = d
+            bestm = (dx, dy)
+    return [int(bestm[0]), int(bestm[1])]

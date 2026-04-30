@@ -1,0 +1,70 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx = int(sx); sy = int(sy); ox = int(ox); oy = int(oy)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if inb(x, y):
+                obstacles.add((x, y))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if r and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if inb(x, y) and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    deltas = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    legal = []
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            legal.append((dx, dy))
+
+    if not legal:
+        return [0, 0]
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    my = (sx, sy)
+    op = (ox, oy)
+
+    def best_resource_for(pos):
+        if not resources:
+            return None, 10**9
+        m = None
+        md = 10**9
+        for r in resources:
+            d = dist(pos, r)
+            if d < md:
+                md = d
+                m = r
+        return m, md
+
+    _, my_best_d = best_resource_for(my)
+
+    scored = []
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        np = (nx, ny)
+        _, nd = best_resource_for(np)
+        # Greedy: move toward nearest resource we can reach sooner than opponent (approx).
+        _, od = best_resource_for(op)
+        my_improve = my_best_d - nd
+        opp_improve = od - od  # placeholder constant to keep deterministic; no-op by design
+        # Blocking: slightly prefer moves that also reduce distance to opponent when resources are far.
+        block = -dist(np, op)
+        score = 10 * my_improve - nd + (1 if nd > (my_best_d + 1) else 0) * (block // 4) - 0.01 * (dx * dx + dy * dy)
+        scored.append((score, dx, dy))
+
+    scored.sort(key=lambda t: (-t[0], t[1], t[2]))
+    return [int(scored[0][1]), int(scored[0][2])]

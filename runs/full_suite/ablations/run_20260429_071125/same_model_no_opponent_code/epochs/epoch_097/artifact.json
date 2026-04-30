@@ -1,0 +1,940 @@
+{
+  "agents": [
+    {
+      "max_tokens": 1200,
+      "model": "gpt-5.4-nano",
+      "name": "agent_a",
+      "provider": "openai",
+      "regenerate_each_epoch": true,
+      "system_prompt": "You write deterministic Python for a grid-game agent.",
+      "temperature": 0.2
+    },
+    {
+      "max_tokens": 1200,
+      "model": "gpt-5.4-nano",
+      "name": "agent_b",
+      "provider": "openai",
+      "regenerate_each_epoch": true,
+      "system_prompt": "You write deterministic Python for a grid-game agent.",
+      "temperature": 0.2
+    }
+  ],
+  "codes": {
+    "agent_a": "def choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [w - 1, h - 1]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    def dist(a, b):\n        return abs(a[0] - b[0]) + abs(a[1] - b[1])\n\n    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]\n    moves = []\n    for dx, dy in deltas:\n        nx, ny = sx + dx, sy + dy\n        if valid(nx, ny):\n            moves.append((dx, dy))\n\n    # If no resources, just step to reduce opponent distance\n    if not resources:\n        best = None\n        bestv = -10**9\n        for dx, dy in moves:\n            nx, ny = sx + dx, sy + dy\n            v = -dist((nx, ny), (ox, oy))\n            if v > bestv:\n                bestv = v\n                best = (dx, dy)\n        return [best[0], best[1]]\n\n    my = (sx, sy)\n    opp = (ox, oy)\n    center = (w // 2, h // 2)\n\n    opp_nearest = min(resources, key=lambda r: dist(opp, r))\n    my_nearest = min(resources, key=lambda r: dist(my, r))\n\n    best = (0, 0)\n    best_score = -10**18\n\n    for dx, dy in moves:\n        nx, ny = sx + dx, sy + dy\n        me = (nx, ny)\n\n        # Target a resource where we are at least as close as the opponent (or the least-bad contested one)\n        best_res_score = -10**18\n        for r in resources:\n            dm = dist(me, r)\n            do = dist(opp, r)\n            # Prefer resources we can secure (dm <= do), otherwise heavily penalize being behind.\n            sec = 1 if dm <= do else -1\n            # Also slightly prefer nearer and avoid letting opponent get much closer.\n            val = (sec * 1000) - dm + 0.3 * (do - dm) - 0.02 * dist(r, center)\n            if val > best_res_score:\n                best_res_score = val\n\n        # Blocking/denial: if opponent is heading to their nearest resource, try to increase its distance.\n        deny = dist(opp, opp_nearest) - dist(opp, opp_nearest)  # baseline 0 (keeps deterministic)\n        # More direct: maximize distance from the square that would be an opponent \"pressure point\"\n        # (use a proxy: stay away from cells close to opponent-nearest resource).\n        pressure = -dist(me, opp_nearest)\n\n        # Total: secure advantage > deny > drift to center\n        drift = -dist(me, center)\n        score = best_res_score + 5.0 * pressure + 0.5 * drift + deny\n\n        # Small deterministic tie-breaker: prefer moves with smaller dx^2+dy^2 (less movement)\n        move_cost = -(dx * dx + dy * dy) * 0.001\n        score += move_cost\n\n        if score > best_score:\n            best_score = score\n            best = (dx, dy)\n\n    return [best[0], best[1]]",
+    "agent_b": "def choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [0, 0]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def cheb(ax, ay, bx, by):\n        dx = ax - bx\n        if dx < 0: dx = -dx\n        dy = ay - by\n        if dy < 0: dy = -dy\n        return dx if dx > dy else dy\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    def neighbors(x, y):\n        out = []\n        for dx in (-1, 0, 1):\n            for dy in (-1, 0, 1):\n                if dx == 0 and dy == 0:\n                    continue\n                nx, ny = x + dx, y + dy\n                if valid(nx, ny):\n                    out.append((dx, dy, nx, ny))\n        return out\n\n    cands = neighbors(sx, sy)\n    if not cands:\n        return [0, 0]\n\n    if resources:\n        best = None\n        best_score = -10**18\n        cx = w - 1\n        cy = h - 1\n        for rx, ry in resources:\n            dS = cheb(sx, sy, rx, ry)\n            dO = cheb(ox, oy, rx, ry)\n            # prefer resources we can reach first; otherwise still prefer close ones\n            score = (dO - dS) * 1000 - dS * 3 - cheb(rx, ry, cx, cy) * 0.01\n            if score > best_score or (score == best_score and (rx, ry) < best):\n                best_score = score\n                best = (rx, ry)\n        tx, ty = best\n    else:\n        tx, ty = (w - 1) // 2, (h - 1) // 2\n\n    # choose move that minimizes distance to target; tie-break by maximizing distance from opponent\n    best_move = None\n    best_d = 10**9\n    best_od = -1\n    for dx, dy, nx, ny in cands:\n        d = cheb(nx, ny, tx, ty)\n        od = cheb(nx, ny, ox, oy)\n        if d < best_d or (d == best_d and od > best_od) or (d == best_d and od == best_od and (dx, dy) < best_move):\n            best_d = d\n            best_od = od\n            best_move = (dx, dy)\n    return [int(best_move[0]), int(best_move[1])]"
+  },
+  "epoch_index": 97,
+  "feedback": {
+    "code_history_window": 1,
+    "history_window": 1,
+    "include_codes": true,
+    "include_grid_state": true,
+    "include_opponent_code": false,
+    "include_paths": true,
+    "include_runtime_events": true,
+    "include_scores": true
+  },
+  "generation_errors": {
+    "agent_a": null,
+    "agent_b": null
+  },
+  "generation_policy": {
+    "pre_execution_validation": true,
+    "repair_invalid_submissions": true
+  },
+  "generation_reused": {
+    "agent_a": false,
+    "agent_b": false
+  },
+  "generation_used_fallback": {
+    "agent_a": false,
+    "agent_b": false
+  },
+  "generation_validation_issues": {
+    "agent_a": [],
+    "agent_b": []
+  },
+  "initial_resources": [
+    [
+      0,
+      3
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      1,
+      2
+    ],
+    [
+      1,
+      5
+    ],
+    [
+      2,
+      4
+    ],
+    [
+      3,
+      1
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      5,
+      6
+    ],
+    [
+      5,
+      7
+    ],
+    [
+      6,
+      0
+    ],
+    [
+      6,
+      6
+    ],
+    [
+      7,
+      4
+    ]
+  ],
+  "map_seed": 99275,
+  "metadata": {
+    "campaign": "full_suite_from_scratch",
+    "factor_level": "off",
+    "factor_name": "opponent_code_visibility",
+    "replicate_id": "B",
+    "suite_family": "ablations",
+    "suite_type": "research_ablation"
+  },
+  "obstacles": [
+    [
+      0,
+      1
+    ],
+    [
+      7,
+      6
+    ]
+  ],
+  "paths": {
+    "agent_a": [
+      [
+        0,
+        0
+      ],
+      [
+        1,
+        1
+      ],
+      [
+        2,
+        2
+      ],
+      [
+        3,
+        3
+      ],
+      [
+        4,
+        4
+      ],
+      [
+        3,
+        5
+      ],
+      [
+        2,
+        5
+      ],
+      [
+        1,
+        5
+      ],
+      [
+        0,
+        4
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        2
+      ],
+      [
+        3,
+        1
+      ],
+      [
+        4,
+        1
+      ],
+      [
+        5,
+        2
+      ],
+      [
+        6,
+        3
+      ],
+      [
+        7,
+        4
+      ]
+    ],
+    "agent_b": [
+      [
+        7,
+        7
+      ],
+      [
+        6,
+        6
+      ],
+      [
+        5,
+        7
+      ],
+      [
+        5,
+        6
+      ],
+      [
+        4,
+        6
+      ],
+      [
+        3,
+        5
+      ],
+      [
+        2,
+        4
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        2,
+        1
+      ],
+      [
+        3,
+        1
+      ],
+      [
+        4,
+        0
+      ],
+      [
+        5,
+        0
+      ],
+      [
+        6,
+        0
+      ],
+      [
+        7,
+        1
+      ],
+      [
+        7,
+        2
+      ],
+      [
+        7,
+        3
+      ]
+    ]
+  },
+  "prompts": {
+    "agent_a": "You are agent_a in a deterministic two-agent grid competition.\nReturn only raw Python source code.\nThe first line must be exactly: def choose_move(observation):\nDo not use markdown fences.\nDo not include any explanation before or after the function.\n\nGame rules:\n- Grid size: 8 x 8\n- Resources per game: 12\n- Obstacles per game: 2\n- Agents start in opposite corners.\n- Your function is called every turn and must return one move delta [dx, dy].\n- Allowed dx/dy values are -1, 0, or 1. Diagonal moves are allowed.\n- Staying still is allowed.\n- The engine rejects invalid moves by keeping the agent in place.\n- Code must be deterministic. Do not use randomness.\n- Keep the solution self-contained inside choose_move(observation) using only local deterministic logic derived from the observation.\n- Use only the documented observation fields listed below.\n- Do not write import statements of any kind.\n- Do not use names beginning with __.\n- Do not depend on external files, external services, subprocesses, or hidden state.\n- Every control path must end by returning [dx, dy] with integer dx and dy in {-1, 0, 1}.\n- Do not leave placeholder logic, unfinished branches, or helper code without a final return path.\n- Return exactly one top-level function named choose_move.\n- Prefer concise heuristics over large helper stacks or full-grid search if brevity is at risk.\n- Use at most 60 non-empty lines.\n- Keep the function under 4000 characters.\n- If you cannot fit, simplify the strategy instead of adding more code.\n\nObservation schema:\n- turn_index: int\n- grid_width, grid_height: ints\n- self_name, opponent_name: strings\n- self_position, opponent_position: [x, y]\n- resources: list[[x, y], ...]\n- obstacles: list[[x, y], ...]\n- remaining_resource_count: int\n- scores: included each turn = True\n- self_path/opponent_path included each turn = False\n\nDesign goal:\n- Maximize your final score against the opponent.\n- Favor clear deterministic logic over brittle shortcuts.\n- If recent feedback does not show improvement or a decisive win, make a meaningful strategic change instead of repeating the same policy with cosmetic edits.\n- Keep innovating until you are winning decisively and consistently, then preserve the strong core and only refine obvious weaknesses.\n\nEpoch: 97\n\nRecent performance signal:\n- Most recent score margin: -2.000\n- Your score change vs previous epoch: -2.000\n- Adaptation note: your score did not improve last epoch, so do not reuse the same policy unless you can justify a real strategic advantage.\n- Adaptation note: you were not ahead last epoch, so prefer a materially different targeting, obstacle-handling, or opponent-response strategy.\n\nPrevious epoch feedback:\nEpoch 96:\n- Scores: {\"agent_a\": 5.0, \"agent_b\": 7.0}\n- Winner: agent_b\n- Initial resources: [[0, 3], [2, 1], [2, 2], [2, 3], [2, 7], [3, 2], [3, 3], [4, 6], [4, 7], [5, 3], [5, 5], [6, 7]]\n- Obstacles: [[6, 0], [7, 4]]\n- agent_a path: [[0, 0], [1, 1], [2, 1], [2, 2], [1, 3], [0, 3], [1, 3], [2, 3], [2, 4], [2, 5], [2, 6], [2, 7]]\n- agent_b path: [[7, 7], [6, 7], [5, 6], [4, 7], [4, 6], [5, 5], [4, 4], [5, 3], [4, 4], [3, 3], [3, 2], [2, 3]]\n- agent_a runtime events: []\n- agent_b runtime events: []\n- agent_a code:\nBEGIN_PREVIOUS_CODE\ndef choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [w - 1, h - 1]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    # Generate candidate moves (9 including stay)\n    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]\n    moves = []\n    for dx, dy in deltas:\n        nx, ny = sx + dx, sy + dy\n        if valid(nx, ny):\n            moves.append((dx, dy))\n\n    def man(a, b):\n        return abs(a[0] - b[0]) + abs(a[1] - b[1])\n\n    # Score next state by (1) reaching a resource advantageously, else (2) cutting off opponent via contested resources, else (3) drift to centerline\n    center = (w\n...[truncated]...\nEND_PREVIOUS_CODE\n\nOutput only raw Python source code.",
+    "agent_b": "You are agent_b in a deterministic two-agent grid competition.\nReturn only raw Python source code.\nThe first line must be exactly: def choose_move(observation):\nDo not use markdown fences.\nDo not include any explanation before or after the function.\n\nGame rules:\n- Grid size: 8 x 8\n- Resources per game: 12\n- Obstacles per game: 2\n- Agents start in opposite corners.\n- Your function is called every turn and must return one move delta [dx, dy].\n- Allowed dx/dy values are -1, 0, or 1. Diagonal moves are allowed.\n- Staying still is allowed.\n- The engine rejects invalid moves by keeping the agent in place.\n- Code must be deterministic. Do not use randomness.\n- Keep the solution self-contained inside choose_move(observation) using only local deterministic logic derived from the observation.\n- Use only the documented observation fields listed below.\n- Do not write import statements of any kind.\n- Do not use names beginning with __.\n- Do not depend on external files, external services, subprocesses, or hidden state.\n- Every control path must end by returning [dx, dy] with integer dx and dy in {-1, 0, 1}.\n- Do not leave placeholder logic, unfinished branches, or helper code without a final return path.\n- Return exactly one top-level function named choose_move.\n- Prefer concise heuristics over large helper stacks or full-grid search if brevity is at risk.\n- Use at most 60 non-empty lines.\n- Keep the function under 4000 characters.\n- If you cannot fit, simplify the strategy instead of adding more code.\n\nObservation schema:\n- turn_index: int\n- grid_width, grid_height: ints\n- self_name, opponent_name: strings\n- self_position, opponent_position: [x, y]\n- resources: list[[x, y], ...]\n- obstacles: list[[x, y], ...]\n- remaining_resource_count: int\n- scores: included each turn = True\n- self_path/opponent_path included each turn = False\n\nDesign goal:\n- Maximize your final score against the opponent.\n- Favor clear deterministic logic over brittle shortcuts.\n- If recent feedback does not show improvement or a decisive win, make a meaningful strategic change instead of repeating the same policy with cosmetic edits.\n- Keep innovating until you are winning decisively and consistently, then preserve the strong core and only refine obvious weaknesses.\n\nEpoch: 97\n\nRecent performance signal:\n- Most recent score margin: +2.000\n- Your score change vs previous epoch: +2.000\n\nPrevious epoch feedback:\nEpoch 96:\n- Scores: {\"agent_a\": 5.0, \"agent_b\": 7.0}\n- Winner: agent_b\n- Initial resources: [[0, 3], [2, 1], [2, 2], [2, 3], [2, 7], [3, 2], [3, 3], [4, 6], [4, 7], [5, 3], [5, 5], [6, 7]]\n- Obstacles: [[6, 0], [7, 4]]\n- agent_b path: [[7, 7], [6, 7], [5, 6], [4, 7], [4, 6], [5, 5], [4, 4], [5, 3], [4, 4], [3, 3], [3, 2], [2, 3]]\n- agent_a path: [[0, 0], [1, 1], [2, 1], [2, 2], [1, 3], [0, 3], [1, 3], [2, 3], [2, 4], [2, 5], [2, 6], [2, 7]]\n- agent_b runtime events: []\n- agent_a runtime events: []\n- agent_b code:\nBEGIN_PREVIOUS_CODE\ndef choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [0, 0]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def cheb(ax, ay, bx, by):\n        dx = ax - bx\n        if dx < 0: dx = -dx\n        dy = ay - by\n        if dy < 0: dy = -dy\n        return dx if dx > dy else dy\n\n    def inb(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]\n\n    def eval_pos(x, y):\n        if not resources:\n            return -cheb(x, y, (w - 1), 0) * 0.01\n        best = -10**9\n        for rx, ry in resources:\n            d_self = cheb(x, y, rx, ry)\n            d_opp = cheb(ox, oy, rx, ry)\n            # Prefer res\n...[truncated]...\nEND_PREVIOUS_CODE\n\nOutput only raw Python source code."
+  },
+  "raw_responses": {
+    "agent_a": "def choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [w - 1, h - 1]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    def dist(a, b):\n        return abs(a[0] - b[0]) + abs(a[1] - b[1])\n\n    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]\n    moves = []\n    for dx, dy in deltas:\n        nx, ny = sx + dx, sy + dy\n        if valid(nx, ny):\n            moves.append((dx, dy))\n\n    # If no resources, just step to reduce opponent distance\n    if not resources:\n        best = None\n        bestv = -10**9\n        for dx, dy in moves:\n            nx, ny = sx + dx, sy + dy\n            v = -dist((nx, ny), (ox, oy))\n            if v > bestv:\n                bestv = v\n                best = (dx, dy)\n        return [best[0], best[1]]\n\n    my = (sx, sy)\n    opp = (ox, oy)\n    center = (w // 2, h // 2)\n\n    opp_nearest = min(resources, key=lambda r: dist(opp, r))\n    my_nearest = min(resources, key=lambda r: dist(my, r))\n\n    best = (0, 0)\n    best_score = -10**18\n\n    for dx, dy in moves:\n        nx, ny = sx + dx, sy + dy\n        me = (nx, ny)\n\n        # Target a resource where we are at least as close as the opponent (or the least-bad contested one)\n        best_res_score = -10**18\n        for r in resources:\n            dm = dist(me, r)\n            do = dist(opp, r)\n            # Prefer resources we can secure (dm <= do), otherwise heavily penalize being behind.\n            sec = 1 if dm <= do else -1\n            # Also slightly prefer nearer and avoid letting opponent get much closer.\n            val = (sec * 1000) - dm + 0.3 * (do - dm) - 0.02 * dist(r, center)\n            if val > best_res_score:\n                best_res_score = val\n\n        # Blocking/denial: if opponent is heading to their nearest resource, try to increase its distance.\n        deny = dist(opp, opp_nearest) - dist(opp, opp_nearest)  # baseline 0 (keeps deterministic)\n        # More direct: maximize distance from the square that would be an opponent \"pressure point\"\n        # (use a proxy: stay away from cells close to opponent-nearest resource).\n        pressure = -dist(me, opp_nearest)\n\n        # Total: secure advantage > deny > drift to center\n        drift = -dist(me, center)\n        score = best_res_score + 5.0 * pressure + 0.5 * drift + deny\n\n        # Small deterministic tie-breaker: prefer moves with smaller dx^2+dy^2 (less movement)\n        move_cost = -(dx * dx + dy * dy) * 0.001\n        score += move_cost\n\n        if score > best_score:\n            best_score = score\n            best = (dx, dy)\n\n    return [best[0], best[1]]",
+    "agent_b": "def choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [0, 0]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def cheb(ax, ay, bx, by):\n        dx = ax - bx\n        if dx < 0: dx = -dx\n        dy = ay - by\n        if dy < 0: dy = -dy\n        return dx if dx > dy else dy\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    # Pick best resource by who can reach it first (Chebyshev distance)\n    best_r = None\n    best_val = -10**18\n    for rx, ry in resources:\n        dS = cheb(sx, sy, rx, ry)\n        dO = cheb(ox, oy, rx, ry)\n        val = (dO - dS) * 10 - dS\n        # Small bias to keep moving \"toward center-ish\" when tied\n        val -= 0.01 * (abs(rx - (w - 1) / 2) + abs(ry - (h - 1) / 2))\n        if val > best_val:\n            best_val = val\n            best_r = (rx, ry)\n\n    # Fallback: go to nearest resource\n    if best_r is None:\n        # deterministic scan of in-bounds deltas toward top-left-ish\n        deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]\n        tx, ty = (w - 1) // 2, (h - 1) // 2\n        best = (-10**18, 0, 0)\n        for dx, dy in deltas:\n            nx, ny = sx + dx, sy + dy\n            if not valid(nx, ny):\n                continue\n            d = cheb(nx, ny, tx, ty)\n            sc = -d\n            if sc > best[0]:\n                best = (sc, dx, dy)\n        return [best[1], best[2]]\n\n    tx, ty = best_r\n    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]\n    best = (-10**18, 0, 0)\n    for dx, dy in deltas:\n        nx, ny = sx + dx, sy + dy\n        if not valid(nx, ny):\n            continue\n        d_now = cheb(nx, ny, tx, ty)\n        d_opp = cheb(ox, oy, tx, ty)\n        # Prefer reducing distance; if equal, prefer states that keep advantage in reach\n        sc = -d_now * 4 + (d_opp - d_now) * 1\n        # Tiny preference to reduce distance to opponent position (denial)\n        sc -= 0.01 * cheb(nx, ny, ox, oy)\n        if sc > best[0]:\n            best = (sc, dx, dy)\n    return [best[1], best[\n\n--- REPAIR ATTEMPT ---\n\ndef choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [0, 0]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def cheb(ax, ay, bx, by):\n        dx = ax - bx\n        if dx < 0: dx = -dx\n        dy = ay - by\n        if dy < 0: dy = -dy\n        return dx if dx > dy else dy\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    def neighbors(x, y):\n        out = []\n        for dx in (-1, 0, 1):\n            for dy in (-1, 0, 1):\n                if dx == 0 and dy == 0:\n                    continue\n                nx, ny = x + dx, y + dy\n                if valid(nx, ny):\n                    out.append((dx, dy, nx, ny))\n        return out\n\n    cands = neighbors(sx, sy)\n    if not cands:\n        return [0, 0]\n\n    if resources:\n        best = None\n        best_score = -10**18\n        cx = w - 1\n        cy = h - 1\n        for rx, ry in resources:\n            dS = cheb(sx, sy, rx, ry)\n            dO = cheb(ox, oy, rx, ry)\n            # prefer resources we can reach first; otherwise still prefer close ones\n            score = (dO - dS) * 1000 - dS * 3 - cheb(rx, ry, cx, cy) * 0.01\n            if score > best_score or (score == best_score and (rx, ry) < best):\n                best_score = score\n                best = (rx, ry)\n        tx, ty = best\n    else:\n        tx, ty = (w - 1) // 2, (h - 1) // 2\n\n    # choose move that minimizes distance to target; tie-break by maximizing distance from opponent\n    best_move = None\n    best_d = 10**9\n    best_od = -1\n    for dx, dy, nx, ny in cands:\n        d = cheb(nx, ny, tx, ty)\n        od = cheb(nx, ny, ox, oy)\n        if d < best_d or (d == best_d and od > best_od) or (d == best_d and od == best_od and (dx, dy) < best_move):\n            best_d = d\n            best_od = od\n            best_move = (dx, dy)\n    return [int(best_move[0]), int(best_move[1])]"
+  },
+  "runtime_events": {
+    "agent_a": [],
+    "agent_b": []
+  },
+  "sandbox_reports": {
+    "agent_a": {
+      "executed_code": "def choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [w - 1, h - 1]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    def dist(a, b):\n        return abs(a[0] - b[0]) + abs(a[1] - b[1])\n\n    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]\n    moves = []\n    for dx, dy in deltas:\n        nx, ny = sx + dx, sy + dy\n        if valid(nx, ny):\n            moves.append((dx, dy))\n\n    # If no resources, just step to reduce opponent distance\n    if not resources:\n        best = None\n        bestv = -10**9\n        for dx, dy in moves:\n            nx, ny = sx + dx, sy + dy\n            v = -dist((nx, ny), (ox, oy))\n            if v > bestv:\n                bestv = v\n                best = (dx, dy)\n        return [best[0], best[1]]\n\n    my = (sx, sy)\n    opp = (ox, oy)\n    center = (w // 2, h // 2)\n\n    opp_nearest = min(resources, key=lambda r: dist(opp, r))\n    my_nearest = min(resources, key=lambda r: dist(my, r))\n\n    best = (0, 0)\n    best_score = -10**18\n\n    for dx, dy in moves:\n        nx, ny = sx + dx, sy + dy\n        me = (nx, ny)\n\n        # Target a resource where we are at least as close as the opponent (or the least-bad contested one)\n        best_res_score = -10**18\n        for r in resources:\n            dm = dist(me, r)\n            do = dist(opp, r)\n            # Prefer resources we can secure (dm <= do), otherwise heavily penalize being behind.\n            sec = 1 if dm <= do else -1\n            # Also slightly prefer nearer and avoid letting opponent get much closer.\n            val = (sec * 1000) - dm + 0.3 * (do - dm) - 0.02 * dist(r, center)\n            if val > best_res_score:\n                best_res_score = val\n\n        # Blocking/denial: if opponent is heading to their nearest resource, try to increase its distance.\n        deny = dist(opp, opp_nearest) - dist(opp, opp_nearest)  # baseline 0 (keeps deterministic)\n        # More direct: maximize distance from the square that would be an opponent \"pressure point\"\n        # (use a proxy: stay away from cells close to opponent-nearest resource).\n        pressure = -dist(me, opp_nearest)\n\n        # Total: secure advantage > deny > drift to center\n        drift = -dist(me, center)\n        score = best_res_score + 5.0 * pressure + 0.5 * drift + deny\n\n        # Small deterministic tie-breaker: prefer moves with smaller dx^2+dy^2 (less movement)\n        move_cost = -(dx * dx + dy * dy) * 0.001\n        score += move_cost\n\n        if score > best_score:\n            best_score = score\n            best = (dx, dy)\n\n    return [best[0], best[1]]",
+      "init_error": null,
+      "issues": [],
+      "used_fallback": false
+    },
+    "agent_b": {
+      "executed_code": "def choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [0, 0]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def cheb(ax, ay, bx, by):\n        dx = ax - bx\n        if dx < 0: dx = -dx\n        dy = ay - by\n        if dy < 0: dy = -dy\n        return dx if dx > dy else dy\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    def neighbors(x, y):\n        out = []\n        for dx in (-1, 0, 1):\n            for dy in (-1, 0, 1):\n                if dx == 0 and dy == 0:\n                    continue\n                nx, ny = x + dx, y + dy\n                if valid(nx, ny):\n                    out.append((dx, dy, nx, ny))\n        return out\n\n    cands = neighbors(sx, sy)\n    if not cands:\n        return [0, 0]\n\n    if resources:\n        best = None\n        best_score = -10**18\n        cx = w - 1\n        cy = h - 1\n        for rx, ry in resources:\n            dS = cheb(sx, sy, rx, ry)\n            dO = cheb(ox, oy, rx, ry)\n            # prefer resources we can reach first; otherwise still prefer close ones\n            score = (dO - dS) * 1000 - dS * 3 - cheb(rx, ry, cx, cy) * 0.01\n            if score > best_score or (score == best_score and (rx, ry) < best):\n                best_score = score\n                best = (rx, ry)\n        tx, ty = best\n    else:\n        tx, ty = (w - 1) // 2, (h - 1) // 2\n\n    # choose move that minimizes distance to target; tie-break by maximizing distance from opponent\n    best_move = None\n    best_d = 10**9\n    best_od = -1\n    for dx, dy, nx, ny in cands:\n        d = cheb(nx, ny, tx, ty)\n        od = cheb(nx, ny, ox, oy)\n        if d < best_d or (d == best_d and od > best_od) or (d == best_d and od == best_od and (dx, dy) < best_move):\n            best_d = d\n            best_od = od\n            best_move = (dx, dy)\n    return [int(best_move[0]), int(best_move[1])]",
+      "init_error": null,
+      "issues": [],
+      "used_fallback": false
+    }
+  },
+  "scores": {
+    "agent_a": 4.0,
+    "agent_b": 8.0
+  },
+  "submitted_codes": {
+    "agent_a": "def choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [w - 1, h - 1]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\") or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    def dist(a, b):\n        return abs(a[0] - b[0]) + abs(a[1] - b[1])\n\n    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]\n    moves = []\n    for dx, dy in deltas:\n        nx, ny = sx + dx, sy + dy\n        if valid(nx, ny):\n            moves.append((dx, dy))\n\n    # If no resources, just step to reduce opponent distance\n    if not resources:\n        best = None\n        bestv = -10**9\n        for dx, dy in moves:\n            nx, ny = sx + dx, sy + dy\n            v = -dist((nx, ny), (ox, oy))\n            if v > bestv:\n                bestv = v\n                best = (dx, dy)\n        return [best[0], best[1]]\n\n    my = (sx, sy)\n    opp = (ox, oy)\n    center = (w // 2, h // 2)\n\n    opp_nearest = min(resources, key=lambda r: dist(opp, r))\n    my_nearest = min(resources, key=lambda r: dist(my, r))\n\n    best = (0, 0)\n    best_score = -10**18\n\n    for dx, dy in moves:\n        nx, ny = sx + dx, sy + dy\n        me = (nx, ny)\n\n        # Target a resource where we are at least as close as the opponent (or the least-bad contested one)\n        best_res_score = -10**18\n        for r in resources:\n            dm = dist(me, r)\n            do = dist(opp, r)\n            # Prefer resources we can secure (dm <= do), otherwise heavily penalize being behind.\n            sec = 1 if dm <= do else -1\n            # Also slightly prefer nearer and avoid letting opponent get much closer.\n            val = (sec * 1000) - dm + 0.3 * (do - dm) - 0.02 * dist(r, center)\n            if val > best_res_score:\n                best_res_score = val\n\n        # Blocking/denial: if opponent is heading to their nearest resource, try to increase its distance.\n        deny = dist(opp, opp_nearest) - dist(opp, opp_nearest)  # baseline 0 (keeps deterministic)\n        # More direct: maximize distance from the square that would be an opponent \"pressure point\"\n        # (use a proxy: stay away from cells close to opponent-nearest resource).\n        pressure = -dist(me, opp_nearest)\n\n        # Total: secure advantage > deny > drift to center\n        drift = -dist(me, center)\n        score = best_res_score + 5.0 * pressure + 0.5 * drift + deny\n\n        # Small deterministic tie-breaker: prefer moves with smaller dx^2+dy^2 (less movement)\n        move_cost = -(dx * dx + dy * dy) * 0.001\n        score += move_cost\n\n        if score > best_score:\n            best_score = score\n            best = (dx, dy)\n\n    return [best[0], best[1]]",
+    "agent_b": "def choose_move(observation):\n    w = int(observation.get(\"grid_width\", 8) or 8)\n    h = int(observation.get(\"grid_height\", 8) or 8)\n    sp = observation.get(\"self_position\") or [0, 0]\n    op = observation.get(\"opponent_position\") or [0, 0]\n    sx, sy = int(sp[0]), int(sp[1])\n    ox, oy = int(op[0]), int(op[1])\n\n    obstacles = set()\n    for p in observation.get(\"obstacles\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h:\n                obstacles.add((x, y))\n\n    resources = []\n    for p in observation.get(\"resources\", []) or []:\n        if p and len(p) >= 2:\n            x, y = int(p[0]), int(p[1])\n            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:\n                resources.append((x, y))\n\n    def cheb(ax, ay, bx, by):\n        dx = ax - bx\n        if dx < 0: dx = -dx\n        dy = ay - by\n        if dy < 0: dy = -dy\n        return dx if dx > dy else dy\n\n    def valid(x, y):\n        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles\n\n    def neighbors(x, y):\n        out = []\n        for dx in (-1, 0, 1):\n            for dy in (-1, 0, 1):\n                if dx == 0 and dy == 0:\n                    continue\n                nx, ny = x + dx, y + dy\n                if valid(nx, ny):\n                    out.append((dx, dy, nx, ny))\n        return out\n\n    cands = neighbors(sx, sy)\n    if not cands:\n        return [0, 0]\n\n    if resources:\n        best = None\n        best_score = -10**18\n        cx = w - 1\n        cy = h - 1\n        for rx, ry in resources:\n            dS = cheb(sx, sy, rx, ry)\n            dO = cheb(ox, oy, rx, ry)\n            # prefer resources we can reach first; otherwise still prefer close ones\n            score = (dO - dS) * 1000 - dS * 3 - cheb(rx, ry, cx, cy) * 0.01\n            if score > best_score or (score == best_score and (rx, ry) < best):\n                best_score = score\n                best = (rx, ry)\n        tx, ty = best\n    else:\n        tx, ty = (w - 1) // 2, (h - 1) // 2\n\n    # choose move that minimizes distance to target; tie-break by maximizing distance from opponent\n    best_move = None\n    best_d = 10**9\n    best_od = -1\n    for dx, dy, nx, ny in cands:\n        d = cheb(nx, ny, tx, ty)\n        od = cheb(nx, ny, ox, oy)\n        if d < best_d or (d == best_d and od > best_od) or (d == best_d and od == best_od and (dx, dy) < best_move):\n            best_d = d\n            best_od = od\n            best_move = (dx, dy)\n    return [int(best_move[0]), int(best_move[1])]"
+  },
+  "turn_log": [
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            1,
+            1
+          ],
+          "winner": "agent_a"
+        },
+        {
+          "points": 1.0,
+          "resource": [
+            6,
+            6
+          ],
+          "winner": "agent_b"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          1,
+          1
+        ],
+        "agent_b": [
+          6,
+          6
+        ]
+      },
+      "remaining_resource_count": 10,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          1
+        ],
+        "agent_b": [
+          -1,
+          -1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 1.0
+      },
+      "turn_index": 0
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            5,
+            7
+          ],
+          "winner": "agent_b"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          2,
+          2
+        ],
+        "agent_b": [
+          5,
+          7
+        ]
+      },
+      "remaining_resource_count": 9,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          1
+        ],
+        "agent_b": [
+          -1,
+          1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 2.0
+      },
+      "turn_index": 1
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            5,
+            6
+          ],
+          "winner": "agent_b"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          3,
+          3
+        ],
+        "agent_b": [
+          5,
+          6
+        ]
+      },
+      "remaining_resource_count": 8,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          1
+        ],
+        "agent_b": [
+          0,
+          -1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 3.0
+      },
+      "turn_index": 2
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            4,
+            6
+          ],
+          "winner": "agent_b"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          4,
+          4
+        ],
+        "agent_b": [
+          4,
+          6
+        ]
+      },
+      "remaining_resource_count": 7,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          1
+        ],
+        "agent_b": [
+          -1,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 4.0
+      },
+      "turn_index": 3
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          3,
+          5
+        ],
+        "agent_b": [
+          3,
+          5
+        ]
+      },
+      "remaining_resource_count": 7,
+      "requested_moves": {
+        "agent_a": [
+          -1,
+          1
+        ],
+        "agent_b": [
+          -1,
+          -1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 4.0
+      },
+      "turn_index": 4
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            2,
+            4
+          ],
+          "winner": "agent_b"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          2,
+          5
+        ],
+        "agent_b": [
+          2,
+          4
+        ]
+      },
+      "remaining_resource_count": 6,
+      "requested_moves": {
+        "agent_a": [
+          -1,
+          0
+        ],
+        "agent_b": [
+          -1,
+          -1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 1.0,
+        "agent_b": 5.0
+      },
+      "turn_index": 5
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            1,
+            5
+          ],
+          "winner": "agent_a"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          1,
+          5
+        ],
+        "agent_b": [
+          1,
+          3
+        ]
+      },
+      "remaining_resource_count": 5,
+      "requested_moves": {
+        "agent_a": [
+          -1,
+          0
+        ],
+        "agent_b": [
+          -1,
+          -1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 2.0,
+        "agent_b": 5.0
+      },
+      "turn_index": 6
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            1,
+            2
+          ],
+          "winner": "agent_b"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          4
+        ],
+        "agent_b": [
+          1,
+          2
+        ]
+      },
+      "remaining_resource_count": 4,
+      "requested_moves": {
+        "agent_a": [
+          -1,
+          -1
+        ],
+        "agent_b": [
+          0,
+          -1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 2.0,
+        "agent_b": 6.0
+      },
+      "turn_index": 7
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            0,
+            3
+          ],
+          "winner": "agent_a"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          0,
+          3
+        ],
+        "agent_b": [
+          2,
+          1
+        ]
+      },
+      "remaining_resource_count": 3,
+      "requested_moves": {
+        "agent_a": [
+          0,
+          -1
+        ],
+        "agent_b": [
+          1,
+          -1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 3.0,
+        "agent_b": 6.0
+      },
+      "turn_index": 8
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            3,
+            1
+          ],
+          "winner": "agent_b"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          1,
+          2
+        ],
+        "agent_b": [
+          3,
+          1
+        ]
+      },
+      "remaining_resource_count": 2,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          -1
+        ],
+        "agent_b": [
+          1,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 3.0,
+        "agent_b": 7.0
+      },
+      "turn_index": 9
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          2,
+          2
+        ],
+        "agent_b": [
+          4,
+          0
+        ]
+      },
+      "remaining_resource_count": 2,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          0
+        ],
+        "agent_b": [
+          1,
+          -1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 3.0,
+        "agent_b": 7.0
+      },
+      "turn_index": 10
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          3,
+          1
+        ],
+        "agent_b": [
+          5,
+          0
+        ]
+      },
+      "remaining_resource_count": 2,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          -1
+        ],
+        "agent_b": [
+          1,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 3.0,
+        "agent_b": 7.0
+      },
+      "turn_index": 11
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            6,
+            0
+          ],
+          "winner": "agent_b"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          4,
+          1
+        ],
+        "agent_b": [
+          6,
+          0
+        ]
+      },
+      "remaining_resource_count": 1,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          0
+        ],
+        "agent_b": [
+          1,
+          0
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 3.0,
+        "agent_b": 8.0
+      },
+      "turn_index": 12
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          5,
+          2
+        ],
+        "agent_b": [
+          7,
+          1
+        ]
+      },
+      "remaining_resource_count": 1,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          1
+        ],
+        "agent_b": [
+          1,
+          1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 3.0,
+        "agent_b": 8.0
+      },
+      "turn_index": 13
+    },
+    {
+      "collections": [],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          6,
+          3
+        ],
+        "agent_b": [
+          7,
+          2
+        ]
+      },
+      "remaining_resource_count": 1,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          1
+        ],
+        "agent_b": [
+          0,
+          1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 3.0,
+        "agent_b": 8.0
+      },
+      "turn_index": 14
+    },
+    {
+      "collections": [
+        {
+          "points": 1.0,
+          "resource": [
+            7,
+            4
+          ],
+          "winner": "agent_a"
+        }
+      ],
+      "move_issues": {
+        "agent_a": [],
+        "agent_b": []
+      },
+      "positions_after_turn": {
+        "agent_a": [
+          7,
+          4
+        ],
+        "agent_b": [
+          7,
+          3
+        ]
+      },
+      "remaining_resource_count": 0,
+      "requested_moves": {
+        "agent_a": [
+          1,
+          1
+        ],
+        "agent_b": [
+          0,
+          1
+        ]
+      },
+      "scores_after_turn": {
+        "agent_a": 4.0,
+        "agent_b": 8.0
+      },
+      "turn_index": 15
+    }
+  ],
+  "winner": "agent_b"
+}
