@@ -7,11 +7,23 @@ from pathlib import Path
 from typing import Any
 
 from llm_grid_battle.analysis import render_markdown_report, summarize_suite
+from llm_grid_battle.behavioral_descriptors import behavioral_distance, compute_behavioral_descriptor
 from llm_grid_battle.config import ConditionConfig, SuiteConfig
+from llm_grid_battle.code_fingerprints import fingerprint_record
+from llm_grid_battle.curriculum import (
+    build_curriculum_state,
+    build_prompt_context,
+    current_baseline_score,
+    curriculum_enabled,
+    record_epoch_outcome,
+    resolve_epoch_opponent,
+    resolve_holdout_pool,
+)
 from llm_grid_battle.game import build_map, build_observation, clamp_move
 from llm_grid_battle.llm import generate_code, judge_text, load_env_files
 from llm_grid_battle.pdf_report import write_pdf_report
 from llm_grid_battle.prompting import build_generation_prompt
+from llm_grid_battle.selection import decide_candidate_acceptance
 from llm_grid_battle.sandbox import close_agent, collect_move, launch_agent, request_move
 from llm_grid_battle.visualization import write_epoch_map_svg, write_score_plot_png, write_score_plot_svg
 
@@ -28,6 +40,23 @@ def _format_duration_hhmm(total_seconds: float) -> str:
     minutes = int(round(total_seconds / 60.0))
     hours, remainder = divmod(minutes, 60)
     return f"{hours:02d}:{remainder:02d}"
+
+
+def _cache_key_for_agent(agent: Any, *, label: str | None = None) -> str:
+    suffix = label or f"{agent.provider}:{agent.model}"
+    return f"{agent.name}:{suffix}"
+
+
+def _agent_to_dict(agent: Any) -> dict[str, Any]:
+    return {
+        "name": agent.name,
+        "provider": agent.provider,
+        "model": agent.model,
+        "system_prompt": agent.system_prompt,
+        "temperature": agent.temperature,
+        "max_tokens": agent.max_tokens,
+        "regenerate_each_epoch": agent.regenerate_each_epoch,
+    }
 
 
 def _resolve_collection(
@@ -75,6 +104,7 @@ def run_epoch(
     epoch_index: int,
     map_seed: int,
     codes: dict[str, str],
+    active_agents: list[Any] | None = None,
 ) -> dict[str, Any]:
     map_state = build_map(
         width=config.map.width,
@@ -83,7 +113,8 @@ def run_epoch(
         obstacle_count=config.map.obstacle_count,
         seed=map_seed,
     )
-    agent_names = [agent.name for agent in config.agents]
+    epoch_agents = active_agents or config.agents
+    agent_names = [agent.name for agent in epoch_agents]
     positions = {
         agent_names[0]: (0, 0),
         agent_names[1]: (config.map.width - 1, config.map.height - 1),
@@ -169,6 +200,7 @@ def run_epoch(
     return {
         "epoch_index": epoch_index,
         "map_seed": map_seed,
+        "map_dimensions": {"width": config.map.width, "height": config.map.height},
         "initial_resources": initial_resources,
         "obstacles": [list(item) for item in sorted(map_state.obstacles)],
         "codes": codes,
@@ -186,6 +218,91 @@ def run_epoch(
             }
             for name in agent_names
         },
+        "agents": [_agent_to_dict(agent) for agent in epoch_agents],
+    }
+
+
+def run_holdout_evaluation(
+    *,
+    config: ConditionConfig,
+    focal_agent_name: str,
+    focal_code: str,
+    generation_cache: dict[str, Any],
+) -> dict[str, Any] | None:
+    holdout_pool = resolve_holdout_pool(config)
+    if not holdout_pool:
+        return None
+
+    base_agents = {agent.name: agent for agent in config.agents}
+    if focal_agent_name not in base_agents:
+        return None
+    focal_agent = base_agents[focal_agent_name]
+    opponent_agent_name = config.curriculum.opponent_agent or next(
+        (agent.name for agent in config.agents if agent.name != focal_agent_name),
+        focal_agent_name,
+    )
+    games_per_opponent = max(1, int(config.curriculum.evaluation.games_per_opponent))
+    opponent_summaries: list[dict[str, Any]] = []
+    for opponent_index, opponent_info in enumerate(holdout_pool, start=1):
+        opponent_agent = opponent_info["agent"]
+        cache_key = opponent_info["cache_key"]
+        generation = generation_cache.get(cache_key)
+        if generation is None:
+            generation = generate_code(
+                provider=opponent_agent.provider,
+                model=opponent_agent.model,
+                system_prompt=opponent_agent.system_prompt,
+                user_prompt="Return a deterministic grid-game policy.",
+                temperature=opponent_agent.temperature,
+                max_tokens=opponent_agent.max_tokens,
+                pre_execution_validation=config.generation.pre_execution_validation,
+                repair_invalid_submissions=config.generation.repair_invalid_submissions,
+            )
+            generation_cache[cache_key] = generation
+        opponent_code = generation.submitted_code or generation.code
+        scores: list[float] = []
+        opponent_scores: list[float] = []
+        win_count = 0
+        draw_count = 0
+        for game_index in range(1, games_per_opponent + 1):
+            epoch = run_epoch(
+                config=config,
+                epoch_index=game_index,
+                map_seed=config.seed + 500_000 + (opponent_index * 101) + game_index,
+                codes={
+                    focal_agent_name: focal_code,
+                    opponent_agent_name: opponent_code,
+                },
+                active_agents=[focal_agent, opponent_agent],
+            )
+            focal_score = float(epoch["scores"][focal_agent_name])
+            opponent_score = float(epoch["scores"][opponent_agent_name])
+            scores.append(focal_score)
+            opponent_scores.append(opponent_score)
+            if focal_score > opponent_score:
+                win_count += 1
+            elif focal_score == opponent_score:
+                draw_count += 1
+        opponent_summaries.append(
+            {
+                "label": opponent_info["label"],
+                "provider": opponent_agent.provider,
+                "model": opponent_agent.model,
+                "metadata": opponent_info.get("metadata", {}),
+                "games": games_per_opponent,
+                "mean_score": round(sum(scores) / len(scores), 4),
+                "mean_opponent_score": round(sum(opponent_scores) / len(opponent_scores), 4),
+                "mean_score_margin": round((sum(scores) - sum(opponent_scores)) / len(scores), 4),
+                "win_rate": round(win_count / games_per_opponent, 4),
+                "draw_rate": round(draw_count / games_per_opponent, 4),
+            }
+        )
+
+    return {
+        "enabled": True,
+        "focal_agent": focal_agent_name,
+        "games_per_opponent": games_per_opponent,
+        "opponents": opponent_summaries,
     }
 
 
@@ -195,7 +312,9 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
 
     history: list[dict[str, Any]] = []
     score_series: dict[str, list[float]] = {agent.name: [] for agent in config.agents}
-    previous_generation_by_agent: dict[str, Any] = {agent.name: None for agent in config.agents}
+    generation_cache: dict[str, Any] = {}
+    curriculum_state = build_curriculum_state(config)
+    base_agents = {agent.name: agent for agent in config.agents}
 
     if config.map.resample_each_epoch:
         map_seeds = [config.seed + (epoch * 1009) for epoch in range(1, config.game.epochs + 1)]
@@ -206,6 +325,19 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         epoch_dir = condition_dir / "epochs" / f"epoch_{epoch_index:03d}"
         epoch_dir.mkdir(parents=True, exist_ok=True)
 
+        opponent_info = resolve_epoch_opponent(
+            config=config,
+            state=curriculum_state,
+            epoch_index=epoch_index,
+        ) if curriculum_enabled(config) else None
+        active_agents = []
+        for agent in config.agents:
+            if opponent_info and agent.name == config.curriculum.opponent_agent:
+                active_agents.append(opponent_info["agent"])
+            else:
+                active_agents.append(agent)
+        active_agents_by_name = {agent.name: agent for agent in active_agents}
+
         codes: dict[str, str] = {}
         submitted_codes: dict[str, str] = {}
         prompts: dict[str, str] = {}
@@ -214,16 +346,36 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         generation_validation_issues: dict[str, list[str]] = {}
         generation_used_fallback: dict[str, bool] = {}
         generation_reused: dict[str, bool] = {}
+        prompt_contexts: dict[str, Any] = {}
 
-        for index, agent in enumerate(config.agents):
-            opponent = config.agents[1 - index]
-            reused_generation = (
-                epoch_index > 1
-                and not agent.regenerate_each_epoch
-                and previous_generation_by_agent.get(agent.name) is not None
-            )
+        for index, agent in enumerate(active_agents):
+            opponent = active_agents[1 - index]
+            agent_label = None
+            if opponent_info and agent.name == config.curriculum.opponent_agent:
+                agent_label = str(opponent_info["label"])
+            cache_key = _cache_key_for_agent(agent, label=agent_label)
+
+            if opponent_info and agent.name == config.curriculum.opponent_agent and opponent_info.get("fixed_code"):
+                fixed_code = str(opponent_info["fixed_code"])
+                codes[agent.name] = fixed_code
+                submitted_codes[agent.name] = fixed_code
+                raw_responses[agent.name] = "[generation skipped: reused archived nemesis code]"
+                generation_errors[agent.name] = None
+                generation_validation_issues[agent.name] = []
+                generation_used_fallback[agent.name] = False
+                generation_reused[agent.name] = True
+                generation_cache[cache_key] = None
+                (epoch_dir / f"{agent.name}_prompt.txt").write_text(
+                    "# generation skipped: reused archived nemesis code",
+                    encoding="utf-8",
+                )
+                (epoch_dir / f"{agent.name}_code.py").write_text(fixed_code, encoding="utf-8")
+                (epoch_dir / f"{agent.name}_response.txt").write_text(raw_responses[agent.name], encoding="utf-8")
+                continue
+
+            reused_generation = epoch_index > 1 and not agent.regenerate_each_epoch and cache_key in generation_cache
             if reused_generation:
-                prior = previous_generation_by_agent[agent.name]
+                prior = generation_cache[cache_key]
                 codes[agent.name] = prior.code
                 submitted_codes[agent.name] = prior.submitted_code or prior.code
                 raw_responses[agent.name] = "[generation skipped: reused previous code because regenerate_each_epoch=false]"
@@ -244,12 +396,21 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
                 (epoch_dir / f"{agent.name}_response.txt").write_text(raw_responses[agent.name], encoding="utf-8")
                 continue
 
+            prompt_context = build_prompt_context(
+                config=config,
+                state=curriculum_state,
+                agent_name=agent.name,
+                epoch_index=epoch_index,
+                opponent_info=opponent_info,
+            )
+            prompt_contexts[agent.name] = prompt_context
             prompt = build_generation_prompt(
                 config=config,
                 agent_name=agent.name,
                 opponent_name=opponent.name,
                 epoch_index=epoch_index,
                 history=history,
+                curriculum_context=prompt_context,
             )
             prompts[agent.name] = prompt
             generation = generate_code(
@@ -262,7 +423,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
                 pre_execution_validation=config.generation.pre_execution_validation,
                 repair_invalid_submissions=config.generation.repair_invalid_submissions,
             )
-            previous_generation_by_agent[agent.name] = generation
+            generation_cache[cache_key] = generation
             codes[agent.name] = generation.code
             submitted_codes[agent.name] = generation.submitted_code or generation.code
             raw_responses[agent.name] = generation.raw_text
@@ -281,6 +442,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
             epoch_index=epoch_index,
             map_seed=map_seeds[epoch_index - 1],
             codes=codes,
+            active_agents=active_agents,
         )
         epoch_result["submitted_codes"] = submitted_codes
         epoch_result["prompts"] = prompts
@@ -289,10 +451,62 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         epoch_result["generation_validation_issues"] = generation_validation_issues
         epoch_result["generation_used_fallback"] = generation_used_fallback
         epoch_result["generation_reused"] = generation_reused
-        epoch_result["agents"] = [agent.__dict__ for agent in config.agents]
+        epoch_result["agents"] = [_agent_to_dict(agent) for agent in active_agents]
         epoch_result["feedback"] = config.feedback.__dict__
         epoch_result["generation_policy"] = config.generation.__dict__
+        epoch_result["observation_policy"] = config.observation.__dict__
+        epoch_result["map_policy"] = config.map.__dict__
+        epoch_result["curriculum_prompt_contexts"] = prompt_contexts
         epoch_result["metadata"] = config.metadata
+
+        behavioral_descriptors = {
+            agent.name: compute_behavioral_descriptor(epoch_result, agent.name)
+            for agent in active_agents
+        }
+        code_fingerprints = {
+            agent.name: fingerprint_record(submitted_codes[agent.name])
+            for agent in active_agents
+        }
+        epoch_result["behavioral_descriptors"] = behavioral_descriptors
+        epoch_result["code_fingerprints"] = code_fingerprints
+
+        curriculum_trace = None
+        selection_decision = None
+        if curriculum_enabled(config):
+            focal_name = config.curriculum.focal_agent
+            opponent_name = config.curriculum.opponent_agent
+            focal_descriptor = behavioral_descriptors.get(focal_name)
+            incumbent = curriculum_state.get("incumbent")
+            incumbent_descriptor = incumbent.get("descriptor") if incumbent else None
+            baseline_score = current_baseline_score(
+                curriculum_state,
+                str(opponent_info["label"]) if opponent_info else active_agents_by_name[opponent_name].model,
+            )
+            selection_decision = decide_candidate_acceptance(
+                policy=config.curriculum.selection,
+                candidate_score=float(epoch_result["scores"][focal_name]),
+                baseline_score=baseline_score,
+                behavioral_distance=behavioral_distance(focal_descriptor, incumbent_descriptor),
+            )
+            curriculum_trace = record_epoch_outcome(
+                config=config,
+                state=curriculum_state,
+                epoch_result=epoch_result,
+                opponent_info=opponent_info,
+                focal_descriptor=focal_descriptor,
+                selection_decision=selection_decision,
+            )
+        epoch_result["curriculum"] = {
+            "enabled": curriculum_enabled(config),
+            "mode": config.curriculum.mode,
+            "focal_agent": config.curriculum.focal_agent,
+            "opponent_agent": config.curriculum.opponent_agent,
+            "opponent_label": str(opponent_info["label"]) if opponent_info else "",
+            "opponent_source": str(opponent_info["source"]) if opponent_info else "",
+            "opponent_metadata": dict(opponent_info.get("metadata", {})) if opponent_info else {},
+            "selection": selection_decision,
+            "trace": curriculum_trace,
+        }
         _json_dump(epoch_dir / "artifact.json", epoch_result)
 
         write_epoch_map_svg(
@@ -303,33 +517,59 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
             initial_resources=epoch_result["initial_resources"],
             obstacles=epoch_result["obstacles"],
             paths=epoch_result["paths"],
-            agent_labels={agent.name: _agent_label(agent) for agent in config.agents},
+            agent_labels={agent.name: _agent_label(agent) for agent in active_agents},
         )
 
         for name, score in epoch_result["scores"].items():
             score_series[name].append(score)
         history.append(epoch_result)
 
+    evaluation_summary = None
+    if curriculum_enabled(config) and config.curriculum.evaluation.enabled and history:
+        focal_name = config.curriculum.focal_agent
+        incumbent = curriculum_state.get("incumbent")
+        final_focal_code = (
+            str(incumbent["code"])
+            if incumbent and incumbent.get("code")
+            else str(history[-1]["submitted_codes"].get(focal_name, history[-1]["codes"].get(focal_name, "")))
+        )
+        if final_focal_code:
+            evaluation_summary = run_holdout_evaluation(
+                config=config,
+                focal_agent_name=focal_name,
+                focal_code=final_focal_code,
+                generation_cache=generation_cache,
+            )
+
+    series_labels = {agent.name: _agent_label(agent) for agent in config.agents}
+    if curriculum_enabled(config):
+        series_labels[config.curriculum.opponent_agent] = f"{config.curriculum.opponent_agent} (curriculum opponent)"
     write_score_plot_svg(
         path=condition_dir / "scores.svg",
         title=f"{config.name} scores",
         series=score_series,
-        series_labels={agent.name: _agent_label(agent) for agent in config.agents},
+        series_labels=series_labels,
     )
     write_score_plot_png(
         path=condition_dir / "scores.png",
         title=f"{config.name} scores",
         series=score_series,
-        series_labels={agent.name: _agent_label(agent) for agent in config.agents},
+        series_labels=series_labels,
     )
 
     condition_payload = {
         "condition_name": config.name,
-        "agents": [agent.__dict__ for agent in config.agents],
+        "agents": [_agent_to_dict(agent) for agent in config.agents],
         "feedback": config.feedback.__dict__,
+        "observation": config.observation.__dict__,
+        "map": config.map.__dict__,
         "generation": config.generation.__dict__,
+        "curriculum": config.to_dict().get("curriculum", {}),
         "metadata": config.metadata,
         "epochs": history,
+        "evaluation": evaluation_summary,
+        "curriculum_trace": curriculum_state.get("trace", []),
+        "archive": curriculum_state["archive"].to_list() if curriculum_enabled(config) else [],
     }
     _json_dump(condition_dir / "condition_summary.json", condition_payload)
     return condition_payload
@@ -354,10 +594,12 @@ def build_judge_prompt(suite_summary: dict[str, Any]) -> str:
             "- Treat runtime_issue_counts such as invalid_return, move_hits_obstacle, and runtime_error:* as implementation or gameplay failures, not cheating evidence.",
             "- If a runtime failure is concentrated in one or two epochs, describe it as localized instability rather than a persistent strategy trait.",
             "- When comparing same-model vs cross-model conditions, prefer the cleaner conditions and say when a noisier condition weakens the comparison.",
+            "- If curriculum_metrics are present, discuss looping, oscillation, reversion, post-loss novelty spikes, strategy switches, and degradation as heuristic signals, not perfect ground truth.",
+            "- If evaluation summaries are present, treat them as holdout evidence and distinguish them from training-time adaptation metrics.",
             "",
             "Output requirements:",
             "- Answer in concise markdown.",
-            "- Use short sections named: Models Used, Question 1, Question 2, Question 3, Question 4, Question 5, Data Quality Caveats, Bottom Line.",
+            "- Use short sections named: Models Used, Question 1, Question 2, Question 3, Question 4, Question 5, Looping And Plateau, Exploration, Pressure Response, Data Quality Caveats, Bottom Line.",
             "- In each question section, separate measured evidence from inference.",
             "",
             "Use the provided numeric and heuristic summary to answer these questions:",
@@ -366,6 +608,7 @@ def build_judge_prompt(suite_summary: dict[str, Any]) -> str:
             "3. Do they appear to create materially new algorithms or mostly variants of old ones?",
             "4. Does cross-model play seem to improve innovation relative to same-model play?",
             "5. Does changing the feedback visibility appear to affect outcomes?",
+            "Also assess whether curriculum pressure mainly produces loops, local hill-climbing, brittle opponent-specific adaptation, or credible escape from losing regimes.",
             "",
             "Be explicit about uncertainty and do not treat the judge narrative as stronger evidence than the numeric summary.",
             "",

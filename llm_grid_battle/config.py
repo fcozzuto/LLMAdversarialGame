@@ -29,6 +29,19 @@ class AgentConfig:
 
 
 @dataclass
+class OpponentSpec:
+    label: str = ""
+    library_key: str = ""
+    provider: str = ""
+    model: str = ""
+    system_prompt: str = ""
+    temperature: float = 0.0
+    max_tokens: int = 0
+    regenerate_each_epoch: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class FeedbackConfig:
     history_window: int = 1
     code_history_window: int = 1
@@ -83,6 +96,55 @@ class GenerationConfig:
 
 
 @dataclass
+class ArchivePolicyConfig:
+    enabled: bool = False
+    reintroduce_every: int = 0
+    min_score_margin: float = 1.0
+    max_size: int = 8
+
+
+@dataclass
+class PressurePolicyConfig:
+    enabled: bool = False
+    loss_streak_trigger: int = 1
+    score_margin_trigger: float = 0.0
+    require_substantial_change: bool = True
+    custom_instruction: str = (
+        "Your last approach failed. Propose a substantially different algorithmic strategy."
+    )
+
+
+@dataclass
+class SelectionPolicyConfig:
+    mode: str = "accept_all"
+    novelty_metric: str = "behavioral_distance"
+    novelty_threshold: float = 0.2
+    score_tolerance: float = 0.5
+
+
+@dataclass
+class EvaluationConfig:
+    enabled: bool = False
+    games_per_opponent: int = 3
+    holdout_opponents: list[OpponentSpec] = field(default_factory=list)
+
+
+@dataclass
+class CurriculumConfig:
+    enabled: bool = False
+    focal_agent: str = ""
+    opponent_agent: str = ""
+    mode: str = "none"
+    opponent_pool: list[OpponentSpec] = field(default_factory=list)
+    rotation_policy: str = "cyclic"
+    rotation_stride: int = 1
+    archive: ArchivePolicyConfig = field(default_factory=ArchivePolicyConfig)
+    pressure: PressurePolicyConfig = field(default_factory=PressurePolicyConfig)
+    selection: SelectionPolicyConfig = field(default_factory=SelectionPolicyConfig)
+    evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
+
+
+@dataclass
 class ConditionConfig:
     name: str
     seed: int
@@ -94,11 +156,14 @@ class ConditionConfig:
     game: GameConfig
     judge: JudgeConfig
     generation: GenerationConfig
+    curriculum: CurriculumConfig
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "ConditionConfig":
         agents = [AgentConfig(**item) for item in data["agents"]]
+        curriculum_raw = data.get("curriculum", {})
+        evaluation_raw = curriculum_raw.get("evaluation", {})
         return ConditionConfig(
             name=data["name"],
             seed=int(data["seed"]),
@@ -110,6 +175,23 @@ class ConditionConfig:
             game=GameConfig(**data.get("game", {})),
             judge=JudgeConfig(**data.get("judge", {})),
             generation=GenerationConfig(**data.get("generation", {})),
+            curriculum=CurriculumConfig(
+                enabled=bool(curriculum_raw.get("enabled", False)),
+                focal_agent=str(curriculum_raw.get("focal_agent", "")),
+                opponent_agent=str(curriculum_raw.get("opponent_agent", "")),
+                mode=str(curriculum_raw.get("mode", "none")),
+                opponent_pool=[OpponentSpec(**item) for item in curriculum_raw.get("opponent_pool", [])],
+                rotation_policy=str(curriculum_raw.get("rotation_policy", "cyclic")),
+                rotation_stride=int(curriculum_raw.get("rotation_stride", 1)),
+                archive=ArchivePolicyConfig(**curriculum_raw.get("archive", {})),
+                pressure=PressurePolicyConfig(**curriculum_raw.get("pressure", {})),
+                selection=SelectionPolicyConfig(**curriculum_raw.get("selection", {})),
+                evaluation=EvaluationConfig(
+                    enabled=bool(evaluation_raw.get("enabled", False)),
+                    games_per_opponent=int(evaluation_raw.get("games_per_opponent", 3)),
+                    holdout_opponents=[OpponentSpec(**item) for item in evaluation_raw.get("holdout_opponents", [])],
+                ),
+            ),
             metadata=data.get("metadata", {}),
         )
 
@@ -125,6 +207,25 @@ class ConditionConfig:
             "game": self.game.__dict__,
             "judge": self.judge.__dict__,
             "generation": self.generation.__dict__,
+            "curriculum": {
+                "enabled": self.curriculum.enabled,
+                "focal_agent": self.curriculum.focal_agent,
+                "opponent_agent": self.curriculum.opponent_agent,
+                "mode": self.curriculum.mode,
+                "opponent_pool": [opponent.__dict__ for opponent in self.curriculum.opponent_pool],
+                "rotation_policy": self.curriculum.rotation_policy,
+                "rotation_stride": self.curriculum.rotation_stride,
+                "archive": self.curriculum.archive.__dict__,
+                "pressure": self.curriculum.pressure.__dict__,
+                "selection": self.curriculum.selection.__dict__,
+                "evaluation": {
+                    "enabled": self.curriculum.evaluation.enabled,
+                    "games_per_opponent": self.curriculum.evaluation.games_per_opponent,
+                    "holdout_opponents": [
+                        opponent.__dict__ for opponent in self.curriculum.evaluation.holdout_opponents
+                    ],
+                },
+            },
             "metadata": self.metadata,
         }
 
@@ -136,7 +237,7 @@ class SuiteConfig:
 
     @staticmethod
     def load(path: str | Path) -> "SuiteConfig":
-        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        raw = json.loads(Path(path).read_text(encoding="utf-8-sig"))
         defaults = raw.get("defaults", {})
         conditions: list[ConditionConfig] = []
         for item in raw.get("conditions", []):

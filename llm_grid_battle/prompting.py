@@ -25,6 +25,7 @@ def build_generation_prompt(
     opponent_name: str,
     epoch_index: int,
     history: list[dict[str, Any]],
+    curriculum_context: dict[str, Any] | None = None,
 ) -> str:
     parts = [
         f"You are {agent_name} in a deterministic two-agent grid competition.",
@@ -131,6 +132,40 @@ def build_generation_prompt(
                         parts.append(
                             f"- {opponent_name} code:\nBEGIN_PREVIOUS_CODE\n{truncate_text(item['codes'][opponent_name])}\nEND_PREVIOUS_CODE"
                         )
+
+    if curriculum_context and curriculum_context.get("enabled"):
+        parts.extend(
+            [
+                "",
+                "Curriculum pressure context:",
+                f"- Curriculum mode: {curriculum_context.get('mode', 'none')}",
+                f"- Current opponent archetype: {curriculum_context.get('opponent_label', opponent_name)}",
+                f"- Opponent source: {curriculum_context.get('opponent_source', 'condition_default')}",
+                f"- Current loss streak: {curriculum_context.get('loss_streak', 0)}",
+                f"- Nemesis archive size: {curriculum_context.get('archive_size', 0)}",
+            ]
+        )
+        baseline_score = curriculum_context.get("baseline_score_against_current_opponent")
+        if baseline_score is not None:
+            parts.append(f"- Your accepted baseline score against this opponent archetype is {baseline_score}.")
+        incumbent = curriculum_context.get("accepted_incumbent")
+        if incumbent:
+            parts.append(
+                f"- Current accepted incumbent came from epoch {incumbent.get('epoch_index')} with behavior profile {incumbent.get('behavior_profile', 'unknown')}."
+            )
+            parts.append(
+                f"- Accepted incumbent code:\nBEGIN_ACCEPTED_POLICY\n{truncate_text(str(incumbent.get('code', '')))}\nEND_ACCEPTED_POLICY"
+            )
+        rejection = curriculum_context.get("last_rejection")
+        if rejection:
+            parts.append(
+                f"- Last rejected candidate: epoch {rejection.get('epoch_index')}, reason={rejection.get('reason')}, behavioral_distance={rejection.get('behavioral_distance')}."
+            )
+        if curriculum_context.get("force_substantial_change"):
+            parts.append("- Mutation pressure: your next proposal must be structurally different from the current accepted incumbent.")
+            instruction = str(curriculum_context.get("mutation_instruction", "")).strip()
+            if instruction:
+                parts.append(f"- Required instruction: {instruction}")
 
     parts.append("")
     parts.append("Output only raw Python source code.")

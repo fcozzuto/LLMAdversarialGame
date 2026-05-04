@@ -20,9 +20,11 @@ The design stays intentionally small:
 - `configs/research_controls_suite.json`: baseline and frozen-control conditions for research runs.
 - `configs/research_cheating_opportunity_suite.json`: optional undocumented-field opportunity tests for rule-boundary studies.
 - `configs/full_suite/`: full multi-run research campaign bundle plus ordered runbook.
+- `configs/curriculum_suite/`: phase-2 adversarial-curriculum suite bundle plus ordered runbook.
 - `llm_grid_battle/`: game engine, sandbox, prompt builder, analysis, and SVG output.
 - `runs/`: generated artifacts.
 - `RESEARCH_CHECKLIST.md`: fixed research protocol and minimum publishable checklist.
+- `docs/CURRICULUM_V2_PROTOCOL.md`: phase-2 protocol for looping, plateauing, exploration, pressure response, curriculum, and holdout evaluation.
 
 ## Agent Interface
 
@@ -68,10 +70,12 @@ Expected keys:
 ## Research Workflow
 
 - Use [RESEARCH_CHECKLIST.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/RESEARCH_CHECKLIST.md) as the fixed protocol before making strong claims.
+- Use [docs/CURRICULUM_V2_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CURRICULUM_V2_PROTOCOL.md) when you are working on the adversarial-curriculum phase.
 - Use `configs/research_ablations_suite.json` when you want causal comparisons on feedback visibility or the generation scaffold.
 - Use `configs/research_controls_suite.json` when you want builtin baselines or frozen-agent controls.
 - Use `configs/research_cheating_opportunity_suite.json` when you want to test whether agents exploit undocumented observation fields that are present at runtime but omitted from the documented schema.
 - Use [configs/full_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/full_suite/RUNBOOK.md) when you want the full stricter campaign, including repeated core runs, repeated ablations, controls, cheating-opportunity checks, and aggregate report generation in a fixed order.
+- Use [configs/curriculum_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/curriculum_suite/RUNBOOK.md) when you want the phase-2 curriculum campaign with fixed predators, rotating opponents, nemesis archives, loss-triggered mutation, novelty-gated selection, and holdout evaluation.
 - After collecting repeated runs, aggregate them with:
 
 ```powershell
@@ -98,6 +102,8 @@ For the full suite, it writes:
 - `report.pdf`
 - one `scores.svg` per condition
 - one `scores.png` per condition for report embedding
+- curriculum trace fields, behavioral descriptors, and code fingerprints inside each epoch artifact when curriculum is enabled
+- holdout evaluation summaries inside `condition_summary.json` and the report when evaluation is enabled
 
 ## Notes
 

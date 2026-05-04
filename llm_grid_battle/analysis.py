@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import defaultdict
-import difflib
 import json
 import statistics
 from typing import Any
+
+from .behavioral_descriptors import behavioral_distance, behavioral_profile_label
+from .code_fingerprints import code_similarity, normalize_code, strategy_tags
 
 
 POLICY_SNIPPETS = (
@@ -32,40 +34,6 @@ def _truncate(text: str | None, limit: int = 240) -> str | None:
 
 def _model_descriptor(agent: dict[str, Any]) -> str:
     return f"{agent['provider']}:{agent['model']}"
-
-
-def normalize_code(code: str) -> str:
-    lines = []
-    for line in code.splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        lines.append(stripped)
-    return " ".join(lines)
-
-
-def code_similarity(a: str, b: str) -> float:
-    return difflib.SequenceMatcher(None, normalize_code(a), normalize_code(b)).ratio()
-
-
-def strategy_tags(code: str) -> list[str]:
-    lowered = code.lower()
-    tags: set[str] = set()
-    if "opponent_position" in lowered or "opponent_" in lowered:
-        tags.add("opponent_aware")
-    if "sorted(" in lowered or ".sort(" in lowered:
-        tags.add("global_sort")
-    if "min(" in lowered and "resources" in lowered:
-        tags.add("nearest_resource")
-    if "queue" in lowered or "deque" in lowered or "heapq" in lowered:
-        tags.add("graph_search")
-    if "self_path" in lowered or "visited" in lowered or "memory" in lowered:
-        tags.add("path_memory")
-    if "grid_width" in lowered and "grid_height" in lowered and "y % 2" in lowered:
-        tags.add("sweep_pattern")
-    if not tags:
-        tags.add("uncategorized")
-    return sorted(tags)
 
 
 def policy_markers(code: str, static_issues: list[str]) -> list[str]:
@@ -114,6 +82,131 @@ def _plateau_reasons(
     if unique_code_count == 1 and len(scores) >= 5:
         reasons.append("single_strategy_entire_run")
     return reasons
+
+
+def _opponent_name(agent_names: list[str], agent_name: str) -> str:
+    for candidate in agent_names:
+        if candidate != agent_name:
+            return candidate
+    return agent_name
+
+
+def _score_margin(epoch: dict[str, Any], agent_name: str, opponent_name: str) -> float:
+    return float(epoch["scores"][agent_name]) - float(epoch["scores"][opponent_name])
+
+
+def _curriculum_metrics(
+    *,
+    epochs: list[dict[str, Any]],
+    agent_names: list[str],
+    agent_name: str,
+) -> dict[str, Any]:
+    if not epochs:
+        return {
+            "enabled": False,
+            "loop_count": 0,
+            "failed_fix_repetition_count": 0,
+            "oscillation_count": 0,
+            "reversion_count": 0,
+            "superficial_novelty_count": 0,
+            "post_loss_novelty_spike_count": 0,
+            "strategy_switch_count": 0,
+            "escape_from_losing_regime_count": 0,
+            "specific_adaptation_count": 0,
+            "generalization_hint_count": 0,
+            "degradation_count": 0,
+            "behavior_profiles": [],
+        }
+
+    opponent_name = _opponent_name(agent_names, agent_name)
+    fingerprints = [
+        str(epoch.get("code_fingerprints", {}).get(agent_name, {}).get("fingerprint", normalize_code(epoch["submitted_codes"][agent_name])))
+        for epoch in epochs
+    ]
+    descriptors = [epoch.get("behavioral_descriptors", {}).get(agent_name, {}) for epoch in epochs]
+    behavior_profiles = [behavioral_profile_label(descriptor) for descriptor in descriptors]
+    strategy_labels = [
+        tuple(epoch.get("code_fingerprints", {}).get(agent_name, {}).get("strategy_tags", []))
+        for epoch in epochs
+    ]
+    margins = [_score_margin(epoch, agent_name, opponent_name) for epoch in epochs]
+    novelties = [
+        round(1.0 - code_similarity(epochs[index - 1]["submitted_codes"][agent_name], epochs[index]["submitted_codes"][agent_name]), 4)
+        for index in range(1, len(epochs))
+    ]
+    descriptor_shifts = [
+        behavioral_distance(descriptors[index - 1], descriptors[index])
+        for index in range(1, len(descriptors))
+    ]
+
+    loop_count = 0
+    failed_fix_repetition_count = 0
+    oscillation_count = 0
+    reversion_count = 0
+    superficial_novelty_count = 0
+    post_loss_novelty_spike_count = 0
+    strategy_switch_count = 0
+    escape_from_losing_regime_count = 0
+    specific_adaptation_count = 0
+    generalization_hint_count = 0
+    degradation_count = 0
+
+    seen_prior: set[str] = set()
+    prior_margins_by_label: dict[str, float] = {}
+    recent_negative_streak = 0
+    for index in range(len(epochs)):
+        fingerprint = fingerprints[index]
+        if fingerprint in seen_prior and (index == 0 or fingerprint != fingerprints[index - 1]):
+            reversion_count += 1
+        seen_prior.add(fingerprint)
+        if index >= 1 and fingerprint == fingerprints[index - 1]:
+            loop_count += 1
+            prior_margin = margins[index - 2] if index >= 2 else 0.0
+            if (index >= 2 and margins[index - 1] <= prior_margin) or (index == 1 and margins[index - 1] < 0):
+                failed_fix_repetition_count += 1
+        if index >= 2 and fingerprints[index] == fingerprints[index - 2] and fingerprints[index] != fingerprints[index - 1]:
+            oscillation_count += 1
+        if index >= 1 and descriptor_shifts[index - 1] < 0.08 and novelties[index - 1] > 0.12:
+            superficial_novelty_count += 1
+        if index >= 1 and margins[index - 1] < 0 and novelties[index - 1] >= 0.2:
+            post_loss_novelty_spike_count += 1
+        if index >= 1 and (behavior_profiles[index] != behavior_profiles[index - 1] or strategy_labels[index] != strategy_labels[index - 1]):
+            strategy_switch_count += 1
+        if margins[index] < 0:
+            recent_negative_streak += 1
+        else:
+            if recent_negative_streak >= 2:
+                escape_from_losing_regime_count += 1
+            recent_negative_streak = 0
+
+        opponent_label = str(epochs[index].get("curriculum", {}).get("opponent_label", ""))
+        if opponent_label:
+            previous_margin = prior_margins_by_label.get(opponent_label)
+            if previous_margin is not None and previous_margin < 0 and margins[index] > previous_margin:
+                specific_adaptation_count += 1
+            prior_margins_by_label[opponent_label] = margins[index]
+        selection = epochs[index].get("curriculum", {}).get("selection") or {}
+        if selection:
+            if not bool(selection.get("accepted", True)) and float(selection.get("behavioral_distance", 0.0) or 0.0) >= 0.2:
+                degradation_count += 1
+            if bool(selection.get("accepted", False)) and str(selection.get("reason")) == "diversity_gain_within_score_tolerance":
+                generalization_hint_count += 1
+
+    return {
+        "enabled": bool(any(epoch.get("curriculum", {}).get("enabled") for epoch in epochs)),
+        "loop_count": loop_count,
+        "failed_fix_repetition_count": failed_fix_repetition_count,
+        "oscillation_count": oscillation_count,
+        "reversion_count": reversion_count,
+        "superficial_novelty_count": superficial_novelty_count,
+        "post_loss_novelty_spike_count": post_loss_novelty_spike_count,
+        "strategy_switch_count": strategy_switch_count,
+        "escape_from_losing_regime_count": escape_from_losing_regime_count,
+        "specific_adaptation_count": specific_adaptation_count,
+        "generalization_hint_count": generalization_hint_count,
+        "degradation_count": degradation_count,
+        "behavior_profiles": behavior_profiles,
+    }
 
 
 def _condition_is_clean(condition: dict[str, Any]) -> bool:
@@ -386,6 +479,32 @@ def _render_deterministic_conclusion(suite_summary: dict[str, Any]) -> list[str]
     if runtime_notes:
         lines.append(f"- Runtime notes: {'; '.join(runtime_notes)}.")
 
+    curriculum_notes: list[str] = []
+    for condition in conditions:
+        for agent in condition.get("agent_names", []):
+            metrics = condition.get("curriculum_metrics", {}).get(agent, {})
+            if not metrics.get("enabled"):
+                continue
+            curriculum_notes.append(
+                f"{condition['condition_name']} / {condition['agent_labels'][agent]}: loops={metrics.get('loop_count', 0)}, oscillations={metrics.get('oscillation_count', 0)}, reversions={metrics.get('reversion_count', 0)}, post-loss spikes={metrics.get('post_loss_novelty_spike_count', 0)}, specific adaptations={metrics.get('specific_adaptation_count', 0)}"
+            )
+    if curriculum_notes:
+        lines.append(f"- Curriculum notes: {'; '.join(curriculum_notes)}.")
+
+    evaluation_notes: list[str] = []
+    for condition in conditions:
+        evaluation = condition.get("evaluation") or {}
+        if not evaluation.get("enabled"):
+            continue
+        holdout_parts = [
+            f"{opponent.get('label', '-')}: mean margin {opponent.get('mean_score_margin', 0.0)}"
+            for opponent in evaluation.get("opponents", [])
+        ]
+        if holdout_parts:
+            evaluation_notes.append(f"{condition['condition_name']} holdout panel -> " + ", ".join(holdout_parts))
+    if evaluation_notes:
+        lines.append(f"- Holdout evaluation: {'; '.join(evaluation_notes)}.")
+
     lines.append("")
     return lines
 
@@ -412,14 +531,16 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
     generation_errors_by_agent: dict[str, list[str]] = {name: [] for name in agent_names}
     codes_by_agent: dict[str, list[str]] = {name: [] for name in agent_names}
     fallback_counts: dict[str, int] = {name: 0 for name in agent_names}
+    descriptor_series_by_agent: dict[str, list[dict[str, float]]] = {name: [] for name in agent_names}
 
     previous_codes: dict[str, str | None] = {name: None for name in agent_names}
     for epoch in epochs:
         win_counts[epoch["winner"]] += 1
         for agent_name in agent_names:
             score_series[agent_name].append(float(epoch["scores"][agent_name]))
-            current_code = epoch["codes"][agent_name]
+            current_code = epoch.get("submitted_codes", {}).get(agent_name, epoch["codes"][agent_name])
             codes_by_agent[agent_name].append(current_code)
+            descriptor_series_by_agent[agent_name].append(epoch.get("behavioral_descriptors", {}).get(agent_name, {}))
             if previous_codes[agent_name] is not None:
                 novelty = 1.0 - code_similarity(previous_codes[agent_name] or "", current_code)
                 novelty_by_agent[agent_name].append(round(novelty, 4))
@@ -448,6 +569,8 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
     generation_summary: dict[str, dict[str, Any]] = {}
     execution_summary: dict[str, dict[str, Any]] = {}
     runtime_issue_counts: dict[str, dict[str, int]] = {}
+    behavioral_summary: dict[str, dict[str, Any]] = {}
+    curriculum_metrics: dict[str, dict[str, Any]] = {}
     for agent_name in agent_names:
         normalized_codes = [normalize_code(code) for code in codes_by_agent[agent_name]]
         unchanged_transitions = sum(
@@ -491,6 +614,24 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
             else 0.0,
         }
         runtime_issue_counts[agent_name] = dict(sorted(runtime_issues_by_agent[agent_name].items()))
+        descriptor_values = descriptor_series_by_agent[agent_name]
+        averaged_descriptors: dict[str, float] = {}
+        if descriptor_values:
+            for key in descriptor_values[0].keys():
+                averaged_descriptors[key] = round(
+                    statistics.mean(float(item.get(key, 0.0)) for item in descriptor_values),
+                    4,
+                )
+        behavioral_summary[agent_name] = {
+            "average_descriptor": averaged_descriptors,
+            "latest_descriptor": descriptor_values[-1] if descriptor_values else {},
+            "latest_profile": behavioral_profile_label(descriptor_values[-1] if descriptor_values else {}),
+        }
+        curriculum_metrics[agent_name] = _curriculum_metrics(
+            epochs=epochs,
+            agent_names=agent_names,
+            agent_name=agent_name,
+        )
 
     notable_epochs = _build_notable_epochs(
         epochs=epochs,
@@ -509,6 +650,17 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         "same_model_matchup": len({(agent["provider"], agent["model"]) for agent in agents}) == 1,
         "feedback_policy": condition_summary["feedback"],
         "generation_policy": condition_summary.get("generation", {}),
+        "observation_policy": condition_summary.get("observation", {}),
+        "map_policy": condition_summary.get("map", {}),
+        "curriculum_policy": condition_summary.get("curriculum", {}),
+        "curriculum_pool_labels": [
+            item.get("label") or item.get("library_key") or item.get("model")
+            for item in condition_summary.get("curriculum", {}).get("opponent_pool", [])
+        ],
+        "holdout_labels": [
+            item.get("label") or item.get("library_key") or item.get("model")
+            for item in condition_summary.get("curriculum", {}).get("evaluation", {}).get("holdout_opponents", [])
+        ],
         "metadata": condition_summary.get("metadata", {}),
         "win_counts": dict(win_counts),
         "average_scores": {
@@ -528,10 +680,15 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         "runtime_issue_counts": runtime_issue_counts,
         "generation": generation_summary,
         "execution": execution_summary,
+        "behavioral_summary": behavioral_summary,
+        "curriculum_metrics": curriculum_metrics,
         "code_change_stats": code_change_stats,
         "plateau_signals": plateau_signals,
         "plateau_reasons": plateau_reasons,
         "notable_epochs": notable_epochs,
+        "curriculum_trace": condition_summary.get("curriculum_trace", []),
+        "archive": condition_summary.get("archive", []),
+        "evaluation": condition_summary.get("evaluation"),
     }
 
 
@@ -555,6 +712,18 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
                 values.append(len(item.get("policy_markers", {}).get(agent, [])))
         return round(statistics.mean(values), 3) if values else 0.0
 
+    def _avg_curriculum_metric(items: list[dict[str, Any]], metric_name: str) -> float:
+        values: list[float] = []
+        for item in items:
+            for agent in item["agent_names"]:
+                metrics = item.get("curriculum_metrics", {}).get(agent, {})
+                if metrics.get("enabled"):
+                    values.append(float(metrics.get(metric_name, 0.0)))
+        return round(statistics.mean(values), 4) if values else 0.0
+
+    def _evaluation_condition_count(items: list[dict[str, Any]]) -> int:
+        return sum(1 for item in items if item.get("evaluation", {}).get("enabled"))
+
     models_used = sorted(
         {
             _model_descriptor(agent)
@@ -562,6 +731,19 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
             for agent in payload["agents"]
         }
     )
+    for payload in condition_payloads:
+        curriculum = payload.get("curriculum", {})
+        for item in curriculum.get("opponent_pool", []):
+            provider = item.get("provider")
+            model = item.get("model")
+            if provider and model:
+                models_used.append(f"{provider}:{model}")
+        for item in curriculum.get("evaluation", {}).get("holdout_opponents", []):
+            provider = item.get("provider")
+            model = item.get("model")
+            if provider and model:
+                models_used.append(f"{provider}:{model}")
+    models_used = sorted(set(models_used))
     data_quality_warnings: list[str] = []
     for condition in condition_summaries:
         for agent in condition["agent_names"]:
@@ -589,6 +771,14 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
             "cross_model_avg_novelty": _avg_novelty(cross_model),
             "same_model_avg_policy_markers": _avg_policy_markers(same_model),
             "cross_model_avg_policy_markers": _avg_policy_markers(cross_model),
+            "curriculum_avg_loop_count": _avg_curriculum_metric(condition_summaries, "loop_count"),
+            "curriculum_avg_oscillation_count": _avg_curriculum_metric(condition_summaries, "oscillation_count"),
+            "curriculum_avg_reversion_count": _avg_curriculum_metric(condition_summaries, "reversion_count"),
+            "curriculum_avg_post_loss_novelty_spikes": _avg_curriculum_metric(condition_summaries, "post_loss_novelty_spike_count"),
+            "curriculum_avg_strategy_switches": _avg_curriculum_metric(condition_summaries, "strategy_switch_count"),
+            "curriculum_avg_specific_adaptation": _avg_curriculum_metric(condition_summaries, "specific_adaptation_count"),
+            "curriculum_avg_degradation": _avg_curriculum_metric(condition_summaries, "degradation_count"),
+            "evaluation_condition_count": _evaluation_condition_count(condition_summaries),
         },
     }
 
@@ -679,6 +869,19 @@ def _format_novelty(condition: dict[str, Any]) -> list[str]:
     ]
 
 
+def _format_behavioral_summary(condition: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    for name in condition.get("agent_names", []):
+        behavior = condition.get("behavioral_summary", {}).get(name, {})
+        descriptor = behavior.get("average_descriptor", {})
+        if not descriptor:
+            continue
+        lines.append(
+            f"- {condition['agent_labels'][name]} behavioral profile averaged stay={descriptor.get('stay_ratio', 0.0)}, exploration={descriptor.get('exploration_ratio', 0.0)}, unique-cell coverage={descriptor.get('unique_cell_ratio', 0.0)}, and opponent distance={descriptor.get('mean_opponent_distance', 0.0)}. Latest profile: {behavior.get('latest_profile', 'unknown')}."
+        )
+    return lines
+
+
 def _format_code_change_summary(condition: dict[str, Any]) -> list[str]:
     lines: list[str] = []
     for name in condition.get("agent_names", []):
@@ -746,6 +949,61 @@ def _format_generation_policy(condition: dict[str, Any]) -> list[str]:
     if frozen_agents:
         lines.append(
             f"- Adaptation control: {', '.join(frozen_agents)} reused prior code after epoch 1 instead of regenerating each epoch."
+        )
+    return lines
+
+
+def _format_curriculum_summary(condition: dict[str, Any]) -> list[str]:
+    curriculum = condition.get("curriculum_policy", {})
+    if not curriculum or not curriculum.get("enabled"):
+        return []
+    lines = [
+        f"- Curriculum: mode={curriculum.get('mode', 'none')}, focal_agent={curriculum.get('focal_agent', '-')}, opponent_agent={curriculum.get('opponent_agent', '-')}, rotation_policy={curriculum.get('rotation_policy', 'cyclic')}."
+    ]
+    pool_labels = [label for label in condition.get("curriculum_pool_labels", []) if label]
+    if pool_labels:
+        lines.append(f"- Opponent pool: {', '.join(pool_labels)}.")
+    selection = curriculum.get("selection", {})
+    if selection:
+        lines.append(
+            f"- Selection policy: mode={selection.get('mode', 'accept_all')}, novelty_threshold={selection.get('novelty_threshold', 0.0)}, score_tolerance={selection.get('score_tolerance', 0.0)}."
+        )
+    archive = curriculum.get("archive", {})
+    if archive and archive.get("enabled"):
+        lines.append(
+            f"- Nemesis archive: reintroduce_every={archive.get('reintroduce_every', 0)}, min_score_margin={archive.get('min_score_margin', 0.0)}, max_size={archive.get('max_size', 0)}."
+        )
+    pressure = curriculum.get("pressure", {})
+    if pressure and pressure.get("enabled"):
+        lines.append(
+            f"- Loss-triggered mutation pressure: loss_streak_trigger={pressure.get('loss_streak_trigger', 0)}, score_margin_trigger={pressure.get('score_margin_trigger', 0.0)}."
+        )
+    for name in condition.get("agent_names", []):
+        metrics = condition.get("curriculum_metrics", {}).get(name, {})
+        if not metrics.get("enabled"):
+            continue
+        lines.append(
+            f"- {condition['agent_labels'][name]} curriculum metrics: loops={metrics.get('loop_count', 0)}, oscillations={metrics.get('oscillation_count', 0)}, reversions={metrics.get('reversion_count', 0)}, post-loss novelty spikes={metrics.get('post_loss_novelty_spike_count', 0)}, strategy switches={metrics.get('strategy_switch_count', 0)}, specific adaptations={metrics.get('specific_adaptation_count', 0)}, degradation signals={metrics.get('degradation_count', 0)}."
+        )
+    archive_entries = condition.get("archive", [])
+    if archive_entries:
+        lines.append(f"- Archive snapshots stored: {len(archive_entries)}.")
+    holdout_labels = [label for label in condition.get("holdout_labels", []) if label]
+    if holdout_labels:
+        lines.append(f"- Holdout panel opponents: {', '.join(holdout_labels)}.")
+    return lines
+
+
+def _format_evaluation_summary(condition: dict[str, Any]) -> list[str]:
+    evaluation = condition.get("evaluation") or {}
+    if not evaluation.get("enabled"):
+        return []
+    lines = [
+        f"- Holdout evaluation: {evaluation.get('games_per_opponent', 0)} games per opponent for focal agent `{evaluation.get('focal_agent', '-')}`."
+    ]
+    for opponent in evaluation.get("opponents", []):
+        lines.append(
+            f"- Holdout `{opponent.get('label', '-')}` ({opponent.get('provider', '-')}:`{opponent.get('model', '-')}`): mean score {opponent.get('mean_score', 0.0)}, mean margin {opponent.get('mean_score_margin', 0.0)}, win rate {opponent.get('win_rate', 0.0)}."
         )
     return lines
 
@@ -823,8 +1081,9 @@ def _render_research_caveats(suite_summary: dict[str, Any]) -> list[str]:
     noisy_conditions = [condition["condition_name"] for condition in conditions if not _condition_is_clean(condition)]
     lines = [
         "## Threats To Validity",
-        "- Code novelty is a normalized lexical change metric, not a direct measure of behavioral novelty on the grid.",
+        "- Code novelty is a normalized lexical change metric. The curriculum reports now add behavioral descriptors, but those descriptors are still heuristic summaries rather than full policy semantics.",
         "- Policy markers are heuristic indicators of potential rule violations; they are not proof of cheating or malicious intent.",
+        "- Looping, exploration, and pressure-response metrics are heuristic operationalizations of the supervisor-facing concepts, so they should be interpreted alongside qualitative epoch inspection rather than as perfect ground truth.",
         "- Results from a single run should be treated as provisional until replicated across additional seeds and repeated runs with cross-run statistics.",
         "- Conclusions are specific to this grid-game environment, the chosen prompts, and the configured model pairings; they do not automatically generalize to other tasks.",
     ]
@@ -879,6 +1138,8 @@ def render_markdown_report(
             f"- Cross-model conditions had average novelty {comparison['cross_model_avg_novelty']}.",
             f"- Same-model conditions averaged {comparison.get('same_model_avg_policy_markers', comparison.get('same_model_avg_suspicion_markers', 0.0))} policy markers per agent summary.",
             f"- Cross-model conditions averaged {comparison.get('cross_model_avg_policy_markers', comparison.get('cross_model_avg_suspicion_markers', 0.0))} policy markers per agent summary.",
+            f"- Curriculum-only metrics across enabled conditions: average loops {comparison.get('curriculum_avg_loop_count', 0.0)}, oscillations {comparison.get('curriculum_avg_oscillation_count', 0.0)}, reversions {comparison.get('curriculum_avg_reversion_count', 0.0)}, post-loss novelty spikes {comparison.get('curriculum_avg_post_loss_novelty_spikes', 0.0)}, strategy switches {comparison.get('curriculum_avg_strategy_switches', 0.0)}, specific adaptations {comparison.get('curriculum_avg_specific_adaptation', 0.0)}, degradation signals {comparison.get('curriculum_avg_degradation', 0.0)}.",
+            f"- Holdout evaluation conditions present in this run: {comparison.get('evaluation_condition_count', 0)}.",
             "",
             "## How To Read The Score Charts",
             "- Each `scores.svg` file plots one point per epoch for each agent.",
@@ -901,13 +1162,16 @@ def render_markdown_report(
         lines.extend(_format_research_metadata(condition))
         lines.extend(_format_agent_model_list(condition))
         lines.extend(_format_generation_policy(condition))
+        lines.extend(_format_curriculum_summary(condition))
         lines.append(f"- Overall result: {_format_overall_result(condition)}")
         lines.extend(_format_generation_execution(condition))
         lines.extend(_format_novelty(condition))
+        lines.extend(_format_behavioral_summary(condition))
         lines.extend(_format_code_change_summary(condition))
         lines.extend(_format_plateau_summary(condition))
         lines.extend(_format_runtime_summary(condition))
         lines.extend(_format_policy_summary(condition))
+        lines.extend(_format_evaluation_summary(condition))
         lines.extend(_format_notable_epochs(condition))
         lines.append(
             f"- Score chart artifact: `{condition['condition_name']}/scores.svg`."

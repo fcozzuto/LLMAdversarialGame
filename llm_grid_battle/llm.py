@@ -114,6 +114,51 @@ def choose_move(observation):
     dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
     return [dx, dy]
 """.strip()
+    if normalized == "center_rush":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    cx = observation["grid_width"] // 2
+    cy = observation["grid_height"] // 2
+    resources = observation.get("resources", [])
+    target = [cx, cy]
+    if resources:
+        target = min(resources, key=lambda item: (abs(item[0] - cx) + abs(item[1] - cy), abs(item[0] - sx) + abs(item[1] - sy)))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "corner_guard":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    if not resources:
+        return [0, 0]
+    near_self = [cell for cell in resources if abs(cell[0] - sx) + abs(cell[1] - sy) <= abs(cell[0] - ox) + abs(cell[1] - oy)]
+    target = min((near_self or resources), key=lambda item: (abs(item[0] - sx) + abs(item[1] - sy), abs(item[0] - ox) + abs(item[1] - oy)))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "resource_denier":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    if not resources:
+        return [0, 0]
+    def score(cell):
+        self_d = abs(cell[0] - sx) + abs(cell[1] - sy)
+        opp_d = abs(cell[0] - ox) + abs(cell[1] - oy)
+        return (opp_d - self_d, self_d)
+    target = max(resources, key=score)
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
     return default_agent_code()
 
 
