@@ -311,6 +311,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
     _json_dump(condition_dir / "condition_config.json", config.to_dict())
 
     history: list[dict[str, Any]] = []
+    optimization_history: list[dict[str, Any]] = []
     score_series: dict[str, list[float]] = {agent.name: [] for agent in config.agents}
     generation_cache: dict[str, Any] = {}
     curriculum_state = build_curriculum_state(config)
@@ -404,12 +405,19 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
                 opponent_info=opponent_info,
             )
             prompt_contexts[agent.name] = prompt_context
+            prompt_history = history
+            if (
+                curriculum_enabled(config)
+                and agent.name == config.curriculum.focal_agent
+                and config.curriculum.selection.mode != "accept_all"
+            ):
+                prompt_history = optimization_history
             prompt = build_generation_prompt(
                 config=config,
                 agent_name=agent.name,
                 opponent_name=opponent.name,
                 epoch_index=epoch_index,
-                history=history,
+                history=prompt_history,
                 curriculum_context=prompt_context,
             )
             prompts[agent.name] = prompt
@@ -523,6 +531,15 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         for name, score in epoch_result["scores"].items():
             score_series[name].append(score)
         history.append(epoch_result)
+        if (
+            curriculum_enabled(config)
+            and config.curriculum.selection.mode != "accept_all"
+            and selection_decision is not None
+        ):
+            if bool(selection_decision.get("accepted", False)):
+                optimization_history.append(epoch_result)
+        else:
+            optimization_history.append(epoch_result)
 
     evaluation_summary = None
     if curriculum_enabled(config) and config.curriculum.evaluation.enabled and history:
