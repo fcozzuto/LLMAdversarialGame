@@ -142,16 +142,21 @@ def build_generation_prompt(
                 f"- Current opponent archetype: {curriculum_context.get('opponent_label', opponent_name)}",
                 f"- Opponent source: {curriculum_context.get('opponent_source', 'condition_default')}",
                 f"- Current loss streak: {curriculum_context.get('loss_streak', 0)}",
+                f"- Current non-improving streak: {curriculum_context.get('non_improving_streak', 0)}",
                 f"- Nemesis archive size: {curriculum_context.get('archive_size', 0)}",
+                f"- Focal elite archive size: {curriculum_context.get('elite_archive_size', 0)}",
             ]
         )
+        elite_profiles = curriculum_context.get("elite_profiles") or []
+        if elite_profiles:
+            parts.append(f"- Existing accepted behavior niches: {', '.join(str(item) for item in elite_profiles)}.")
         baseline_score = curriculum_context.get("baseline_score_against_current_opponent")
         if baseline_score is not None:
             parts.append(f"- Your accepted baseline score against this opponent archetype is {baseline_score}.")
         incumbent = curriculum_context.get("accepted_incumbent")
         if incumbent:
             parts.append(
-                f"- Current accepted incumbent came from epoch {incumbent.get('epoch_index')} with behavior profile {incumbent.get('behavior_profile', 'unknown')}."
+                f"- Current accepted incumbent came from epoch {incumbent.get('epoch_index')} with behavior profile {incumbent.get('behavior_profile', 'unknown')} and behavior cell {incumbent.get('behavior_cell', 'unknown')}."
             )
             parts.append(
                 f"- Accepted incumbent code:\nBEGIN_ACCEPTED_POLICY\n{truncate_text(str(incumbent.get('code', '')))}\nEND_ACCEPTED_POLICY"
@@ -160,6 +165,10 @@ def build_generation_prompt(
         if rejection:
             parts.append(
                 f"- Last rejected candidate: epoch {rejection.get('epoch_index')}, reason={rejection.get('reason')}, behavioral_distance={rejection.get('behavioral_distance')}."
+            )
+        if curriculum_context.get("elite_archive_size", 0):
+            parts.append(
+                "- Selection rule: do not propose a cosmetic variant of an already-covered behavior niche unless it clearly improves score or robustness."
             )
         if curriculum_context.get("force_substantial_change"):
             parts.append("- Mutation pressure: your next proposal must be structurally different from the current accepted incumbent.")

@@ -60,6 +60,33 @@ _LIBRARY: dict[str, dict[str, Any]] = {
         "regenerate_each_epoch": False,
         "metadata": {"archetype": "resource_denier"},
     },
+    "edge_patrol": {
+        "label": "edge_patrol",
+        "provider": "builtin",
+        "model": "edge_patrol",
+        "temperature": 0.0,
+        "max_tokens": 1,
+        "regenerate_each_epoch": False,
+        "metadata": {"archetype": "edge_patrol"},
+    },
+    "diagonal_probe": {
+        "label": "diagonal_probe",
+        "provider": "builtin",
+        "model": "diagonal_probe",
+        "temperature": 0.0,
+        "max_tokens": 1,
+        "regenerate_each_epoch": False,
+        "metadata": {"archetype": "diagonal_probe"},
+    },
+    "safe_collector": {
+        "label": "safe_collector",
+        "provider": "builtin",
+        "model": "safe_collector",
+        "temperature": 0.0,
+        "max_tokens": 1,
+        "regenerate_each_epoch": False,
+        "metadata": {"archetype": "safe_collector"},
+    },
 }
 
 

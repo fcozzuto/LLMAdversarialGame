@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import time
 from typing import Any
 import urllib.error
 import urllib.request
@@ -22,6 +23,8 @@ from .sandbox import close_agent, collect_move, launch_agent, request_move
 
 CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 FENCE_LINE_RE = re.compile(r"^\s*```(?:python)?\s*$", re.IGNORECASE)
+RETRYABLE_HTTP_CODES = {429, 500, 502, 503, 504}
+MAX_HTTP_ATTEMPTS = 4
 
 
 def load_env_files(project_root: Path) -> None:
@@ -159,6 +162,72 @@ def choose_move(observation):
     dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
     return [dx, dy]
 """.strip()
+    if normalized == "edge_patrol":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    resources = observation.get("resources", [])
+    edge = [cell for cell in resources if cell[0] in (0, w - 1) or cell[1] in (0, h - 1)]
+    if edge:
+        target = min(edge, key=lambda item: abs(item[0] - sx) + abs(item[1] - sy))
+    else:
+        if sy == 0 and sx < w - 1:
+            return [1, 0]
+        if sx == w - 1 and sy < h - 1:
+            return [0, 1]
+        if sy == h - 1 and sx > 0:
+            return [-1, 0]
+        if sx == 0 and sy > 0:
+            return [0, -1]
+        target = [0, 0]
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "diagonal_probe":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    if not resources:
+        return [0, 0]
+    def score(cell):
+        self_d = abs(cell[0] - sx) + abs(cell[1] - sy)
+        opp_d = abs(cell[0] - ox) + abs(cell[1] - oy)
+        diagonal = abs((cell[0] - sx) - (cell[1] - sy))
+        return (self_d, -opp_d, diagonal, cell[0], cell[1])
+    target = min(resources, key=score)
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "safe_collector":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    obstacles = set(tuple(item) for item in observation.get("obstacles", []))
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not resources:
+        return [0, 0]
+    best = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < observation["grid_width"] and 0 <= ny < observation["grid_height"]):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        nearest = min(abs(nx - rx) + abs(ny - ry) for rx, ry in resources)
+        opp_d = abs(nx - ox) + abs(ny - oy)
+        key = (nearest, -opp_d, dx, dy)
+        if best is None or key < best[0]:
+            best = (key, dx, dy)
+    return [best[1], best[2]] if best else [0, 0]
+""".strip()
     return default_agent_code()
 
 
@@ -180,14 +249,39 @@ def _truncate(text: str, limit: int = 1400) -> str:
 
 
 def _post_json(url: str, headers: dict[str, str], payload: dict[str, Any], timeout: float) -> dict[str, Any]:
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_HTTP_ATTEMPTS + 1):
+        request = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            if exc.code in RETRYABLE_HTTP_CODES and attempt < MAX_HTTP_ATTEMPTS:
+                time.sleep(min(8.0, 0.75 * (2 ** (attempt - 1))))
+                last_error = RuntimeError(f"HTTP {exc.code}: {body[:500]}")
+                continue
+            raise RuntimeError(f"HTTP {exc.code}: {body[:500]}") from exc
+        except urllib.error.URLError as exc:
+            if attempt < MAX_HTTP_ATTEMPTS:
+                time.sleep(min(8.0, 0.75 * (2 ** (attempt - 1))))
+                last_error = exc
+                continue
+            raise
+        except TimeoutError as exc:
+            if attempt < MAX_HTTP_ATTEMPTS:
+                time.sleep(min(8.0, 0.75 * (2 ** (attempt - 1))))
+                last_error = exc
+                continue
+            raise
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Request failed without a recoverable error.")
 
 
 def _content_to_text(content: Any) -> str:
@@ -315,23 +409,22 @@ def _generate_text(
                 try:
                     response = _post_json(url, headers, payload, timeout)
                     return _openai_responses_text(response), None
-                except urllib.error.HTTPError as exc:
-                    body = exc.read().decode("utf-8", errors="replace")
-                    last_error = f"HTTP {exc.code}: {body[:500]}"
+                except RuntimeError as exc:
+                    body = str(exc)
+                    last_error = body
                     has_reasoning = "reasoning" in payload
                     verbosity = payload.get("text", {}).get("verbosity") if isinstance(payload.get("text"), dict) else None
-                    if exc.code == 400 and _is_unsupported_openai_reasoning_error(body) and has_reasoning:
+                    if "HTTP 400:" in body and _is_unsupported_openai_reasoning_error(body) and has_reasoning:
                         continue
-                    if exc.code == 400 and _is_unsupported_openai_text_verbosity_error(body) and verbosity != "medium":
+                    if "HTTP 400:" in body and _is_unsupported_openai_text_verbosity_error(body) and verbosity != "medium":
                         continue
                     return "", last_error
             return "", last_error or "OpenAI request failed."
 
         response = _post_json(url, headers, payload, timeout)
         return _content_to_text(response["choices"][0]["message"]["content"]), None
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return "", f"HTTP {exc.code}: {body[:500]}"
+    except RuntimeError as exc:
+        return "", str(exc)
     except Exception as exc:
         return "", str(exc)
 

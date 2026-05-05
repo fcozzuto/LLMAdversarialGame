@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from llm_grid_battle.analysis import render_markdown_report, summarize_suite
-from llm_grid_battle.behavioral_descriptors import behavioral_distance, compute_behavioral_descriptor
+from llm_grid_battle.behavioral_descriptors import behavioral_cell, behavioral_distance, compute_behavioral_descriptor
 from llm_grid_battle.config import ConditionConfig, SuiteConfig
 from llm_grid_battle.code_fingerprints import fingerprint_record
 from llm_grid_battle.curriculum import (
+    build_replay_opponent_pool,
+    build_selection_holdout_pool,
     build_curriculum_state,
     build_prompt_context,
     current_baseline_score,
@@ -57,6 +59,32 @@ def _agent_to_dict(agent: Any) -> dict[str, Any]:
         "max_tokens": agent.max_tokens,
         "regenerate_each_epoch": agent.regenerate_each_epoch,
     }
+
+
+def _get_or_generate_policy_code(
+    *,
+    config: ConditionConfig,
+    generation_cache: dict[str, Any],
+    cache_key: str,
+    agent: Any,
+    fixed_code: str | None = None,
+) -> str:
+    if fixed_code:
+        return str(fixed_code)
+    generation = generation_cache.get(cache_key)
+    if generation is None:
+        generation = generate_code(
+            provider=agent.provider,
+            model=agent.model,
+            system_prompt=agent.system_prompt,
+            user_prompt="Return a deterministic grid-game policy.",
+            temperature=agent.temperature,
+            max_tokens=agent.max_tokens,
+            pre_execution_validation=config.generation.pre_execution_validation,
+            repair_invalid_submissions=config.generation.repair_invalid_submissions,
+        )
+        generation_cache[cache_key] = generation
+    return str(generation.submitted_code or generation.code)
 
 
 def _resolve_collection(
@@ -242,33 +270,58 @@ def run_holdout_evaluation(
         focal_agent_name,
     )
     games_per_opponent = max(1, int(config.curriculum.evaluation.games_per_opponent))
+    return _evaluate_panel(
+        config=config,
+        focal_agent_name=focal_agent_name,
+        focal_agent=focal_agent,
+        focal_code=focal_code,
+        opponent_agent_name=opponent_agent_name,
+        opponent_pool=holdout_pool,
+        generation_cache=generation_cache,
+        games_per_opponent=games_per_opponent,
+        map_seed_base=config.seed + 500_000,
+        panel_name="holdout",
+    )
+
+
+def _evaluate_panel(
+    *,
+    config: ConditionConfig,
+    focal_agent_name: str,
+    focal_agent: Any,
+    focal_code: str,
+    opponent_agent_name: str,
+    opponent_pool: list[dict[str, Any]],
+    generation_cache: dict[str, Any],
+    games_per_opponent: int,
+    map_seed_base: int,
+    panel_name: str,
+    incumbent_code: str | None = None,
+    tolerance: float | None = None,
+) -> dict[str, Any]:
     opponent_summaries: list[dict[str, Any]] = []
-    for opponent_index, opponent_info in enumerate(holdout_pool, start=1):
+    for opponent_index, opponent_info in enumerate(opponent_pool, start=1):
         opponent_agent = opponent_info["agent"]
-        cache_key = opponent_info["cache_key"]
-        generation = generation_cache.get(cache_key)
-        if generation is None:
-            generation = generate_code(
-                provider=opponent_agent.provider,
-                model=opponent_agent.model,
-                system_prompt=opponent_agent.system_prompt,
-                user_prompt="Return a deterministic grid-game policy.",
-                temperature=opponent_agent.temperature,
-                max_tokens=opponent_agent.max_tokens,
-                pre_execution_validation=config.generation.pre_execution_validation,
-                repair_invalid_submissions=config.generation.repair_invalid_submissions,
-            )
-            generation_cache[cache_key] = generation
-        opponent_code = generation.submitted_code or generation.code
-        scores: list[float] = []
+        cache_key = opponent_info.get("cache_key") or f"{panel_name}:{opponent_info['label']}"
+        opponent_code = _get_or_generate_policy_code(
+            config=config,
+            generation_cache=generation_cache,
+            cache_key=str(cache_key),
+            agent=opponent_agent,
+            fixed_code=opponent_info.get("fixed_code"),
+        )
+        candidate_scores: list[float] = []
         opponent_scores: list[float] = []
+        incumbent_scores: list[float] = []
+        incumbent_opponent_scores: list[float] = []
         win_count = 0
         draw_count = 0
         for game_index in range(1, games_per_opponent + 1):
+            map_seed = map_seed_base + (opponent_index * 101) + game_index
             epoch = run_epoch(
                 config=config,
                 epoch_index=game_index,
-                map_seed=config.seed + 500_000 + (opponent_index * 101) + game_index,
+                map_seed=map_seed,
                 codes={
                     focal_agent_name: focal_code,
                     opponent_agent_name: opponent_code,
@@ -277,12 +330,31 @@ def run_holdout_evaluation(
             )
             focal_score = float(epoch["scores"][focal_agent_name])
             opponent_score = float(epoch["scores"][opponent_agent_name])
-            scores.append(focal_score)
+            candidate_scores.append(focal_score)
             opponent_scores.append(opponent_score)
             if focal_score > opponent_score:
                 win_count += 1
             elif focal_score == opponent_score:
                 draw_count += 1
+            if incumbent_code:
+                incumbent_epoch = run_epoch(
+                    config=config,
+                    epoch_index=game_index,
+                    map_seed=map_seed,
+                    codes={
+                        focal_agent_name: incumbent_code,
+                        opponent_agent_name: opponent_code,
+                    },
+                    active_agents=[focal_agent, opponent_agent],
+                )
+                incumbent_scores.append(float(incumbent_epoch["scores"][focal_agent_name]))
+                incumbent_opponent_scores.append(float(incumbent_epoch["scores"][opponent_agent_name]))
+        candidate_margin = (sum(candidate_scores) - sum(opponent_scores)) / len(candidate_scores)
+        incumbent_margin = None
+        margin_delta = None
+        if incumbent_scores:
+            incumbent_margin = (sum(incumbent_scores) - sum(incumbent_opponent_scores)) / len(incumbent_scores)
+            margin_delta = candidate_margin - incumbent_margin
         opponent_summaries.append(
             {
                 "label": opponent_info["label"],
@@ -290,20 +362,44 @@ def run_holdout_evaluation(
                 "model": opponent_agent.model,
                 "metadata": opponent_info.get("metadata", {}),
                 "games": games_per_opponent,
-                "mean_score": round(sum(scores) / len(scores), 4),
+                "mean_score": round(sum(candidate_scores) / len(candidate_scores), 4),
                 "mean_opponent_score": round(sum(opponent_scores) / len(opponent_scores), 4),
-                "mean_score_margin": round((sum(scores) - sum(opponent_scores)) / len(scores), 4),
+                "mean_score_margin": round(candidate_margin, 4),
                 "win_rate": round(win_count / games_per_opponent, 4),
                 "draw_rate": round(draw_count / games_per_opponent, 4),
+                "incumbent_mean_score": round(sum(incumbent_scores) / len(incumbent_scores), 4) if incumbent_scores else None,
+                "incumbent_mean_score_margin": round(incumbent_margin, 4) if incumbent_margin is not None else None,
+                "margin_delta_vs_incumbent": round(margin_delta, 4) if margin_delta is not None else None,
             }
         )
-
-    return {
+    summary = {
         "enabled": True,
+        "panel": panel_name,
         "focal_agent": focal_agent_name,
         "games_per_opponent": games_per_opponent,
         "opponents": opponent_summaries,
     }
+    if incumbent_code:
+        margin_deltas = [
+            float(item["margin_delta_vs_incumbent"])
+            for item in opponent_summaries
+            if item.get("margin_delta_vs_incumbent") is not None
+        ]
+        mean_margin_delta = sum(margin_deltas) / len(margin_deltas) if margin_deltas else 0.0
+        min_margin_delta = min(margin_deltas) if margin_deltas else 0.0
+        tolerance_value = float(tolerance or 0.0)
+        summary.update(
+            {
+                "mean_margin_delta_vs_incumbent": round(mean_margin_delta, 4),
+                "min_margin_delta_vs_incumbent": round(min_margin_delta, 4),
+                "tolerance": round(tolerance_value, 4),
+                "passed": bool(
+                    mean_margin_delta >= -tolerance_value
+                    and min_margin_delta >= -(tolerance_value * 2.0)
+                ),
+            }
+        )
+    return summary
 
 
 def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any]:
@@ -490,15 +586,75 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
             focal_descriptor = behavioral_descriptors.get(focal_name)
             incumbent = curriculum_state.get("incumbent")
             incumbent_descriptor = incumbent.get("descriptor") if incumbent else None
+            incumbent_code = incumbent.get("code") if incumbent else None
             baseline_score = current_baseline_score(
                 curriculum_state,
                 str(opponent_info["label"]) if opponent_info else active_agents_by_name[opponent_name].model,
             )
+            elite_archive = curriculum_state.get("elite_archive")
+            elite_distance = elite_archive.nearest_distance(focal_descriptor) if elite_archive else 0.0
+            opens_new_elite_cell = elite_archive.would_open_cell(focal_descriptor) if elite_archive else False
+            elite_entry = elite_archive.get(focal_descriptor) if elite_archive else None
+            replay_summary = None
+            holdout_summary = None
+            preselection_score_delta = (
+                float(epoch_result["scores"][focal_name]) - baseline_score
+                if baseline_score is not None
+                else None
+            )
+            would_probe = (
+                config.curriculum.selection.mode != "accept_all"
+                and incumbent_code
+                and (
+                    baseline_score is None
+                    or preselection_score_delta is None
+                    or preselection_score_delta >= -float(config.curriculum.selection.score_tolerance)
+                )
+            )
+            if would_probe:
+                base_agents = {agent.name: agent for agent in config.agents}
+                replay_pool = build_replay_opponent_pool(config=config, state=curriculum_state)
+                if replay_pool:
+                    replay_summary = _evaluate_panel(
+                        config=config,
+                        focal_agent_name=focal_name,
+                        focal_agent=base_agents[focal_name],
+                        focal_code=str(epoch_result["submitted_codes"][focal_name]),
+                        opponent_agent_name=opponent_name,
+                        opponent_pool=replay_pool,
+                        generation_cache=generation_cache,
+                        games_per_opponent=max(1, int(config.curriculum.selection.replay_games_per_opponent)),
+                        map_seed_base=config.seed + 700_000 + (epoch_index * 1000),
+                        panel_name="selection_replay",
+                        incumbent_code=str(incumbent_code),
+                        tolerance=float(config.curriculum.selection.replay_score_tolerance),
+                    )
+                holdout_pool = build_selection_holdout_pool(config=config)
+                if holdout_pool:
+                    holdout_summary = _evaluate_panel(
+                        config=config,
+                        focal_agent_name=focal_name,
+                        focal_agent=base_agents[focal_name],
+                        focal_code=str(epoch_result["submitted_codes"][focal_name]),
+                        opponent_agent_name=opponent_name,
+                        opponent_pool=holdout_pool,
+                        generation_cache=generation_cache,
+                        games_per_opponent=max(1, int(config.curriculum.selection.holdout_games_per_opponent)),
+                        map_seed_base=config.seed + 900_000 + (epoch_index * 1000),
+                        panel_name="selection_holdout",
+                        incumbent_code=str(incumbent_code),
+                        tolerance=float(config.curriculum.selection.holdout_score_tolerance),
+                    )
             selection_decision = decide_candidate_acceptance(
                 policy=config.curriculum.selection,
                 candidate_score=float(epoch_result["scores"][focal_name]),
                 baseline_score=baseline_score,
                 behavioral_distance=behavioral_distance(focal_descriptor, incumbent_descriptor),
+                elite_distance=elite_distance,
+                opens_new_elite_cell=opens_new_elite_cell,
+                elite_cell_score=float(elite_entry.score) if elite_entry else None,
+                replay_summary=replay_summary,
+                holdout_summary=holdout_summary,
             )
             curriculum_trace = record_epoch_outcome(
                 config=config,
@@ -591,6 +747,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         "evaluation": evaluation_summary,
         "curriculum_trace": curriculum_state.get("trace", []),
         "archive": curriculum_state["archive"].to_list() if curriculum_enabled(config) else [],
+        "elite_archive": curriculum_state["elite_archive"].to_list() if curriculum_enabled(config) else [],
     }
     _json_dump(condition_dir / "condition_summary.json", condition_payload)
     return condition_payload
@@ -619,8 +776,8 @@ def build_judge_prompt(suite_summary: dict[str, Any]) -> str:
             "- If evaluation summaries are present, treat them as holdout evidence and distinguish them from training-time adaptation metrics.",
             "",
             "Output requirements:",
-            "- Answer in concise markdown.",
-            "- Use short sections named: Models Used, Question 1, Question 2, Question 3, Question 4, Question 5, Looping And Plateau, Exploration, Pressure Response, Data Quality Caveats, Bottom Line.",
+            "- Answer in concise markdown for a research audience.",
+            "- Use short sections named: Models and Roles, Research Question 1, Research Question 2, Research Question 3, Research Question 4, Research Question 5, Looping and Plateau, Exploration, Pressure Response, Data Quality Caveats, Bottom Line.",
             "- In each question section, separate measured evidence from inference.",
             "",
             "Use the provided numeric and heuristic summary to answer these questions:",
@@ -642,17 +799,32 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run an LLM adversarial grid battle suite.")
     parser.add_argument("--config", default="configs/default_suite.json", help="Path to the suite config JSON.")
     parser.add_argument("--output-root", default=None, help="Optional override for the output root directory.")
+    parser.add_argument("--seed-offset", type=int, default=0, help="Add this offset to every condition seed for replication campaigns.")
+    parser.add_argument("--replicate-label", default=None, help="Optional replicate label stored in run metadata and condition metadata.")
     parser.add_argument("--skip-judge", action="store_true", help="Skip the final low-cost analysis model call.")
     args = parser.parse_args()
 
     project_root = Path(__file__).resolve().parent
     load_env_files(project_root)
     suite = SuiteConfig.load(project_root / args.config)
+    if args.seed_offset or args.replicate_label:
+        for condition in suite.conditions:
+            if args.seed_offset:
+                condition.seed += int(args.seed_offset)
+            if args.replicate_label:
+                condition.metadata = {
+                    **condition.metadata,
+                    "replicate_label": str(args.replicate_label),
+                    "seed_offset": int(args.seed_offset),
+                }
 
     started_at = datetime.now()
     timestamp = started_at.strftime("%Y%m%d_%H%M%S")
     base_output_root = Path(args.output_root) if args.output_root else project_root / suite.conditions[0].output_root
-    run_dir = base_output_root / f"run_{timestamp}"
+    run_name = f"run_{timestamp}"
+    if args.replicate_label:
+        run_name = f"{run_name}_{args.replicate_label}"
+    run_dir = base_output_root / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
     condition_payloads = []
@@ -683,6 +855,8 @@ def main() -> None:
         "finished_at_local": finished_at.strftime("%Y-%m-%d %H:%M:%S"),
         "duration_hhmm": _format_duration_hhmm((finished_at - started_at).total_seconds()),
         "duration_seconds": round((finished_at - started_at).total_seconds(), 3),
+        "seed_offset": int(args.seed_offset),
+        "replicate_label": str(args.replicate_label) if args.replicate_label else None,
         "judge_status": "enabled" if llm_report is not None else ("skipped" if args.skip_judge else "disabled"),
         "judge_provider": judge_config.provider if llm_report is not None else None,
         "judge_model": judge_config.model if llm_report is not None else None,

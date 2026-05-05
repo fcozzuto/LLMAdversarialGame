@@ -106,8 +106,10 @@ class ArchivePolicyConfig:
 @dataclass
 class PressurePolicyConfig:
     enabled: bool = False
-    loss_streak_trigger: int = 1
-    score_margin_trigger: float = 0.0
+    loss_streak_trigger: int = 2
+    score_margin_trigger: float = 1.5
+    stagnation_epoch_trigger: int = 3
+    cooldown_epochs: int = 1
     require_substantial_change: bool = True
     custom_instruction: str = (
         "Your last approach failed. Propose a substantially different algorithmic strategy."
@@ -120,12 +122,22 @@ class SelectionPolicyConfig:
     novelty_metric: str = "behavioral_distance"
     novelty_threshold: float = 0.2
     score_tolerance: float = 0.5
+    replay_opponent_count: int = 0
+    replay_games_per_opponent: int = 1
+    replay_score_tolerance: float = 0.5
+    holdout_opponent_count: int = 0
+    holdout_games_per_opponent: int = 1
+    holdout_score_tolerance: float = 0.75
+    elite_archive_enabled: bool = False
+    elite_archive_max_size: int = 12
+    elite_distance_threshold: float = 0.18
+    elite_score_tolerance: float = 0.5
 
 
 @dataclass
 class EvaluationConfig:
     enabled: bool = False
-    games_per_opponent: int = 3
+    games_per_opponent: int = 5
     holdout_opponents: list[OpponentSpec] = field(default_factory=list)
 
 
