@@ -25,6 +25,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - `Cheating evidence`: policy markers, forbidden-call attempts, import attempts, or other sandbox-triggered rule-violation indicators. Runtime pathing mistakes are not cheating evidence.
 - `Code novelty`: normalized lexical change between consecutive submitted programs.
 - `Behavioral novelty`: change in trajectory-level descriptors such as stay ratio, unique-cell coverage, opponent-distance bias, and path overlap.
+- `Behavior cell`: a discretized behavioral niche used for elite-archive coverage and quality-diversity style selection.
 - `Execution reliability`: submitted-code execution rate, distinct from model-call success.
 - `Plateau`: repeated or near-repeated policy with low recent novelty and no recent score improvement.
 - `Looping`: repeated code motifs, failed-fix repetition, oscillation between two strategies, or reversion to an earlier strategy.
@@ -57,8 +58,11 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] An explicit undocumented-field opportunity suite exists in [configs/research_cheating_opportunity_suite.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/research_cheating_opportunity_suite.json).
 - [x] A cross-run aggregation tool exists in [aggregate_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_runs.py).
 - [x] Curriculum condition configs can define fixed predators, rotating opponent pools, nemesis archives, loss-triggered mutation pressure, novelty-gated selection, and holdout panels.
+- [x] Replay-aware selection checks can compare a candidate against recent nemeses before acceptance.
+- [x] A focal-policy elite archive can preserve accepted policies across behavioral cells.
 - [x] Per-epoch artifacts store behavioral descriptors, code fingerprints, and curriculum trace fields.
 - [x] Aggregate reports summarize curriculum loop, exploration, and pressure-response heuristics.
+- [x] The curriculum runbook defines a three-replicate seed-offset campaign instead of relying on single-run evidence.
 
 ## Required Ablations And Controls
 
@@ -93,6 +97,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [ ] At least 3 repeated long-horizon runs for the core suite.
 - [ ] At least 3 repeated runs for the main ablation suite or a justified subset of its conditions.
 - [ ] At least 3 repeated runs for the main curriculum suite family or a justified subset of its conditions.
+- [ ] Curriculum-family claims should be based on learner-centric summaries, not on averaged learner-plus-opponent curriculum metrics.
 - [ ] At least 1 aggregate report generated with [aggregate_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_runs.py) for each main suite family.
 - [ ] Final claims checked against deterministic summaries, aggregate reports, and qualitative epoch review, not judge prose alone.
 
@@ -100,3 +105,4 @@ This checklist is the fixed research protocol for the project. It separates infr
 
 - The project is engineering-complete and research-infrastructure-complete for both the phase-1 and phase-2 protocols.
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
+- Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).

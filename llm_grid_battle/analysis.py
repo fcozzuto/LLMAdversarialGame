@@ -5,7 +5,7 @@ import json
 import statistics
 from typing import Any
 
-from .behavioral_descriptors import behavioral_distance, behavioral_profile_label
+from .behavioral_descriptors import behavioral_cell, behavioral_distance, behavioral_profile_label
 from .code_fingerprints import code_similarity, normalize_code, strategy_tags
 
 
@@ -125,6 +125,7 @@ def _curriculum_metrics(
     ]
     descriptors = [epoch.get("behavioral_descriptors", {}).get(agent_name, {}) for epoch in epochs]
     behavior_profiles = [behavioral_profile_label(descriptor) for descriptor in descriptors]
+    behavior_cells = [behavioral_cell(descriptor) for descriptor in descriptors]
     strategy_labels = [
         tuple(epoch.get("code_fingerprints", {}).get(agent_name, {}).get("strategy_tags", []))
         for epoch in epochs
@@ -170,8 +171,18 @@ def _curriculum_metrics(
             superficial_novelty_count += 1
         if index >= 1 and margins[index - 1] < 0 and novelties[index - 1] >= 0.2:
             post_loss_novelty_spike_count += 1
-        if index >= 1 and (behavior_profiles[index] != behavior_profiles[index - 1] or strategy_labels[index] != strategy_labels[index - 1]):
-            strategy_switch_count += 1
+        if index >= 1:
+            profile_changed = behavior_profiles[index] != behavior_profiles[index - 1]
+            cell_changed = behavior_cells[index] != behavior_cells[index - 1]
+            tags_changed = strategy_labels[index] != strategy_labels[index - 1]
+            large_descriptor_shift = descriptor_shifts[index - 1] >= 0.16
+            persistent = (
+                index == len(epochs) - 1
+                or behavior_cells[index + 1] == behavior_cells[index]
+                or strategy_labels[index + 1] == strategy_labels[index]
+            )
+            if persistent and (cell_changed or (profile_changed and tags_changed) or (large_descriptor_shift and tags_changed)):
+                strategy_switch_count += 1
         if margins[index] < 0:
             recent_negative_streak += 1
         else:
@@ -206,6 +217,8 @@ def _curriculum_metrics(
         "generalization_hint_count": generalization_hint_count,
         "degradation_count": degradation_count,
         "behavior_profiles": behavior_profiles,
+        "behavior_cells": behavior_cells,
+        "behavior_cell_count": len(set(behavior_cells)),
     }
 
 
@@ -340,6 +353,44 @@ def _build_notable_epochs(
             }
         )
 
+    replay_rejection = next(
+        (
+            epoch
+            for epoch in epochs
+            if str((epoch.get("curriculum", {}).get("selection") or {}).get("reason", "")).startswith("rejected_by_")
+        ),
+        None,
+    )
+    if replay_rejection is not None:
+        notes.append(
+            {
+                "kind": "selection_rejection",
+                "epoch_index": int(replay_rejection["epoch_index"]),
+                "summary": f"first curriculum rejection by robustness checks: {(replay_rejection.get('curriculum', {}).get('selection') or {}).get('reason', 'unknown')}",
+            }
+        )
+
+    diversity_accept = next(
+        (
+            epoch
+            for epoch in epochs
+            if str((epoch.get("curriculum", {}).get("selection") or {}).get("reason", "")) in {
+                "opened_new_behavior_cell",
+                "diversity_gain_within_score_tolerance",
+                "behavioral_diversity_within_score_tolerance",
+            }
+        ),
+        None,
+    )
+    if diversity_accept is not None:
+        notes.append(
+            {
+                "kind": "diversity_accept",
+                "epoch_index": int(diversity_accept["epoch_index"]),
+                "summary": f"first acceptance driven by diversity logic: {(diversity_accept.get('curriculum', {}).get('selection') or {}).get('reason', 'unknown')}",
+            }
+        )
+
     return notes
 
 
@@ -377,7 +428,7 @@ def _win_count_winner(condition: dict[str, Any]) -> str | None:
 def _render_deterministic_conclusion(suite_summary: dict[str, Any]) -> list[str]:
     conditions = suite_summary.get("conditions", [])
     comparison = suite_summary.get("cross_condition_comparison", {})
-    lines = ["## Deterministic Conclusion"]
+    lines = ["## Deterministic Findings"]
 
     clean_condition_count = sum(1 for condition in conditions if _condition_is_clean(condition))
     if conditions:
@@ -461,10 +512,10 @@ def _render_deterministic_conclusion(suite_summary: dict[str, Any]) -> list[str]
     same_model_markers = comparison.get("same_model_avg_policy_markers")
     cross_model_markers = comparison.get("cross_model_avg_policy_markers")
     if same_model_markers == 0 and cross_model_markers == 0:
-        lines.append("- Policy markers: none were recorded in either same-model or cross-model conditions.")
+        lines.append("- Potential rule-violation indicators: none were recorded in either same-model or cross-model conditions.")
     elif same_model_markers is not None and cross_model_markers is not None:
         lines.append(
-            f"- Policy markers: same-model average {same_model_markers}, cross-model average {cross_model_markers}."
+            f"- Potential rule-violation indicators: same-model average {same_model_markers}, cross-model average {cross_model_markers}."
         )
 
     runtime_notes: list[str] = []
@@ -481,12 +532,15 @@ def _render_deterministic_conclusion(suite_summary: dict[str, Any]) -> list[str]
 
     curriculum_notes: list[str] = []
     for condition in conditions:
-        for agent in condition.get("agent_names", []):
+        agent_pool = [condition.get("learner_agent")] if condition.get("learner_agent") else condition.get("agent_names", [])
+        for agent in agent_pool:
+            if not agent:
+                continue
             metrics = condition.get("curriculum_metrics", {}).get(agent, {})
             if not metrics.get("enabled"):
                 continue
             curriculum_notes.append(
-                f"{condition['condition_name']} / {condition['agent_labels'][agent]}: loops={metrics.get('loop_count', 0)}, oscillations={metrics.get('oscillation_count', 0)}, reversions={metrics.get('reversion_count', 0)}, post-loss spikes={metrics.get('post_loss_novelty_spike_count', 0)}, specific adaptations={metrics.get('specific_adaptation_count', 0)}"
+                f"{condition['condition_name']} / {condition['agent_labels'][agent]}: loops={metrics.get('loop_count', 0)}, oscillations={metrics.get('oscillation_count', 0)}, reversions={metrics.get('reversion_count', 0)}, post-loss spikes={metrics.get('post_loss_novelty_spike_count', 0)}, behavior-cell coverage={metrics.get('behavior_cell_count', 0)}, specific adaptations={metrics.get('specific_adaptation_count', 0)}"
             )
     if curriculum_notes:
         lines.append(f"- Curriculum notes: {'; '.join(curriculum_notes)}.")
@@ -626,6 +680,7 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
             "average_descriptor": averaged_descriptors,
             "latest_descriptor": descriptor_values[-1] if descriptor_values else {},
             "latest_profile": behavioral_profile_label(descriptor_values[-1] if descriptor_values else {}),
+            "latest_cell": behavioral_cell(descriptor_values[-1] if descriptor_values else {}),
         }
         curriculum_metrics[agent_name] = _curriculum_metrics(
             epochs=epochs,
@@ -640,11 +695,19 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         codes_by_agent=codes_by_agent,
     )
 
+    curriculum_policy = condition_summary.get("curriculum", {})
+    learner_agent = str(curriculum_policy.get("focal_agent", "")) if curriculum_policy.get("enabled") else ""
+    opponent_role_agent = str(curriculum_policy.get("opponent_agent", "")) if curriculum_policy.get("enabled") else ""
+
     return {
         "condition_name": condition_summary["condition_name"],
         "agent_names": agent_names,
         "agent_models": agent_models,
         "agent_labels": agent_labels,
+        "learner_agent": learner_agent,
+        "learner_label": agent_labels.get(learner_agent, learner_agent) if learner_agent else "",
+        "opponent_role_agent": opponent_role_agent,
+        "opponent_role_label": agent_labels.get(opponent_role_agent, opponent_role_agent) if opponent_role_agent else "",
         "agent_generation_controls": agent_generation_controls,
         "epoch_count": len(epochs),
         "same_model_matchup": len({(agent["provider"], agent["model"]) for agent in agents}) == 1,
@@ -652,14 +715,14 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         "generation_policy": condition_summary.get("generation", {}),
         "observation_policy": condition_summary.get("observation", {}),
         "map_policy": condition_summary.get("map", {}),
-        "curriculum_policy": condition_summary.get("curriculum", {}),
+        "curriculum_policy": curriculum_policy,
         "curriculum_pool_labels": [
             item.get("label") or item.get("library_key") or item.get("model")
-            for item in condition_summary.get("curriculum", {}).get("opponent_pool", [])
+            for item in curriculum_policy.get("opponent_pool", [])
         ],
         "holdout_labels": [
             item.get("label") or item.get("library_key") or item.get("model")
-            for item in condition_summary.get("curriculum", {}).get("evaluation", {}).get("holdout_opponents", [])
+            for item in curriculum_policy.get("evaluation", {}).get("holdout_opponents", [])
         ],
         "metadata": condition_summary.get("metadata", {}),
         "win_counts": dict(win_counts),
@@ -688,6 +751,7 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         "notable_epochs": notable_epochs,
         "curriculum_trace": condition_summary.get("curriculum_trace", []),
         "archive": condition_summary.get("archive", []),
+        "elite_archive": condition_summary.get("elite_archive", []),
         "evaluation": condition_summary.get("evaluation") or {},
     }
 
@@ -701,21 +765,29 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
     def _avg_novelty(items: list[dict[str, Any]]) -> float:
         values: list[float] = []
         for item in items:
-            for agent in item["agent_names"]:
+            agent_pool = [item.get("learner_agent")] if item.get("learner_agent") else item["agent_names"]
+            for agent in agent_pool:
+                if not agent:
+                    continue
                 values.append(float(item["novelty"][agent]["average"]))
         return round(statistics.mean(values), 4) if values else 0.0
 
     def _avg_policy_markers(items: list[dict[str, Any]]) -> float:
         values: list[int] = []
         for item in items:
-            for agent in item["agent_names"]:
+            agent_pool = [item.get("learner_agent")] if item.get("learner_agent") else item["agent_names"]
+            for agent in agent_pool:
+                if not agent:
+                    continue
                 values.append(len(item.get("policy_markers", {}).get(agent, [])))
         return round(statistics.mean(values), 3) if values else 0.0
 
     def _avg_curriculum_metric(items: list[dict[str, Any]], metric_name: str) -> float:
         values: list[float] = []
         for item in items:
-            for agent in item["agent_names"]:
+            focal_agent = item.get("learner_agent")
+            agent_pool = [focal_agent] if focal_agent else item["agent_names"]
+            for agent in agent_pool:
                 metrics = item.get("curriculum_metrics", {}).get(agent, {})
                 if metrics.get("enabled"):
                     values.append(float(metrics.get(metric_name, 0.0)))
@@ -776,6 +848,7 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
             "curriculum_avg_reversion_count": _avg_curriculum_metric(condition_summaries, "reversion_count"),
             "curriculum_avg_post_loss_novelty_spikes": _avg_curriculum_metric(condition_summaries, "post_loss_novelty_spike_count"),
             "curriculum_avg_strategy_switches": _avg_curriculum_metric(condition_summaries, "strategy_switch_count"),
+            "curriculum_avg_behavior_cell_coverage": _avg_curriculum_metric(condition_summaries, "behavior_cell_count"),
             "curriculum_avg_specific_adaptation": _avg_curriculum_metric(condition_summaries, "specific_adaptation_count"),
             "curriculum_avg_degradation": _avg_curriculum_metric(condition_summaries, "degradation_count"),
             "evaluation_condition_count": _evaluation_condition_count(condition_summaries),
@@ -877,7 +950,7 @@ def _format_behavioral_summary(condition: dict[str, Any]) -> list[str]:
         if not descriptor:
             continue
         lines.append(
-            f"- {condition['agent_labels'][name]} behavioral profile averaged stay={descriptor.get('stay_ratio', 0.0)}, exploration={descriptor.get('exploration_ratio', 0.0)}, unique-cell coverage={descriptor.get('unique_cell_ratio', 0.0)}, and opponent distance={descriptor.get('mean_opponent_distance', 0.0)}. Latest profile: {behavior.get('latest_profile', 'unknown')}."
+            f"- {condition['agent_labels'][name]} behavioral profile averaged stay={descriptor.get('stay_ratio', 0.0)}, exploration={descriptor.get('exploration_ratio', 0.0)}, revisit={descriptor.get('revisit_ratio', 0.0)}, resource pursuit={descriptor.get('resource_pursuit_ratio', 0.0)}, opponent pursuit={descriptor.get('opponent_pursuit_ratio', 0.0)}, and opponent distance={descriptor.get('mean_opponent_distance', 0.0)}. Latest profile: {behavior.get('latest_profile', 'unknown')}."
         )
     return lines
 
@@ -928,9 +1001,9 @@ def _format_policy_summary(condition: dict[str, Any]) -> list[str]:
         markers = condition.get("policy_markers", {}).get(name, [])
         if markers:
             any_policy = True
-            lines.append(f"- {condition['agent_labels'][name]} policy markers: {', '.join(markers)}.")
+            lines.append(f"- {condition['agent_labels'][name]} potential rule-violation indicators: {', '.join(markers)}.")
     if not any_policy:
-        lines.append("- No policy markers were recorded in this condition.")
+        lines.append("- No potential rule-violation indicators were recorded in this condition.")
     return lines
 
 
@@ -958,7 +1031,7 @@ def _format_curriculum_summary(condition: dict[str, Any]) -> list[str]:
     if not curriculum or not curriculum.get("enabled"):
         return []
     lines = [
-        f"- Curriculum: mode={curriculum.get('mode', 'none')}, focal_agent={curriculum.get('focal_agent', '-')}, opponent_agent={curriculum.get('opponent_agent', '-')}, rotation_policy={curriculum.get('rotation_policy', 'cyclic')}."
+        f"- Curriculum design: mode={curriculum.get('mode', 'none')}, learner={condition.get('learner_label', curriculum.get('focal_agent', '-'))}, opponent role={condition.get('opponent_role_label', curriculum.get('opponent_agent', '-'))}, rotation policy={curriculum.get('rotation_policy', 'cyclic')}."
     ]
     pool_labels = [label for label in condition.get("curriculum_pool_labels", []) if label]
     if pool_labels:
@@ -966,8 +1039,16 @@ def _format_curriculum_summary(condition: dict[str, Any]) -> list[str]:
     selection = curriculum.get("selection", {})
     if selection:
         lines.append(
-            f"- Selection policy: mode={selection.get('mode', 'accept_all')}, novelty_threshold={selection.get('novelty_threshold', 0.0)}, score_tolerance={selection.get('score_tolerance', 0.0)}."
+            f"- Acceptance rule: mode={selection.get('mode', 'accept_all')}, novelty threshold={selection.get('novelty_threshold', 0.0)}, elite-distance threshold={selection.get('elite_distance_threshold', 0.0)}, score tolerance={selection.get('score_tolerance', 0.0)}."
         )
+        if selection.get("replay_opponent_count", 0):
+            lines.append(
+                f"- Replay-aware selection: candidate policies were rechecked against up to {selection.get('replay_opponent_count', 0)} archived opponents before acceptance."
+            )
+        if selection.get("holdout_opponent_count", 0):
+            lines.append(
+                f"- Holdout-aware selection: candidate policies were spot-checked against {selection.get('holdout_opponent_count', 0)} held-out opponents before acceptance."
+            )
     archive = curriculum.get("archive", {})
     if archive and archive.get("enabled"):
         lines.append(
@@ -976,18 +1057,24 @@ def _format_curriculum_summary(condition: dict[str, Any]) -> list[str]:
     pressure = curriculum.get("pressure", {})
     if pressure and pressure.get("enabled"):
         lines.append(
-            f"- Loss-triggered mutation pressure: loss_streak_trigger={pressure.get('loss_streak_trigger', 0)}, score_margin_trigger={pressure.get('score_margin_trigger', 0.0)}."
+            f"- Loss-triggered mutation pressure: loss-streak trigger={pressure.get('loss_streak_trigger', 0)}, stagnation trigger={pressure.get('stagnation_epoch_trigger', 0)}, cooldown={pressure.get('cooldown_epochs', 0)}, score-margin trigger={pressure.get('score_margin_trigger', 0.0)}."
         )
     for name in condition.get("agent_names", []):
         metrics = condition.get("curriculum_metrics", {}).get(name, {})
         if not metrics.get("enabled"):
             continue
+        if condition.get("learner_agent") and name != condition.get("learner_agent"):
+            continue
+        role_prefix = "Learner" if name == condition.get("learner_agent") else condition["agent_labels"][name]
         lines.append(
-            f"- {condition['agent_labels'][name]} curriculum metrics: loops={metrics.get('loop_count', 0)}, oscillations={metrics.get('oscillation_count', 0)}, reversions={metrics.get('reversion_count', 0)}, post-loss novelty spikes={metrics.get('post_loss_novelty_spike_count', 0)}, strategy switches={metrics.get('strategy_switch_count', 0)}, specific adaptations={metrics.get('specific_adaptation_count', 0)}, degradation signals={metrics.get('degradation_count', 0)}."
+            f"- {role_prefix} curriculum metrics: loops={metrics.get('loop_count', 0)}, oscillations={metrics.get('oscillation_count', 0)}, reversions={metrics.get('reversion_count', 0)}, post-loss novelty spikes={metrics.get('post_loss_novelty_spike_count', 0)}, stable strategy switches={metrics.get('strategy_switch_count', 0)}, behavior-cell coverage={metrics.get('behavior_cell_count', 0)}, specific adaptations={metrics.get('specific_adaptation_count', 0)}, degradation signals={metrics.get('degradation_count', 0)}."
         )
     archive_entries = condition.get("archive", [])
     if archive_entries:
         lines.append(f"- Archive snapshots stored: {len(archive_entries)}.")
+    elite_entries = condition.get("elite_archive", [])
+    if elite_entries:
+        lines.append(f"- Focal elite archive coverage: {len(elite_entries)} behavior cells.")
     holdout_labels = [label for label in condition.get("holdout_labels", []) if label]
     if holdout_labels:
         lines.append(f"- Holdout panel opponents: {', '.join(holdout_labels)}.")
@@ -999,7 +1086,7 @@ def _format_evaluation_summary(condition: dict[str, Any]) -> list[str]:
     if not evaluation.get("enabled"):
         return []
     lines = [
-        f"- Holdout evaluation: {evaluation.get('games_per_opponent', 0)} games per opponent for focal agent `{evaluation.get('focal_agent', '-')}`."
+        f"- Held-out evaluation: {evaluation.get('games_per_opponent', 0)} games per opponent for learner `{evaluation.get('focal_agent', '-')}`."
     ]
     for opponent in evaluation.get("opponents", []):
         lines.append(
@@ -1021,7 +1108,7 @@ def _format_notable_epochs(condition: dict[str, Any]) -> list[str]:
     if not notable:
         return []
     return [
-        f"- Notable epoch {item['epoch_index']}: {item['summary']}."
+        f"- Suggested qualitative follow-up, epoch {item['epoch_index']}: {item['summary']}. Artifact: `{condition['condition_name']}/epochs/epoch_{int(item['epoch_index']):03d}/artifact.json`."
         for item in notable
     ]
 
@@ -1054,12 +1141,16 @@ def _render_models_used(
     suite_summary: dict[str, Any],
     run_metadata: dict[str, Any] | None,
 ) -> list[str]:
-    lines = ["## Models Used"]
+    lines = ["## Models and Roles"]
     for condition in suite_summary.get("conditions", []):
-        agent_parts = [
-            f"`{agent}` = `{condition['agent_models'][agent]}`"
-            for agent in condition.get("agent_names", [])
-        ]
+        agent_parts = []
+        for agent in condition.get("agent_names", []):
+            role = ""
+            if agent == condition.get("learner_agent"):
+                role = " (learner)"
+            elif agent == condition.get("opponent_role_agent"):
+                role = " (curriculum opponent)"
+            agent_parts.append(f"`{agent}`{role} = `{condition['agent_models'][agent]}`")
         if agent_parts:
             lines.append(f"- `{condition['condition_name']}`: {', '.join(agent_parts)}.")
     judge_descriptor = None
@@ -1084,6 +1175,7 @@ def _render_research_caveats(suite_summary: dict[str, Any]) -> list[str]:
         "- Code novelty is a normalized lexical change metric. The curriculum reports now add behavioral descriptors, but those descriptors are still heuristic summaries rather than full policy semantics.",
         "- Policy markers are heuristic indicators of potential rule violations; they are not proof of cheating or malicious intent.",
         "- Looping, exploration, and pressure-response metrics are heuristic operationalizations of the supervisor-facing concepts, so they should be interpreted alongside qualitative epoch inspection rather than as perfect ground truth.",
+        "- Acceptance-time replay checks and holdout spot checks are small-sample robustness probes. They improve selection discipline, but they are not substitutes for the final held-out evaluation panel.",
         "- Results from a single run should be treated as provisional until replicated across additional seeds and repeated runs with cross-run statistics.",
         "- Conclusions are specific to this grid-game environment, the chosen prompts, and the configured model pairings; they do not automatically generalize to other tasks.",
     ]
@@ -1101,7 +1193,7 @@ def render_markdown_report(
     run_metadata: dict[str, Any] | None = None,
 ) -> str:
     lines = [
-        "# LLM Adversarial Grid Report",
+        "# Research Report: LLM Adversarial Grid Experiment",
         "",
     ]
 
@@ -1136,9 +1228,9 @@ def render_markdown_report(
         [
             f"- Same-model conditions had average novelty {comparison['same_model_avg_novelty']}.",
             f"- Cross-model conditions had average novelty {comparison['cross_model_avg_novelty']}.",
-            f"- Same-model conditions averaged {comparison.get('same_model_avg_policy_markers', comparison.get('same_model_avg_suspicion_markers', 0.0))} policy markers per agent summary.",
-            f"- Cross-model conditions averaged {comparison.get('cross_model_avg_policy_markers', comparison.get('cross_model_avg_suspicion_markers', 0.0))} policy markers per agent summary.",
-            f"- Curriculum-only metrics across enabled conditions: average loops {comparison.get('curriculum_avg_loop_count', 0.0)}, oscillations {comparison.get('curriculum_avg_oscillation_count', 0.0)}, reversions {comparison.get('curriculum_avg_reversion_count', 0.0)}, post-loss novelty spikes {comparison.get('curriculum_avg_post_loss_novelty_spikes', 0.0)}, strategy switches {comparison.get('curriculum_avg_strategy_switches', 0.0)}, specific adaptations {comparison.get('curriculum_avg_specific_adaptation', 0.0)}, degradation signals {comparison.get('curriculum_avg_degradation', 0.0)}.",
+            f"- Same-model conditions averaged {comparison.get('same_model_avg_policy_markers', comparison.get('same_model_avg_suspicion_markers', 0.0))} potential rule-violation indicators per agent summary.",
+            f"- Cross-model conditions averaged {comparison.get('cross_model_avg_policy_markers', comparison.get('cross_model_avg_suspicion_markers', 0.0))} potential rule-violation indicators per agent summary.",
+            f"- Learner-centric curriculum metrics across enabled conditions: average loops {comparison.get('curriculum_avg_loop_count', 0.0)}, oscillations {comparison.get('curriculum_avg_oscillation_count', 0.0)}, reversions {comparison.get('curriculum_avg_reversion_count', 0.0)}, post-loss novelty spikes {comparison.get('curriculum_avg_post_loss_novelty_spikes', 0.0)}, stable strategy switches {comparison.get('curriculum_avg_strategy_switches', 0.0)}, behavior-cell coverage {comparison.get('curriculum_avg_behavior_cell_coverage', 0.0)}, specific adaptations {comparison.get('curriculum_avg_specific_adaptation', 0.0)}, degradation signals {comparison.get('curriculum_avg_degradation', 0.0)}.",
             f"- Holdout evaluation conditions present in this run: {comparison.get('evaluation_condition_count', 0)}.",
             "",
             "## How To Read The Score Charts",
@@ -1147,7 +1239,7 @@ def render_markdown_report(
             "- Higher points mean the agent collected more resources in that specific epoch.",
             "- A persistent gap between lines means one agent usually finished ahead. Frequent crossings mean the matchup stayed competitive from epoch to epoch.",
             "",
-            "## Per Condition",
+            "## Condition Results",
         ]
     )
 
@@ -1183,5 +1275,5 @@ def render_markdown_report(
     lines.extend(_render_deterministic_conclusion(suite_summary))
 
     if llm_report:
-        lines.extend(["## Judge Model Narrative", "", llm_report.strip(), ""])
+        lines.extend(["## Judge Model Commentary", "", llm_report.strip(), ""])
     return "\n".join(lines)

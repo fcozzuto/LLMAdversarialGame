@@ -25,6 +25,7 @@ The design stays intentionally small:
 - `runs/`: generated artifacts.
 - `RESEARCH_CHECKLIST.md`: fixed research protocol and minimum publishable checklist.
 - `docs/CURRICULUM_V2_PROTOCOL.md`: phase-2 protocol for looping, plateauing, exploration, pressure response, curriculum, and holdout evaluation.
+- `docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md`: deferred checklist for metric validation, stronger evaluation, replication discipline, and broader generalization claims.
 
 ## Agent Interface
 
@@ -57,6 +58,12 @@ python -m pip install -r requirements.txt
 python run_suite.py --config configs/default_suite.json
 ```
 
+For replicated campaigns, you can offset all condition seeds without copying config files:
+
+```powershell
+python run_suite.py --config configs/curriculum_suite/02_rotating_opponents.json --seed-offset 1000 --replicate-label b
+```
+
 The runner loads environment variables from either:
 
 - `.env`
@@ -75,7 +82,7 @@ Expected keys:
 - Use `configs/research_controls_suite.json` when you want builtin baselines or frozen-agent controls.
 - Use `configs/research_cheating_opportunity_suite.json` when you want to test whether agents exploit undocumented observation fields that are present at runtime but omitted from the documented schema.
 - Use [configs/full_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/full_suite/RUNBOOK.md) when you want the full stricter campaign, including repeated core runs, repeated ablations, controls, cheating-opportunity checks, and aggregate report generation in a fixed order.
-- Use [configs/curriculum_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/curriculum_suite/RUNBOOK.md) when you want the phase-2 curriculum campaign with fixed predators, rotating opponents, nemesis archives, loss-triggered mutation, novelty-gated selection, and holdout evaluation.
+- Use [configs/curriculum_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/curriculum_suite/RUNBOOK.md) when you want the updated curriculum campaign with three replicated runs per family, replay-aware novelty gating, elite-archive selection, stronger holdout evaluation, and loss-triggered mutation as a controlled auxiliary ablation.
 - After collecting repeated runs, aggregate them with:
 
 ```powershell
@@ -107,6 +114,6 @@ For the full suite, it writes:
 
 ## Notes
 
-- The OpenAI backend uses the Responses API with low verbosity and a reasoning-effort fallback that retries with supported values when a model rejects the initial setting. That keeps mixed-model suites from silently failing onto default code.
+- The OpenAI backend uses the Responses API with low verbosity and a reasoning-effort fallback that retries with supported values when a model rejects the initial setting. It also retries transient upstream failures such as HTTP 502/503/504 with exponential backoff, which reduces the chance that a single provider glitch contaminates a run.
 - The default judge model is `gpt-4.1-mini`. It is a stable low-cost fallback for summary-style analysis that does not depend on GPT-5-family organization verification.
 - If you want offline smoke tests first, change providers in the config to `builtin` and use models like `nearest_resource`, `sweep_rows`, or `opponent_shadow`.

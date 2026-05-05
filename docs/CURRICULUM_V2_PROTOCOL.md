@@ -15,6 +15,8 @@ The central claim under test is:
 3. Use reproducible opponent schedules and archives.
 4. Treat novelty, looping, and pressure response as heuristic metrics that require qualitative validation.
 5. Prefer deterministic summaries over judge-model prose.
+6. Replicate every curriculum family across at least three predefined seed offsets before drawing conclusions.
+7. Treat the learner policy as the primary unit of analysis in curriculum runs; opponent-role metrics are contextual.
 
 ## Curriculum Axes
 
@@ -24,6 +26,8 @@ The central claim under test is:
 - `Loss-triggered mutation pressure`: after losses, explicitly demand a substantially different strategy.
 - `Novelty-gated selection`: keep a candidate only if it improves score or behavioral diversity within an allowed score tolerance.
 - `Holdout evaluation`: evaluate the accepted focal policy against held-out opponents after training.
+- `Replay-aware selection`: before accepting a candidate, re-evaluate it against recent nemeses and optional held-out opponents.
+- `Elite archive`: keep a MAP-Elites-style archive of accepted focal policies indexed by behavioral cells.
 
 ## Stored Signals
 
@@ -36,6 +40,8 @@ Per epoch, the framework should preserve:
 - selection decisions
 - archive insertions
 - loss-streak and pressure state
+- replay-check summaries
+- elite-archive coverage and behavior-cell occupancy
 
 ## Looping And Plateau Heuristics
 
@@ -53,10 +59,16 @@ Per epoch, the framework should preserve:
 - escape from a losing regime after repeated losses
 - same-opponent recovery
 - degradation after loss-triggered mutation
+- regression against replay opponents
+- regression against held-out opponents during acceptance-time spot checks
 
 ## Training Vs Evaluation
 
 Curriculum conditions are training conditions. Holdout panels are evaluation conditions. Do not treat a curriculum run as evidence of generalization unless the accepted policy also performs meaningfully on the holdout panel.
+
+Replicate every curriculum family with the fixed seed-offset schedule in [configs/curriculum_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/curriculum_suite/RUNBOOK.md) before drawing claims about stable effects.
+
+Deferred follow-up work on metric validation, stronger held-out evaluation, and broader generalization scope is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).
 
 ## Reporting
 
@@ -75,11 +87,16 @@ Aggregate reports should compare:
 - strategy-switch pressure
 - post-loss exploration
 - same-opponent adaptation
+- replay robustness
+- elite-archive coverage
+- holdout generalization
 
 ## Recommended Reading
 
-- Curriculum Learning (Bengio et al., 2009)
-- Open-ended Learning in Symmetric Zero-sum Games (Balduzzi et al., 2019)
-- AlphaStar league training (Vinyals et al., 2019)
-- Novelty Search and MAP-Elites
-- Deep RL That Matters
+- [Curriculum Learning](https://icml.cc/2009/papers/119.pdf)
+- [A Unified Game-Theoretic Approach to Multiagent Reinforcement Learning](https://papers.neurips.cc/paper_files/paper/2017/hash/3323fe11e9595c09af38fe67567a9394-Paper.pdf)
+- [Open-ended Learning in Symmetric Zero-sum Games](https://proceedings.mlr.press/v97/balduzzi19a.html)
+- [Grandmaster level in StarCraft II using multi-agent reinforcement learning](https://www.nature.com/articles/s41586-019-1724-z)
+- [Novelty Search and the Problem with Objectives](https://doi.org/10.1007/978-1-4614-1770-5_3)
+- [Illuminating search spaces by mapping elites](https://arxiv.org/abs/1504.04909)
+- [Deep Reinforcement Learning That Matters](https://arxiv.org/abs/1709.06560)

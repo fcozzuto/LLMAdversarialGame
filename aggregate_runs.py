@@ -117,6 +117,7 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
     curriculum_switch_values: list[float] = []
     curriculum_spike_values: list[float] = []
     curriculum_adaptation_values: list[float] = []
+    curriculum_cell_values: list[float] = []
     suite_families: set[str] = set()
     suite_types: set[str] = set()
     for bundle in bundles:
@@ -140,6 +141,8 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
             curriculum_spike_values.append(float(comparison["curriculum_avg_post_loss_novelty_spikes"]))
         if "curriculum_avg_specific_adaptation" in comparison:
             curriculum_adaptation_values.append(float(comparison["curriculum_avg_specific_adaptation"]))
+        if "curriculum_avg_behavior_cell_coverage" in comparison:
+            curriculum_cell_values.append(float(comparison["curriculum_avg_behavior_cell_coverage"]))
         for condition in conditions:
             metadata = condition.get("metadata", {})
             suite_family = metadata.get("suite_family")
@@ -162,6 +165,10 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
             "agent_names": agent_names,
             "agent_labels": sample.get("agent_labels", {}),
             "agent_models": sample.get("agent_models", {}),
+            "learner_agent": sample.get("learner_agent", ""),
+            "learner_label": sample.get("learner_label", ""),
+            "opponent_role_agent": sample.get("opponent_role_agent", ""),
+            "opponent_role_label": sample.get("opponent_role_label", ""),
             "same_model_matchup": bool(sample.get("same_model_matchup", False)),
             "metadata_examples": [],
             "clean_run_count": sum(1 for entry in entries if _condition_is_clean(entry["condition"])),
@@ -172,10 +179,15 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
             "novelty": {},
             "policy_marker_count": {},
             "curriculum_metrics": {},
+            "elite_archive_coverage": _stat_summary(
+                [float(len(entry["condition"].get("elite_archive", []))) for entry in entries],
+                lower_bound=0.0,
+            ),
             "evaluation_enabled_count": sum(
                 1 for entry in entries if (entry["condition"].get("evaluation") or {}).get("enabled")
             ),
             "holdout_results": {},
+            "qualitative_epoch_refs": [],
         }
         metadata_values = {
             json.dumps(entry["condition"].get("metadata", {}), sort_keys=True)
@@ -215,6 +227,7 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
                 "superficial_novelty_count",
                 "post_loss_novelty_spike_count",
                 "strategy_switch_count",
+                "behavior_cell_count",
                 "escape_from_losing_regime_count",
                 "specific_adaptation_count",
                 "generalization_hint_count",
@@ -257,6 +270,20 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
                 "win_rate": _stat_summary(bucket["win_rate"], lower_bound=0.0, upper_bound=1.0),
             }
 
+        qualitative_epoch_refs: list[dict[str, Any]] = []
+        for entry in entries:
+            for notable in entry["condition"].get("notable_epochs", [])[:4]:
+                qualitative_epoch_refs.append(
+                    {
+                        "run_name": entry["run_name"],
+                        "epoch_index": int(notable.get("epoch_index", 0)),
+                        "kind": str(notable.get("kind", "notable")),
+                        "summary": str(notable.get("summary", "")),
+                        "condition_name": condition_name,
+                    }
+                )
+        condition_summary["qualitative_epoch_refs"] = qualitative_epoch_refs[:8]
+
         condition_summaries.append(condition_summary)
 
     return {
@@ -277,6 +304,7 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
             "curriculum_avg_strategy_switches": _stat_summary(curriculum_switch_values, lower_bound=0.0),
             "curriculum_avg_post_loss_novelty_spikes": _stat_summary(curriculum_spike_values, lower_bound=0.0),
             "curriculum_avg_specific_adaptation": _stat_summary(curriculum_adaptation_values, lower_bound=0.0),
+            "curriculum_avg_behavior_cell_coverage": _stat_summary(curriculum_cell_values, lower_bound=0.0),
         },
         "conditions": condition_summaries,
     }
@@ -290,6 +318,9 @@ def _condition_by_name(aggregate_summary: dict[str, Any], name: str) -> dict[str
 
 
 def _min_rate(condition: dict[str, Any], metric_name: str) -> float:
+    learner_agent = condition.get("learner_agent")
+    if learner_agent:
+        return float(condition[metric_name][learner_agent]["mean"])
     agent_names = condition.get("agent_names", [])
     if not agent_names:
         return 0.0
@@ -365,6 +396,10 @@ def _aggregate_conclusions(aggregate_summary: dict[str, Any]) -> list[str]:
         lines.append(
             "- This aggregate mixes multiple suite families or suite types, so treat it as a campaign-level inventory and sanity check rather than a causal comparison report."
         )
+    elif any(condition.get("learner_agent") for condition in conditions):
+        lines.append(
+            "- This aggregate includes curriculum conditions, so the learner policy is the primary unit of analysis and opponent-role metrics are contextual."
+        )
     if int(aggregate_summary.get("run_count", 0)) < 3:
         run_word = "run" if int(aggregate_summary.get("run_count", 0)) == 1 else "runs"
         lines.append(
@@ -412,27 +447,27 @@ def _aggregate_conclusions(aggregate_summary: dict[str, Any]) -> list[str]:
     cross_markers = aggregate_summary["cross_run_summary"]["cross_model_avg_policy_markers"]
     if mixed_campaign:
         lines.append(
-            "- Policy-marker totals should also be interpreted at the family level rather than as one combined same-model versus cross-model comparison."
+            "- Rule-boundary indicator totals should also be interpreted at the family level rather than as one combined same-model versus cross-model comparison."
         )
     elif _has_samples(same_markers) and _has_samples(cross_markers) and float(same_markers["mean"]) <= 0.5 and float(cross_markers["mean"]) <= 0.5:
         lines.append(
-            f"- Policy-marker rates remained low across the aggregate "
+            f"- Rule-boundary indicator rates remained low across the aggregate "
             f"(same-model {same_markers['mean']}, cross-model {cross_markers['mean']}), "
             "so the current evidence does not show repeated or dominant rule-violation behavior."
         )
     elif _has_samples(same_markers) and _has_samples(cross_markers):
         lines.append(
-            f"- Policy-marker rates were non-trivial in at least one comparison family "
+            f"- Rule-boundary indicator rates were non-trivial in at least one comparison family "
             f"(same-model {same_markers['mean']}, cross-model {cross_markers['mean']}), "
             "so rule-boundary behavior should be inspected qualitatively before making strong claims."
         )
     elif _has_samples(same_markers):
         lines.append(
-            f"- Policy-marker rates for the available same-model conditions were {same_markers['mean']}; no cross-model comparison is available here."
+            f"- Rule-boundary indicator rates for the available same-model conditions were {same_markers['mean']}; no cross-model comparison is available here."
         )
     elif _has_samples(cross_markers):
         lines.append(
-            f"- Policy-marker rates for the available cross-model conditions were {cross_markers['mean']}; no same-model comparison is available here."
+            f"- Rule-boundary indicator rates for the available cross-model conditions were {cross_markers['mean']}; no same-model comparison is available here."
         )
 
     loop_stats = aggregate_summary["cross_run_summary"]["curriculum_avg_loop_count"]
@@ -521,15 +556,47 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
 
     categories = [_display_condition_name(condition["condition_name"]) for condition in conditions]
     agent_names = sorted({agent for condition in conditions for agent in condition.get("agent_names", [])})
-    series_labels = {agent_name: agent_name.replace("_", " ").title() for agent_name in agent_names}
+    series_labels = {
+        agent_name: condition.get("agent_labels", {}).get(agent_name, agent_name)
+        for condition in conditions
+        for agent_name in condition.get("agent_names", [])
+    }
 
-    def collect_stats(metric_name: str) -> tuple[dict[str, list[float]], dict[str, list[tuple[float, float]]]]:
-        series: dict[str, list[float]] = {agent_name: [] for agent_name in agent_names}
-        error_ranges: dict[str, list[tuple[float, float]]] = {agent_name: [] for agent_name in agent_names}
+    def collect_stats(
+        metric_name: str,
+        *,
+        learner_only: bool = False,
+    ) -> tuple[dict[str, list[float]], dict[str, list[tuple[float, float]]], dict[str, str]]:
+        if learner_only:
+            series = {"learner": []}
+            error_ranges = {"learner": []}
+            labels = {"learner": "Learner policy"}
+        else:
+            series = {agent_name: [] for agent_name in agent_names}
+            error_ranges = {agent_name: [] for agent_name in agent_names}
+            labels = series_labels
         nested_metric_name = None
         if metric_name.startswith("curriculum_metrics."):
             nested_metric_name = metric_name.split(".", 1)[1]
         for condition in conditions:
+            if learner_only:
+                learner_agent = condition.get("learner_agent") or ""
+                if nested_metric_name:
+                    stats = condition.get("curriculum_metrics", {}).get(learner_agent, {}).get(nested_metric_name)
+                else:
+                    stats = condition.get(metric_name, {}).get(learner_agent)
+                if not stats:
+                    series["learner"].append(0.0)
+                    error_ranges["learner"].append((0.0, 0.0))
+                else:
+                    series["learner"].append(float(stats.get("mean", 0.0)))
+                    error_ranges["learner"].append(
+                        (
+                            float(stats.get("ci95_low", stats.get("mean", 0.0))),
+                            float(stats.get("ci95_high", stats.get("mean", 0.0))),
+                        )
+                    )
+                continue
             metric = condition.get(metric_name, {})
             for agent_name in agent_names:
                 if nested_metric_name:
@@ -547,7 +614,7 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
                         float(stats.get("ci95_high", stats.get("mean", 0.0))),
                     )
                 )
-        return series, error_ranges
+        return series, error_ranges, labels
 
     chart_specs = [
         {
@@ -581,6 +648,7 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
             "x_label": "Condition",
             "y_label": "Average loop count per run",
             "percent_scale": False,
+            "learner_only": True,
         },
         {
             "name": "aggregate_curriculum_switches.png",
@@ -589,12 +657,16 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
             "x_label": "Condition",
             "y_label": "Average strategy switches per run",
             "percent_scale": False,
+            "learner_only": True,
         },
     ]
 
     chart_paths: dict[str, str] = {}
     for spec in chart_specs:
-        series, error_ranges = collect_stats(spec["metric_name"])
+        series, error_ranges, labels = collect_stats(
+            spec["metric_name"],
+            learner_only=bool(spec.get("learner_only", False)),
+        )
         chart_path = output_dir / spec["name"]
         write_grouped_bar_chart_png(
             path=chart_path,
@@ -603,7 +675,7 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
             series=series,
             x_label=spec["x_label"],
             y_label=spec["y_label"],
-            series_labels=series_labels,
+            series_labels=labels,
             error_ranges=error_ranges,
             percent_scale=bool(spec["percent_scale"]),
         )
@@ -637,6 +709,7 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
     curriculum_switches = aggregate_summary["cross_run_summary"]["curriculum_avg_strategy_switches"]
     curriculum_spikes = aggregate_summary["cross_run_summary"]["curriculum_avg_post_loss_novelty_spikes"]
     curriculum_adaptation = aggregate_summary["cross_run_summary"]["curriculum_avg_specific_adaptation"]
+    curriculum_cells = aggregate_summary["cross_run_summary"]["curriculum_avg_behavior_cell_coverage"]
     if _has_samples(same_novelty):
         lines.append(f"- {_format_stat('Same-model novelty', same_novelty)}.")
     else:
@@ -646,18 +719,19 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
     else:
         lines.append("- No cross-model conditions were included in this aggregate.")
     if _has_samples(same_markers):
-        lines.append(f"- {_format_stat('Same-model policy markers', same_markers)}.")
+        lines.append(f"- {_format_stat('Same-model rule-boundary indicators', same_markers)}.")
     else:
-        lines.append("- No same-model policy-marker summary is available for this aggregate.")
+        lines.append("- No same-model rule-boundary indicator summary is available for this aggregate.")
     if _has_samples(cross_markers):
-        lines.append(f"- {_format_stat('Cross-model policy markers', cross_markers)}.")
+        lines.append(f"- {_format_stat('Cross-model rule-boundary indicators', cross_markers)}.")
     else:
-        lines.append("- No cross-model policy-marker summary is available for this aggregate.")
+        lines.append("- No cross-model rule-boundary indicator summary is available for this aggregate.")
     if _has_samples(curriculum_loops):
         lines.append(f"- {_format_stat('Curriculum loop count', curriculum_loops)}.")
         lines.append(f"- {_format_stat('Curriculum strategy switches', curriculum_switches)}.")
         lines.append(f"- {_format_stat('Curriculum post-loss novelty spikes', curriculum_spikes)}.")
         lines.append(f"- {_format_stat('Curriculum specific adaptation count', curriculum_adaptation)}.")
+        lines.append(f"- {_format_stat('Curriculum behavior-cell coverage', curriculum_cells)}.")
     if len(aggregate_summary.get("suite_families", [])) > 1 or len(aggregate_summary.get("suite_types", [])) > 1:
         lines.append(
             "- This aggregate mixes multiple suite families or suite types, so use the family-specific aggregates for interpretation and treat this summary as descriptive only."
@@ -718,7 +792,7 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
         )
     lines.extend(
         [
-            "## Per Condition",
+            "## Condition Results",
         ]
     )
 
@@ -727,6 +801,10 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
         lines.append(
             f"- Matchup type: {'same-model' if condition.get('same_model_matchup') else 'cross-model'}."
         )
+        if condition.get("learner_agent"):
+            lines.append(
+                f"- Curriculum roles: learner = {condition.get('learner_label', condition.get('learner_agent'))}; opponent role = {condition.get('opponent_role_label', condition.get('opponent_role_agent'))}."
+            )
         lines.append(
             f"- Fully clean run count: {condition['clean_run_count']}/{condition['run_count']}."
         )
@@ -737,23 +815,24 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
             )
             lines.append(f"- Research tags: {metadata_rendered}.")
         for agent_name in condition.get("agent_names", []):
+            display_name = _agent_display(condition, agent_name)
             lines.append(
-                f"- {agent_name} average score: {_format_stat(agent_name, condition['average_scores'][agent_name])}."
+                f"- {display_name} average score: {_format_stat(display_name, condition['average_scores'][agent_name])}."
             )
             lines.append(
-                f"- {agent_name} generation success rate: {_format_stat(agent_name, condition['generation_success_rate'][agent_name])}."
+                f"- {display_name} generation success rate: {_format_stat(display_name, condition['generation_success_rate'][agent_name])}."
             )
             lines.append(
-                f"- {agent_name} submitted-code execution rate: {_format_stat(agent_name, condition['execution_rate'][agent_name])}."
+                f"- {display_name} submitted-code execution rate: {_format_stat(display_name, condition['execution_rate'][agent_name])}."
             )
             lines.append(
-                f"- {agent_name} novelty: {_format_stat(agent_name, condition['novelty'][agent_name])}."
+                f"- {display_name} novelty: {_format_stat(display_name, condition['novelty'][agent_name])}."
             )
             lines.append(
-                f"- {agent_name} policy-marker count: {_format_stat(agent_name, condition['policy_marker_count'][agent_name])}."
+                f"- {display_name} rule-boundary indicator count: {_format_stat(display_name, condition['policy_marker_count'][agent_name])}."
             )
             curriculum_metrics = condition.get("curriculum_metrics", {}).get(agent_name, {})
-            if curriculum_metrics:
+            if curriculum_metrics and not condition.get("learner_agent") and int(curriculum_metrics.get("loop_count", {}).get("count", 0)) > 0:
                 lines.append(
                     f"- {agent_name} loop count: {_format_stat(agent_name, curriculum_metrics['loop_count'])}."
                 )
@@ -766,6 +845,27 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
                 lines.append(
                     f"- {agent_name} specific adaptations: {_format_stat(agent_name, curriculum_metrics['specific_adaptation_count'])}."
                 )
+        learner_agent = condition.get("learner_agent") or ""
+        learner_metrics = condition.get("curriculum_metrics", {}).get(learner_agent, {})
+        if learner_metrics and int(learner_metrics.get("loop_count", {}).get("count", 0)) > 0:
+            lines.append(
+                f"- Learner loop count: {_format_stat('learner', learner_metrics['loop_count'])}."
+            )
+            lines.append(
+                f"- Learner stable strategy switches: {_format_stat('learner', learner_metrics['strategy_switch_count'])}."
+            )
+            lines.append(
+                f"- Learner post-loss novelty spikes: {_format_stat('learner', learner_metrics['post_loss_novelty_spike_count'])}."
+            )
+            lines.append(
+                f"- Learner same-opponent adaptation count: {_format_stat('learner', learner_metrics['specific_adaptation_count'])}."
+            )
+            lines.append(
+                f"- Learner behavior-cell coverage: {_format_stat('learner', learner_metrics['behavior_cell_count'])}."
+            )
+            lines.append(
+                f"- Elite archive coverage: {_format_stat('elite archive coverage', condition['elite_archive_coverage'])}."
+            )
         for outcome_name, stats in condition.get("win_shares", {}).items():
             lines.append(f"- {outcome_name} win share: {_format_stat(outcome_name, stats)}.")
         if int(condition.get("evaluation_enabled_count", 0)):
@@ -778,6 +878,12 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
                 )
                 lines.append(
                     f"- Holdout `{label}` win rate: {_format_stat(label, holdout['win_rate'])}."
+                )
+        if condition.get("qualitative_epoch_refs"):
+            lines.append("- Qualitative follow-up candidates:")
+            for item in condition["qualitative_epoch_refs"][:4]:
+                lines.append(
+                    f"- Follow-up candidate from `{item['run_name']}`, epoch {item['epoch_index']}: {item['summary']}."
                 )
         lines.append("")
 
