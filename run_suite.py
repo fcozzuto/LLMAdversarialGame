@@ -365,7 +365,6 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
                 generation_validation_issues[agent.name] = []
                 generation_used_fallback[agent.name] = False
                 generation_reused[agent.name] = True
-                generation_cache[cache_key] = None
                 (epoch_dir / f"{agent.name}_prompt.txt").write_text(
                     "# generation skipped: reused archived nemesis code",
                     encoding="utf-8",
@@ -374,7 +373,12 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
                 (epoch_dir / f"{agent.name}_response.txt").write_text(raw_responses[agent.name], encoding="utf-8")
                 continue
 
-            reused_generation = epoch_index > 1 and not agent.regenerate_each_epoch and cache_key in generation_cache
+            reused_generation = (
+                epoch_index > 1
+                and not agent.regenerate_each_epoch
+                and cache_key in generation_cache
+                and generation_cache[cache_key] is not None
+            )
             if reused_generation:
                 prior = generation_cache[cache_key]
                 codes[agent.name] = prior.code

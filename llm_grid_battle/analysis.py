@@ -688,7 +688,7 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         "notable_epochs": notable_epochs,
         "curriculum_trace": condition_summary.get("curriculum_trace", []),
         "archive": condition_summary.get("archive", []),
-        "evaluation": condition_summary.get("evaluation"),
+        "evaluation": condition_summary.get("evaluation") or {},
     }
 
 
@@ -722,7 +722,7 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
         return round(statistics.mean(values), 4) if values else 0.0
 
     def _evaluation_condition_count(items: list[dict[str, Any]]) -> int:
-        return sum(1 for item in items if item.get("evaluation", {}).get("enabled"))
+        return sum(1 for item in items if (item.get("evaluation") or {}).get("enabled"))
 
     models_used = sorted(
         {
