@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from llm_grid_battle.analysis import render_markdown_report
+from llm_grid_battle.analysis import render_markdown_report, summarize_suite
 from llm_grid_battle.llm import judge_text, load_env_files
 from llm_grid_battle.pdf_report import write_pdf_report
 from llm_grid_battle.visualization import write_score_plot_png, write_score_plot_svg
@@ -143,7 +143,6 @@ def rerun_judge_for_latest_run(
     if not suite_summary_path.exists():
         raise FileNotFoundError(f"Missing suite summary: {suite_summary_path}")
 
-    suite_summary = _load_json(suite_summary_path)
     judge_config = _load_judge_config_from_run(target_run_dir)
     if judge_provider_override:
         judge_config["provider"] = judge_provider_override
@@ -156,6 +155,16 @@ def rerun_judge_for_latest_run(
     run_metadata["judge_status"] = "enabled"
     run_metadata["judge_provider"] = str(judge_config.get("provider", "openai"))
     run_metadata["judge_model"] = str(judge_config.get("model", "gpt-4.1-mini"))
+
+    condition_payloads = [
+        _load_json(path)
+        for path in sorted(target_run_dir.glob("*/condition_summary.json"))
+    ]
+    suite_summary = summarize_suite(condition_payloads)
+    suite_summary_path.write_text(
+        json.dumps(suite_summary, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
 
     llm_report = judge_text(
         provider=str(judge_config.get("provider", "openai")),
@@ -174,10 +183,6 @@ def rerun_judge_for_latest_run(
         json.dumps(run_metadata, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-    condition_payloads = [
-        _load_json(path)
-        for path in sorted(target_run_dir.glob("*/condition_summary.json"))
-    ]
     _regenerate_score_charts(target_run_dir, condition_payloads)
     write_pdf_report(
         path=target_run_dir / "report.pdf",

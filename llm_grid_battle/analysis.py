@@ -502,21 +502,7 @@ def _render_deterministic_conclusion(suite_summary: dict[str, Any]) -> list[str]
                 f"- `{condition['condition_name']}`: no overall winner by average score and win count; average scores {json.dumps(average_scores, sort_keys=True)}, win counts {json.dumps(win_counts, sort_keys=True)}."
             )
 
-    same_model_novelty = comparison.get("same_model_avg_novelty")
-    cross_model_novelty = comparison.get("cross_model_avg_novelty")
-    if same_model_novelty is not None and cross_model_novelty is not None:
-        lines.append(
-            f"- Novelty: same-model average novelty was {same_model_novelty}, versus {cross_model_novelty} for cross-model conditions in this run."
-        )
-
-    same_model_markers = comparison.get("same_model_avg_policy_markers")
-    cross_model_markers = comparison.get("cross_model_avg_policy_markers")
-    if same_model_markers == 0 and cross_model_markers == 0:
-        lines.append("- Potential rule-violation indicators: none were recorded in either same-model or cross-model conditions.")
-    elif same_model_markers is not None and cross_model_markers is not None:
-        lines.append(
-            f"- Potential rule-violation indicators: same-model average {same_model_markers}, cross-model average {cross_model_markers}."
-        )
+    lines.extend(_format_matchup_comparison_summary(comparison))
 
     runtime_notes: list[str] = []
     for condition in conditions:
@@ -688,16 +674,40 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
             agent_name=agent_name,
         )
 
+    curriculum_policy = condition_summary.get("curriculum", {})
+    learner_agent = str(curriculum_policy.get("focal_agent", "")) if curriculum_policy.get("enabled") else ""
+    opponent_role_agent = str(curriculum_policy.get("opponent_agent", "")) if curriculum_policy.get("enabled") else ""
+
+    def _pool_item_descriptor(item: dict[str, Any]) -> str:
+        provider = str(item.get("provider") or "").strip()
+        model = str(item.get("model") or "").strip()
+        library_key = str(item.get("library_key") or "").strip()
+        label = str(item.get("label") or "").strip()
+        if provider and model:
+            return f"{provider}:{model}"
+        if library_key:
+            return f"builtin:{library_key}"
+        if label:
+            return f"curriculum:{label}"
+        return "curriculum:opponent_pool"
+
+    if opponent_role_agent:
+        opponent_pool = curriculum_policy.get("opponent_pool", []) or []
+        if len(opponent_pool) == 1:
+            descriptor = _pool_item_descriptor(opponent_pool[0])
+            agent_models[opponent_role_agent] = descriptor
+            agent_labels[opponent_role_agent] = f"{opponent_role_agent} ({descriptor})"
+        elif len(opponent_pool) > 1:
+            descriptor = f"curriculum:opponent_pool[{len(opponent_pool)}]"
+            agent_models[opponent_role_agent] = descriptor
+            agent_labels[opponent_role_agent] = f"{opponent_role_agent} ({descriptor})"
+
     notable_epochs = _build_notable_epochs(
         epochs=epochs,
         agent_names=agent_names,
         agent_labels=agent_labels,
         codes_by_agent=codes_by_agent,
     )
-
-    curriculum_policy = condition_summary.get("curriculum", {})
-    learner_agent = str(curriculum_policy.get("focal_agent", "")) if curriculum_policy.get("enabled") else ""
-    opponent_role_agent = str(curriculum_policy.get("opponent_agent", "")) if curriculum_policy.get("enabled") else ""
 
     return {
         "condition_name": condition_summary["condition_name"],
@@ -839,6 +849,8 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
         "data_quality_warnings": data_quality_warnings,
         "conditions": condition_summaries,
         "cross_condition_comparison": {
+            "same_model_condition_count": len(same_model),
+            "cross_model_condition_count": len(cross_model),
             "same_model_avg_novelty": _avg_novelty(same_model),
             "cross_model_avg_novelty": _avg_novelty(cross_model),
             "same_model_avg_policy_markers": _avg_policy_markers(same_model),
@@ -883,6 +895,85 @@ def _format_agent_model_list(condition: dict[str, Any]) -> list[str]:
         f"- {name}: {condition['agent_models'][name]}"
         for name in condition.get("agent_names", [])
     ]
+
+
+def _format_matchup_comparison_summary(comparison: dict[str, Any]) -> list[str]:
+    same_count = int(comparison.get("same_model_condition_count", 0))
+    cross_count = int(comparison.get("cross_model_condition_count", 0))
+    same_novelty = comparison.get("same_model_avg_novelty")
+    cross_novelty = comparison.get("cross_model_avg_novelty")
+    same_markers = comparison.get(
+        "same_model_avg_policy_markers",
+        comparison.get("same_model_avg_suspicion_markers", 0.0),
+    )
+    cross_markers = comparison.get(
+        "cross_model_avg_policy_markers",
+        comparison.get("cross_model_avg_suspicion_markers", 0.0),
+    )
+    lines: list[str] = []
+    if same_count and cross_count:
+        lines.append(f"- Same-model conditions had average novelty {same_novelty}.")
+        lines.append(f"- Cross-model conditions had average novelty {cross_novelty}.")
+        lines.append(
+            f"- Same-model conditions averaged {same_markers} potential rule-violation indicators per agent summary."
+        )
+        lines.append(
+            f"- Cross-model conditions averaged {cross_markers} potential rule-violation indicators per agent summary."
+        )
+    elif cross_count:
+        lines.append(
+            f"- This run contains only cross-model conditions. Cross-model average novelty was {cross_novelty}."
+        )
+        lines.append(
+            f"- Cross-model conditions averaged {cross_markers} potential rule-violation indicators per agent summary."
+        )
+    elif same_count:
+        lines.append(
+            f"- This run contains only same-model conditions. Same-model average novelty was {same_novelty}."
+        )
+        lines.append(
+            f"- Same-model conditions averaged {same_markers} potential rule-violation indicators per agent summary."
+        )
+    else:
+        lines.append("- No same-model versus cross-model comparison is available for this run.")
+    return lines
+
+
+def _clean_judge_report(llm_report: str) -> str:
+    cleaned = llm_report.strip()
+    if cleaned.startswith("```"):
+        fence_lines = cleaned.splitlines()
+        if fence_lines and fence_lines[0].startswith("```"):
+            fence_lines = fence_lines[1:]
+        if fence_lines and fence_lines[-1].strip().startswith("```"):
+            fence_lines = fence_lines[:-1]
+        cleaned = "\n".join(fence_lines).strip()
+    replacements = {
+        "≈": "~",
+        "—": "-",
+        "–": "-",
+        "“": "\"",
+        "”": "\"",
+        "’": "'",
+        "‘": "'",
+        "…": "...",
+        "â‰ˆ": "~",
+        "â€”": "-",
+        "â€“": "-",
+        "â€œ": "\"",
+        "â€": "\"",
+        "â€™": "'",
+        "â€˜": "'",
+        "â€¦": "...",
+        "Â": "",
+    }
+    for source, target in replacements.items():
+        cleaned = cleaned.replace(source, target)
+    trailing_lines = cleaned.splitlines()
+    while trailing_lines and trailing_lines[-1].strip().startswith("```"):
+        trailing_lines.pop()
+    cleaned = "\n".join(trailing_lines).strip()
+    return cleaned.strip()
 
 
 def _format_overall_result(condition: dict[str, Any]) -> str:
@@ -1226,10 +1317,7 @@ def render_markdown_report(
     comparison = suite_summary["cross_condition_comparison"]
     lines.extend(
         [
-            f"- Same-model conditions had average novelty {comparison['same_model_avg_novelty']}.",
-            f"- Cross-model conditions had average novelty {comparison['cross_model_avg_novelty']}.",
-            f"- Same-model conditions averaged {comparison.get('same_model_avg_policy_markers', comparison.get('same_model_avg_suspicion_markers', 0.0))} potential rule-violation indicators per agent summary.",
-            f"- Cross-model conditions averaged {comparison.get('cross_model_avg_policy_markers', comparison.get('cross_model_avg_suspicion_markers', 0.0))} potential rule-violation indicators per agent summary.",
+            *_format_matchup_comparison_summary(comparison),
             f"- Learner-centric curriculum metrics across enabled conditions: average loops {comparison.get('curriculum_avg_loop_count', 0.0)}, oscillations {comparison.get('curriculum_avg_oscillation_count', 0.0)}, reversions {comparison.get('curriculum_avg_reversion_count', 0.0)}, post-loss novelty spikes {comparison.get('curriculum_avg_post_loss_novelty_spikes', 0.0)}, stable strategy switches {comparison.get('curriculum_avg_strategy_switches', 0.0)}, behavior-cell coverage {comparison.get('curriculum_avg_behavior_cell_coverage', 0.0)}, specific adaptations {comparison.get('curriculum_avg_specific_adaptation', 0.0)}, degradation signals {comparison.get('curriculum_avg_degradation', 0.0)}.",
             f"- Holdout evaluation conditions present in this run: {comparison.get('evaluation_condition_count', 0)}.",
             "",
@@ -1275,5 +1363,5 @@ def render_markdown_report(
     lines.extend(_render_deterministic_conclusion(suite_summary))
 
     if llm_report:
-        lines.extend(["## Judge Model Commentary", "", llm_report.strip(), ""])
+        lines.extend(["## Judge Model Commentary", "", _clean_judge_report(llm_report), ""])
     return "\n".join(lines)
