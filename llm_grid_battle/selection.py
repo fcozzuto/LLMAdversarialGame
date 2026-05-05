@@ -53,9 +53,14 @@ def decide_candidate_acceptance(
         base_reason = "score_improved_or_matched"
     else:
         diversity_pass = False
-        if policy.elite_archive_enabled and opens_new_elite_cell and elite_distance >= float(policy.elite_distance_threshold):
+        if (
+            policy.elite_archive_enabled
+            and opens_new_elite_cell
+            and elite_distance >= float(policy.elite_distance_threshold)
+            and float(score_delta or 0.0) >= -float(policy.score_tolerance)
+        ):
             diversity_pass = True
-            base_reason = "opened_new_behavior_cell"
+            base_reason = "opened_new_behavior_cell_within_score_tolerance"
         elif policy.elite_archive_enabled and elite_distance >= float(policy.elite_distance_threshold):
             if float(score_delta or 0.0) >= -float(policy.score_tolerance):
                 diversity_pass = True
