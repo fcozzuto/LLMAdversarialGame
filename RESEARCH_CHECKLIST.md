@@ -20,6 +20,12 @@ This checklist is the fixed research protocol for the project. It separates infr
 6. Does novelty-gated selection produce better behavioral diversity without collapsing score?
 7. Do holdout opponent panels show generalization beyond the training curriculum?
 
+## Phase 2b And Phase 3 Questions
+
+1. Which curriculum ingredients improve held-out opponent win rate when compared under a replicated factorial design?
+2. Do the largest code-novelty spikes correspond to real behavioral change, or mostly to code churn?
+3. Does the best curriculum recipe transfer to pursuit / evasion and territory-control environments, or only to the original resource-collection benchmark?
+
 ## Operational Definitions
 
 - `Cheating evidence`: policy markers, forbidden-call attempts, import attempts, or other sandbox-triggered rule-violation indicators. Runtime pathing mistakes are not cheating evidence.
@@ -43,6 +49,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - Post-loss novelty spikes, same-opponent recovery counts, and degradation counts.
 - Policy marker counts.
 - Holdout-panel mean margin and win rate when evaluation is enabled.
+- Factorial primary endpoint: mean held-out win rate per condition.
+- Transfer endpoint: held-out win rate per environment using the winning factorial recipe.
 
 ## Infrastructure
 
@@ -63,6 +71,10 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Per-epoch artifacts store behavioral descriptors, code fingerprints, and curriculum trace fields.
 - [x] Aggregate reports summarize curriculum loop, exploration, and pressure-response heuristics.
 - [x] The curriculum runbook defines a three-replicate seed-offset campaign instead of relying on single-run evidence.
+- [x] A holdout-first factorial suite exists in [configs/factorial_holdout_suite/01_factorial_holdout.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/factorial_holdout_suite/01_factorial_holdout.json).
+- [x] A novelty-review tool exists in [review_novelty_spikes.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/review_novelty_spikes.py).
+- [x] A transfer-suite generator exists in [build_transfer_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/build_transfer_suite.py).
+- [x] A cross-environment transfer runbook exists in [configs/transfer_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/transfer_suite/RUNBOOK.md).
 
 ## Required Ablations And Controls
 
@@ -91,6 +103,9 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [ ] Perform qualitative inspection of notable epochs referenced by the reports.
 - [ ] Decide which claims are primary, which are exploratory, and which are unsupported.
 - [ ] Compare curriculum training results against holdout panels before making claims about generalization.
+- [ ] Complete the five-replicate factorial holdout campaign and rank recipes by held-out win rate.
+- [ ] Run the novelty-review packet on the top novelty spikes before treating novelty as innovation.
+- [ ] Generate the transfer suite from the winning factorial recipe and run the transfer campaign.
 
 ## Recommended Minimum Evidence Target
 
@@ -100,9 +115,12 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [ ] Curriculum-family claims should be based on learner-centric summaries, not on averaged learner-plus-opponent curriculum metrics.
 - [ ] At least 1 aggregate report generated with [aggregate_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_runs.py) for each main suite family.
 - [ ] Final claims checked against deterministic summaries, aggregate reports, and qualitative epoch review, not judge prose alone.
+- [ ] At least 5 replicated suite runs for the factorial holdout comparison.
+- [ ] At least 5 replicated suite runs for the cross-environment transfer comparison.
 
 ## Current Status
 
 - The project is engineering-complete and research-infrastructure-complete for both the phase-1 and phase-2 protocols.
+- The project is engineering-complete and research-infrastructure-complete for the phase-2b factorial and phase-3 transfer protocols.
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
 - Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).

@@ -2,6 +2,8 @@
 
 This document defines the phase-2 research design built on top of the original adversarial grid framework.
 
+For the follow-on holdout-first factorial study and the cross-environment transfer study, use [docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md).
+
 ## Goal
 
 The central claim under test is:

@@ -95,6 +95,34 @@ def _score_margin(epoch: dict[str, Any], agent_name: str, opponent_name: str) ->
     return float(epoch["scores"][agent_name]) - float(epoch["scores"][opponent_name])
 
 
+def _environment_name(condition_summary: dict[str, Any]) -> str:
+    return str((condition_summary.get("environment") or {}).get("name") or "resource_collection")
+
+
+def _primary_endpoint_summary(
+    *,
+    evaluation: dict[str, Any],
+) -> dict[str, Any]:
+    if not evaluation or not evaluation.get("enabled"):
+        return {
+            "enabled": False,
+            "name": "none",
+            "mean_win_rate": None,
+            "mean_score_margin": None,
+            "opponent_count": 0,
+        }
+    opponents = evaluation.get("opponents", [])
+    win_rates = [float(item.get("win_rate", 0.0)) for item in opponents]
+    margins = [float(item.get("mean_score_margin", 0.0)) for item in opponents]
+    return {
+        "enabled": True,
+        "name": str(evaluation.get("panel") or "holdout"),
+        "mean_win_rate": round(statistics.mean(win_rates), 4) if win_rates else 0.0,
+        "mean_score_margin": round(statistics.mean(margins), 4) if margins else 0.0,
+        "opponent_count": len(opponents),
+    }
+
+
 def _curriculum_metrics(
     *,
     epochs: list[dict[str, Any]],
@@ -708,6 +736,9 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         agent_labels=agent_labels,
         codes_by_agent=codes_by_agent,
     )
+    evaluation_summary = condition_summary.get("evaluation") or {}
+    environment_policy = condition_summary.get("environment") or {}
+    primary_endpoint = _primary_endpoint_summary(evaluation=evaluation_summary)
 
     return {
         "condition_name": condition_summary["condition_name"],
@@ -725,6 +756,8 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         "generation_policy": condition_summary.get("generation", {}),
         "observation_policy": condition_summary.get("observation", {}),
         "map_policy": condition_summary.get("map", {}),
+        "environment_policy": environment_policy,
+        "environment_name": _environment_name(condition_summary),
         "curriculum_policy": curriculum_policy,
         "curriculum_pool_labels": [
             item.get("label") or item.get("library_key") or item.get("model")
@@ -762,7 +795,8 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         "curriculum_trace": condition_summary.get("curriculum_trace", []),
         "archive": condition_summary.get("archive", []),
         "elite_archive": condition_summary.get("elite_archive", []),
-        "evaluation": condition_summary.get("evaluation") or {},
+        "evaluation": evaluation_summary,
+        "primary_endpoint": primary_endpoint,
     }
 
 
@@ -805,6 +839,16 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
 
     def _evaluation_condition_count(items: list[dict[str, Any]]) -> int:
         return sum(1 for item in items if (item.get("evaluation") or {}).get("enabled"))
+
+    def _avg_primary_endpoint(items: list[dict[str, Any]], field_name: str) -> float | None:
+        values = [
+            float(item["primary_endpoint"][field_name])
+            for item in items
+            if item.get("primary_endpoint", {}).get("enabled") and item["primary_endpoint"].get(field_name) is not None
+        ]
+        if not values:
+            return None
+        return round(statistics.mean(values), 4)
 
     models_used = sorted(
         {
@@ -851,6 +895,7 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
         "cross_condition_comparison": {
             "same_model_condition_count": len(same_model),
             "cross_model_condition_count": len(cross_model),
+            "environment_names": sorted({item.get("environment_name", "resource_collection") for item in condition_summaries}),
             "same_model_avg_novelty": _avg_novelty(same_model),
             "cross_model_avg_novelty": _avg_novelty(cross_model),
             "same_model_avg_policy_markers": _avg_policy_markers(same_model),
@@ -864,6 +909,8 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
             "curriculum_avg_specific_adaptation": _avg_curriculum_metric(condition_summaries, "specific_adaptation_count"),
             "curriculum_avg_degradation": _avg_curriculum_metric(condition_summaries, "degradation_count"),
             "evaluation_condition_count": _evaluation_condition_count(condition_summaries),
+            "avg_primary_holdout_win_rate": _avg_primary_endpoint(condition_summaries, "mean_win_rate"),
+            "avg_primary_holdout_margin": _avg_primary_endpoint(condition_summaries, "mean_score_margin"),
         },
     }
 
@@ -1040,8 +1087,42 @@ def _format_behavioral_summary(condition: dict[str, Any]) -> list[str]:
         descriptor = behavior.get("average_descriptor", {})
         if not descriptor:
             continue
+        extra_terms: list[str] = []
+        if float(descriptor.get("tag_success_ratio", 0.0)) > 0.0:
+            extra_terms.append(f"tag success={descriptor.get('tag_success_ratio', 0.0)}")
+        if float(descriptor.get("survival_reward_ratio", 0.0)) > 0.0:
+            extra_terms.append(f"survival reward={descriptor.get('survival_reward_ratio', 0.0)}")
+        if float(descriptor.get("territory_claim_ratio", 0.0)) > 0.0:
+            extra_terms.append(f"territory claims={descriptor.get('territory_claim_ratio', 0.0)}")
+        extra_text = f", {', '.join(extra_terms)}" if extra_terms else ""
         lines.append(
-            f"- {condition['agent_labels'][name]} behavioral profile averaged stay={descriptor.get('stay_ratio', 0.0)}, exploration={descriptor.get('exploration_ratio', 0.0)}, revisit={descriptor.get('revisit_ratio', 0.0)}, resource pursuit={descriptor.get('resource_pursuit_ratio', 0.0)}, opponent pursuit={descriptor.get('opponent_pursuit_ratio', 0.0)}, and opponent distance={descriptor.get('mean_opponent_distance', 0.0)}. Latest profile: {behavior.get('latest_profile', 'unknown')}."
+            f"- {condition['agent_labels'][name]} behavioral profile averaged stay={descriptor.get('stay_ratio', 0.0)}, exploration={descriptor.get('exploration_ratio', 0.0)}, revisit={descriptor.get('revisit_ratio', 0.0)}, resource pursuit={descriptor.get('resource_pursuit_ratio', 0.0)}, opponent pursuit={descriptor.get('opponent_pursuit_ratio', 0.0)}, opponent distance={descriptor.get('mean_opponent_distance', 0.0)}{extra_text}. Latest profile: {behavior.get('latest_profile', 'unknown')}."
+        )
+    return lines
+
+
+def _format_environment_summary(condition: dict[str, Any]) -> list[str]:
+    environment_name = str(condition.get("environment_name", "resource_collection"))
+    environment = condition.get("environment_policy", {})
+    map_policy = condition.get("map_policy", {})
+    lines = [
+        f"- Environment: `{environment_name}` on a {map_policy.get('width', 0)} x {map_policy.get('height', 0)} grid."
+    ]
+    if environment_name == "pursuit_evasion":
+        role_assignments = environment.get("role_assignments") or {}
+        if role_assignments:
+            rendered_roles = ", ".join(f"{name}={role}" for name, role in sorted(role_assignments.items()))
+            lines.append(f"- Role assignment: {rendered_roles}.")
+        lines.append(
+            f"- Capture rules: radius {environment.get('capture_radius', 0)}, capture points {environment.get('capture_points', 0.0)}, evasion survival reward {environment.get('survival_points_per_turn', 0.0)} per turn."
+        )
+    elif environment_name == "territory_control":
+        lines.append(
+            f"- Territory rules: flip_on_entry={environment.get('territory_flip_on_entry', True)}, control bonus interval={environment.get('territory_control_bonus_interval', 0)}, control bonus={environment.get('territory_control_bonus', 0.0)}."
+        )
+    else:
+        lines.append(
+            f"- Resource rules: resources={map_policy.get('resource_count', 0)}, obstacles={map_policy.get('obstacle_count', 0)}."
         )
     return lines
 
@@ -1176,9 +1257,14 @@ def _format_evaluation_summary(condition: dict[str, Any]) -> list[str]:
     evaluation = condition.get("evaluation") or {}
     if not evaluation.get("enabled"):
         return []
+    primary = condition.get("primary_endpoint", {})
     lines = [
         f"- Held-out evaluation: {evaluation.get('games_per_opponent', 0)} games per opponent for learner `{evaluation.get('focal_agent', '-')}`."
     ]
+    if primary.get("enabled"):
+        lines.append(
+            f"- Primary endpoint summary: mean holdout win rate {primary.get('mean_win_rate', 0.0)}, mean holdout score margin {primary.get('mean_score_margin', 0.0)} across {primary.get('opponent_count', 0)} opponents."
+        )
     for opponent in evaluation.get("opponents", []):
         lines.append(
             f"- Holdout `{opponent.get('label', '-')}` ({opponent.get('provider', '-')}:`{opponent.get('model', '-')}`): mean score {opponent.get('mean_score', 0.0)}, mean margin {opponent.get('mean_score_margin', 0.0)}, win rate {opponent.get('win_rate', 0.0)}."
@@ -1284,7 +1370,7 @@ def render_markdown_report(
     run_metadata: dict[str, Any] | None = None,
 ) -> str:
     lines = [
-        "# Research Report: LLM Adversarial Grid Experiment",
+        "# Research Report: LLM Adversarial Agent Experiment",
         "",
     ]
 
@@ -1315,16 +1401,21 @@ def render_markdown_report(
 
     lines.append("## Cross-Condition Summary")
     comparison = suite_summary["cross_condition_comparison"]
+    primary_holdout_win_rate = comparison.get("avg_primary_holdout_win_rate")
+    primary_holdout_margin = comparison.get("avg_primary_holdout_margin")
     lines.extend(
         [
             *_format_matchup_comparison_summary(comparison),
+            f"- Environment types in this run: {', '.join(comparison.get('environment_names', []))}.",
             f"- Learner-centric curriculum metrics across enabled conditions: average loops {comparison.get('curriculum_avg_loop_count', 0.0)}, oscillations {comparison.get('curriculum_avg_oscillation_count', 0.0)}, reversions {comparison.get('curriculum_avg_reversion_count', 0.0)}, post-loss novelty spikes {comparison.get('curriculum_avg_post_loss_novelty_spikes', 0.0)}, stable strategy switches {comparison.get('curriculum_avg_strategy_switches', 0.0)}, behavior-cell coverage {comparison.get('curriculum_avg_behavior_cell_coverage', 0.0)}, specific adaptations {comparison.get('curriculum_avg_specific_adaptation', 0.0)}, degradation signals {comparison.get('curriculum_avg_degradation', 0.0)}.",
             f"- Holdout evaluation conditions present in this run: {comparison.get('evaluation_condition_count', 0)}.",
+            f"- Average primary holdout win rate across evaluated conditions: {primary_holdout_win_rate if primary_holdout_win_rate is not None else 'N/A'}.",
+            f"- Average primary holdout score margin across evaluated conditions: {primary_holdout_margin if primary_holdout_margin is not None else 'N/A'}.",
             "",
             "## How To Read The Score Charts",
             "- Each `scores.svg` file plots one point per epoch for each agent.",
             "- The x-axis is epoch index. The y-axis is that agent's final score at the end of the epoch, not a cumulative running total across the whole experiment.",
-            "- Higher points mean the agent collected more resources in that specific epoch.",
+            "- Higher points mean the agent performed better under that environment's scoring rules in that specific epoch.",
             "- A persistent gap between lines means one agent usually finished ahead. Frequent crossings mean the matchup stayed competitive from epoch to epoch.",
             "",
             "## Condition Results",
@@ -1341,6 +1432,7 @@ def render_markdown_report(
         )
         lines.extend(_format_research_metadata(condition))
         lines.extend(_format_agent_model_list(condition))
+        lines.extend(_format_environment_summary(condition))
         lines.extend(_format_generation_policy(condition))
         lines.extend(_format_curriculum_summary(condition))
         lines.append(f"- Overall result: {_format_overall_result(condition)}")

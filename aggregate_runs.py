@@ -84,6 +84,15 @@ def _display_condition_name(condition_name: str) -> str:
         "same_model_full_feedback": "Same-model full feedback",
         "cross_model_full_feedback": "Cross-model full feedback",
         "same_model_limited_feedback": "Same-model limited feedback",
+        "fixed_predator_holdout_endpoint": "Fixed predator",
+        "rotating_opponents_holdout_endpoint": "Rotating opponents",
+        "rotating_plus_nemesis_archive": "Rotating + nemesis archive",
+        "rotating_plus_novelty_gate": "Rotating + novelty gate",
+        "rotating_plus_replay_aware_selection": "Rotating + replay-aware selection",
+        "rotating_plus_nemesis_novelty_replay": "Rotating + nemesis + novelty + replay",
+        "transfer_resource_collection_denial": "Transfer: resource collection / denial",
+        "transfer_pursuit_evasion": "Transfer: pursuit / evasion",
+        "transfer_territory_control": "Transfer: territory control",
     }
     return mapping.get(condition_name, condition_name.replace("_", " "))
 
@@ -118,6 +127,8 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
     curriculum_spike_values: list[float] = []
     curriculum_adaptation_values: list[float] = []
     curriculum_cell_values: list[float] = []
+    primary_holdout_win_rate_values: list[float] = []
+    primary_holdout_margin_values: list[float] = []
     suite_families: set[str] = set()
     suite_types: set[str] = set()
     for bundle in bundles:
@@ -143,6 +154,10 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
             curriculum_adaptation_values.append(float(comparison["curriculum_avg_specific_adaptation"]))
         if "curriculum_avg_behavior_cell_coverage" in comparison:
             curriculum_cell_values.append(float(comparison["curriculum_avg_behavior_cell_coverage"]))
+        if comparison.get("avg_primary_holdout_win_rate") is not None:
+            primary_holdout_win_rate_values.append(float(comparison["avg_primary_holdout_win_rate"]))
+        if comparison.get("avg_primary_holdout_margin") is not None:
+            primary_holdout_margin_values.append(float(comparison["avg_primary_holdout_margin"]))
         for condition in conditions:
             metadata = condition.get("metadata", {})
             suite_family = metadata.get("suite_family")
@@ -165,6 +180,8 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
             "agent_names": agent_names,
             "agent_labels": sample.get("agent_labels", {}),
             "agent_models": sample.get("agent_models", {}),
+            "environment_name": sample.get("environment_name", "resource_collection"),
+            "environment_policy": sample.get("environment_policy", {}),
             "learner_agent": sample.get("learner_agent", ""),
             "learner_label": sample.get("learner_label", ""),
             "opponent_role_agent": sample.get("opponent_role_agent", ""),
@@ -186,6 +203,24 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
             "evaluation_enabled_count": sum(
                 1 for entry in entries if (entry["condition"].get("evaluation") or {}).get("enabled")
             ),
+            "primary_endpoint": {
+                "mean_win_rate": _stat_summary(
+                    [
+                        float(entry["condition"].get("primary_endpoint", {}).get("mean_win_rate", 0.0))
+                        for entry in entries
+                        if entry["condition"].get("primary_endpoint", {}).get("enabled")
+                    ],
+                    lower_bound=0.0,
+                    upper_bound=1.0,
+                ),
+                "mean_score_margin": _stat_summary(
+                    [
+                        float(entry["condition"].get("primary_endpoint", {}).get("mean_score_margin", 0.0))
+                        for entry in entries
+                        if entry["condition"].get("primary_endpoint", {}).get("enabled")
+                    ]
+                ),
+            },
             "holdout_results": {},
             "qualitative_epoch_refs": [],
         }
@@ -305,6 +340,8 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
             "curriculum_avg_post_loss_novelty_spikes": _stat_summary(curriculum_spike_values, lower_bound=0.0),
             "curriculum_avg_specific_adaptation": _stat_summary(curriculum_adaptation_values, lower_bound=0.0),
             "curriculum_avg_behavior_cell_coverage": _stat_summary(curriculum_cell_values, lower_bound=0.0),
+            "avg_primary_holdout_win_rate": _stat_summary(primary_holdout_win_rate_values, lower_bound=0.0, upper_bound=1.0),
+            "avg_primary_holdout_margin": _stat_summary(primary_holdout_margin_values),
         },
         "conditions": condition_summaries,
     }
@@ -408,6 +445,26 @@ def _aggregate_conclusions(aggregate_summary: dict[str, Any]) -> list[str]:
 
     lines.append("")
     lines.append("### Best-Supported Findings")
+
+    holdout_rankable = [
+        condition for condition in conditions
+        if _has_samples(condition.get("primary_endpoint", {}).get("mean_win_rate", {}))
+    ]
+    if holdout_rankable:
+        ranked = sorted(
+            holdout_rankable,
+            key=lambda condition: (
+                float(condition["primary_endpoint"]["mean_win_rate"]["mean"]),
+                float(condition["primary_endpoint"]["mean_score_margin"]["mean"]),
+            ),
+            reverse=True,
+        )
+        winner = ranked[0]
+        lines.append(
+            f"- On the primary endpoint, {_display_condition_name(str(winner['condition_name']))} led with mean held-out win rate "
+            f"{winner['primary_endpoint']['mean_win_rate']['mean']} and mean held-out margin "
+            f"{winner['primary_endpoint']['mean_score_margin']['mean']}."
+        )
 
     same_novelty = aggregate_summary["cross_run_summary"]["same_model_avg_novelty"]
     cross_novelty = aggregate_summary["cross_run_summary"]["cross_model_avg_novelty"]
@@ -576,12 +633,17 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
             error_ranges = {agent_name: [] for agent_name in agent_names}
             labels = series_labels
         nested_metric_name = None
+        primary_metric_name = None
         if metric_name.startswith("curriculum_metrics."):
             nested_metric_name = metric_name.split(".", 1)[1]
+        elif metric_name.startswith("primary_endpoint."):
+            primary_metric_name = metric_name.split(".", 1)[1]
         for condition in conditions:
             if learner_only:
                 learner_agent = condition.get("learner_agent") or ""
-                if nested_metric_name:
+                if primary_metric_name:
+                    stats = condition.get("primary_endpoint", {}).get(primary_metric_name)
+                elif nested_metric_name:
                     stats = condition.get("curriculum_metrics", {}).get(learner_agent, {}).get(nested_metric_name)
                 else:
                     stats = condition.get(metric_name, {}).get(learner_agent)
@@ -659,6 +721,15 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
             "percent_scale": False,
             "learner_only": True,
         },
+        {
+            "name": "aggregate_primary_holdout_win_rate.png",
+            "title": "Primary Holdout Win Rate by Condition",
+            "metric_name": "primary_endpoint.mean_win_rate",
+            "x_label": "Condition",
+            "y_label": "Mean holdout win rate",
+            "percent_scale": True,
+            "learner_only": True,
+        },
     ]
 
     chart_paths: dict[str, str] = {}
@@ -710,6 +781,8 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
     curriculum_spikes = aggregate_summary["cross_run_summary"]["curriculum_avg_post_loss_novelty_spikes"]
     curriculum_adaptation = aggregate_summary["cross_run_summary"]["curriculum_avg_specific_adaptation"]
     curriculum_cells = aggregate_summary["cross_run_summary"]["curriculum_avg_behavior_cell_coverage"]
+    primary_holdout_win_rate = aggregate_summary["cross_run_summary"]["avg_primary_holdout_win_rate"]
+    primary_holdout_margin = aggregate_summary["cross_run_summary"]["avg_primary_holdout_margin"]
     if _has_samples(same_novelty):
         lines.append(f"- {_format_stat('Same-model novelty', same_novelty)}.")
     else:
@@ -732,6 +805,10 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
         lines.append(f"- {_format_stat('Curriculum post-loss novelty spikes', curriculum_spikes)}.")
         lines.append(f"- {_format_stat('Curriculum specific adaptation count', curriculum_adaptation)}.")
         lines.append(f"- {_format_stat('Curriculum behavior-cell coverage', curriculum_cells)}.")
+    if _has_samples(primary_holdout_win_rate):
+        lines.append(f"- {_format_stat('Primary holdout win rate', primary_holdout_win_rate)}.")
+    if _has_samples(primary_holdout_margin):
+        lines.append(f"- {_format_stat('Primary holdout score margin', primary_holdout_margin)}.")
     if len(aggregate_summary.get("suite_families", [])) > 1 or len(aggregate_summary.get("suite_types", [])) > 1:
         lines.append(
             "- This aggregate mixes multiple suite families or suite types, so use the family-specific aggregates for interpretation and treat this summary as descriptive only."
@@ -790,6 +867,16 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
                 "",
             ]
         )
+    if chart_paths.get("primary_endpoint.mean_win_rate"):
+        lines.extend(
+            [
+                "### Primary Holdout Win Rate",
+                f"![Primary holdout win rate by condition]({chart_paths['primary_endpoint.mean_win_rate']})",
+                "- This is the main evaluation endpoint for holdout-first ablation studies.",
+                "- Higher bars mean the accepted learner policy won more often against opponents that were not used as the training objective.",
+                "",
+            ]
+        )
     lines.extend(
         [
             "## Condition Results",
@@ -805,9 +892,17 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
             lines.append(
                 f"- Curriculum roles: learner = {condition.get('learner_label', condition.get('learner_agent'))}; opponent role = {condition.get('opponent_role_label', condition.get('opponent_role_agent'))}."
             )
+        lines.append(f"- Environment: {condition.get('environment_name', 'resource_collection')}.")
         lines.append(
             f"- Fully clean run count: {condition['clean_run_count']}/{condition['run_count']}."
         )
+        primary_endpoint = condition.get("primary_endpoint", {})
+        holdout_win_stats = primary_endpoint.get("mean_win_rate", {})
+        holdout_margin_stats = primary_endpoint.get("mean_score_margin", {})
+        if _has_samples(holdout_win_stats):
+            lines.append(
+                f"- Primary endpoint: {_format_stat('held-out win rate', holdout_win_stats)}; {_format_stat('held-out score margin', holdout_margin_stats)}."
+            )
         if condition.get("metadata_examples"):
             metadata_rendered = "; ".join(
                 ", ".join(f"{key}={value}" for key, value in sorted(item.items()))
