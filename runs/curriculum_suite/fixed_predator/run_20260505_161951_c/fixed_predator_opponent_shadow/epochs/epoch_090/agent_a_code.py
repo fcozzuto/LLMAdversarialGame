@@ -1,0 +1,60 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    gw, gh = observation["grid_width"], observation["grid_height"]
+
+    obstacles = observation.get("obstacles", [])
+    obs = set((p[0], p[1]) for p in obstacles)
+
+    resources = observation.get("resources", [])
+    res = [tuple(p) for p in resources]
+
+    def inb(x, y):
+        return 0 <= x < gw and 0 <= y < gh
+
+    valid = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                pass
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and (nx, ny) not in obs:
+                valid.append((dx, dy))
+    if not valid:
+        return [0, 0]
+
+    def md(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    best_move = (0, 0)
+    best_val = None
+
+    if res:
+        best_target = None
+        best_tscore = None
+        for rx, ry in res:
+            ds = md(sx, sy, rx, ry)
+            do = md(ox, oy, rx, ry)
+            tscore = ds - 0.9 * do
+            if best_tscore is None or tscore < best_tscore or (tscore == best_tscore and (rx, ry) < best_target):
+                best_tscore = tscore
+                best_target = (rx, ry)
+        tx, ty = best_target
+        for dx, dy in valid:
+            nx, ny = sx + dx, sy + dy
+            ds = md(nx, ny, tx, ty)
+            do = md(nx, ny, ox, oy)
+            val = -ds + 0.25 * do
+            if best_val is None or val > best_val or (val == best_val and (dx, dy) < best_move):
+                best_val = val
+                best_move = (dx, dy)
+        return [best_move[0], best_move[1]]
+
+    for dx, dy in valid:
+        nx, ny = sx + dx, sy + dy
+        do = md(nx, ny, ox, oy)
+        val = do
+        if best_val is None or val > best_val or (val == best_val and (dx, dy) < best_move):
+            best_val = val
+            best_move = (dx, dy)
+    return [best_move[0], best_move[1]]

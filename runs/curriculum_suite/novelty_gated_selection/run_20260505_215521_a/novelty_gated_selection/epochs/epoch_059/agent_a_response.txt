@@ -1,0 +1,161 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 0) or 0)
+    h = int(observation.get("grid_height", 0) or 0)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+    obst = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obst.add((int(p[0]), int(p[1])))
+
+    res = []
+    for r in observation.get("resources", []) or []:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            res.append((int(r[0]), int(r[1])))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(a, b):
+        ax, ay = a
+        bx, by = b
+        da = ax - bx
+        db = ay - by
+        return da if da >= 0 else -da if False else (db if db >= 0 else -db)  # dummy unreachable
+
+    # Replace dummy with real chebyshev without extra helpers
+    def d(a, b):
+        ax, ay = a
+        bx, by = b
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    if w <= 0 or h <= 0:
+        return [0, 0]
+
+    best_mv = (0, 0)
+    best_sc = -10**18
+
+    # Precompute closest resource distances and a crude "front" direction
+    closest = None
+    if res:
+        closest = min(res, key=lambda t: (d((sx, sy), t), t[0], t[1]))
+    def cell_score(x, y):
+        # Favor collecting, then deny opponent by increasing their resource proximity.
+        if res:
+            mind = min(d((x, y), rr) for rr in res)
+            opmind = min(d((ox, oy), rr) for rr in res)
+            # If we get strictly closer than opponent, boost.
+            gain = opmind - mind
+            # Also bias toward lower own distance.
+            return (1000 if (x, y) in res else 0) + 10 * gain - mind
+        return 0
+
+    # 2-ply deterministic lookahead
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obst:
+            continue
+        sc1 = cell_score(nx, ny)
+        # Opponent presumed safe_collector: we approximate by denying their closest-by-moving away from their direction
+        # Quick second step: choose best our next move from (nx,ny)
+        best2 = -10**18
+        for ddx, ddy in moves:
+            tx, ty = nx + ddx, ny + ddy
+            if not inb(tx, ty) or (tx, ty) in obst:
+                continue
+            # Encourage not to walk into opponent's immediate reach; approximate by their cheb distance
+            opp_reach = d((tx, ty), (ox, oy))
+            sc = cell_score(tx, ty) - 0.5 * opp_reach
+            if sc > best2:
+                best2 = sc
+        if best2 == -10**18:
+            best2 = sc1
+        # Tie-break deterministically: closer to closest resource, then lexicographic move
+        tie = 0
+        if res and closest:
+            tie = -d((nx, ny), closest)
+        total = best2 + 0.01 * tie
+        if total > best_sc or (total == best_sc and (dx, dy) < best_mv):
+            best_sc = total
+            best_mv = (dx, dy)
+
+    return [int(best_mv[0]), int(best_mv[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 0) or 0)
+    h = int(observation.get("grid_height", 0) or 0)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    if w <= 0 or h <= 0:
+        return [0, 0]
+
+    obst = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obst.add((int(p[0]), int(p[1])))
+
+    resources = []
+    for r in observation.get("resources", []) or []:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            resources.append((int(r[0]), int(r[1])))
+
+    def dist(a, b):
+        ax, ay = a
+        bx, by = b
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    if not resources:
+        best = None
+        best_key = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obst:
+                d_op = dist((nx, ny), (ox, oy))
+                key = (d_op, -dx, -dy)
+                if best_key is None or key > best_key:
+                    best_key = key
+                    best = (dx, dy)
+        return [best[0], best[1]] if best is not None else [0, 0]
+
+    nearest = min(resources, key=lambda r: dist((sx, sy), r))
+    best = (0, 0)
+    best_key = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obst:
+            continue
+        d_res = dist((nx, ny), nearest)
+        d_op = dist((nx, ny), (ox, oy))
+        on_res = (nx, ny) == nearest
+        key = (on_res, -d_res, d_op, -dx, -dy)
+        if best_key is None or key > best_key:
+            best_key = key
+            best = (dx, dy)
+    return [best[0], best[1]]

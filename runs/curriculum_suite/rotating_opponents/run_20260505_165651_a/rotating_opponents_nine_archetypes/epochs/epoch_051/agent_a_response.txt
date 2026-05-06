@@ -1,0 +1,154 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources") or []
+    obs_list = observation.get("obstacles") or []
+    obstacles = set((p[0], p[1]) for p in obs_list)
+
+    def kd(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def blocked(x, y):
+        return x < 0 or x >= w or y < 0 or y >= h or (x, y) in obstacles
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not moves:
+        return [0, 0]
+
+    if kd(sx, sy, ox, oy) <= 2 and resources:
+        best = (None, -10**9)
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if blocked(nx, ny):
+                continue
+            val = kd(nx, ny, ox, oy)  # escape
+            # discourage stepping into opponent pursuit line
+            if kd(nx, ny, ox, oy) <= 1:
+                val -= 2
+            if val > best[1]:
+                best = ((dx, dy), val)
+        return [best[0][0], best[0][1]]
+
+    if not resources:
+        # just drift toward center while not running into opponent
+        cx = (w - 1) // 2
+        cy = (h - 1) // 2
+        best = ([0, 0], -10**9)
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if blocked(nx, ny):
+                continue
+            val = -kd(nx, ny, cx, cy) - 0.3 * kd(nx, ny, ox, oy)
+            if val > best[1]:
+                best = ([dx, dy], val)
+        return [best[0][0], best[0][1]]
+
+    # Switch target: prefer resources where we can outpace opponent.
+    # Compute a small set of candidate targets deterministically.
+    scored_targets = []
+    for rx, ry in resources:
+        if blocked(rx, ry):
+            continue
+        sd = kd(sx, sy, rx, ry)
+        od = kd(ox, oy, rx, ry)
+        lead = od - sd  # positive means we are closer
+        # prefer reachable (not too far) and strong lead
+        val = 3.0 * lead - 0.2 * sd
+        scored_targets.append((val, rx, ry, lead, sd, od))
+    if not scored_targets:
+        return [0, 0]
+    scored_targets.sort(key=lambda t: (t[0], -t[3], -t[4]), reverse=True)
+    candidates = scored_targets[:min(6, len(scored_targets))]
+
+    best_move = [0, 0]
+    best_val = -10**18
+    center_x = (w - 1) // 2
+    center_y = (h - 1) // 2
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        # Evaluate best candidate target from this next position
+        move_val = -0.15 * kd(nx, ny, ox, oy) - 0.02 * kd(nx, ny, center_x, center_y)
+        for _, rx, ry, lead, sd0, od0 in candidates:
+            sd = kd(nx, ny, rx, ry)
+            od = od0  # opponent assumed stationary in one step for determinism; small impact
+            # immediate improvement in our lead and progress
+            move_val += 2.2 * (lead) + 1.0 * (od - sd) - 0.12 * sd
+        # strong penalty if moving into adjacent threat when resources exist
+        if kd(nx, ny, ox, oy) == 1:
+            move_val -= 1.5
+        if move_val > best_val:
+            best_val
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    res = observation.get("resources") or []
+    obs = observation.get("obstacles") or []
+
+    obstacles = set()
+    for p in obs:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    resources = []
+    for r in res:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            resources.append((r[0], r[1]))
+
+    def dist(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    def blocked(x, y):
+        return x < 0 or x >= w or y < 0 or y >= h or (x, y) in obstacles
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = [0, 0]
+    best_score = -10**18
+
+    close = dist(sx, sy, ox, oy) <= 2
+    center_x = (w - 1) // 2
+    center_y = (h - 1) // 2
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+
+        score = 0
+        if resources:
+            dres = min(dist(nx, ny, rx, ry) for rx, ry in resources)
+            score += 1000 - 20 * dres
+        else:
+            score += -dist(nx, ny, center_x, center_y)
+
+        dop = dist(nx, ny, ox, oy)
+        if close:
+            score += 2000 - 50 * dop
+        else:
+            score += -5 * dop
+
+        if dx == 0 and dy == 0:
+            score -= 1
+
+        if score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+
+    return best_move

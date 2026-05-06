@@ -1,0 +1,159 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    obstacles = observation.get("obstacles", [])
+    obs = set((a, b) for a, b in obstacles)
+
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def pick_target(px, py):
+        if not resources:
+            return (w - 1 if px <= w//2 else 0, h - 1 if py <= h//2 else 0)
+        best = resources[0]
+        bestv = -10**9
+        for rx, ry in resources:
+            d = cheb(px, py, rx, ry)
+            # prefer nearer resources, tie-break by "central" to reduce path ambiguity
+            cv = (d * 3) + (abs(rx - w//2) + abs(ry - h//2))
+            if -cv > bestv:
+                bestv = -cv
+                best = (rx, ry)
+        return best
+
+    if not resources:
+        tx, ty = pick_target(x, y)
+        tx2, ty2 = pick_target(ox, oy)
+        bx, by = 0 if tx2 > w//2 else w - 1, 0 if ty2 > h//2 else h - 1
+        best = (0, 0)
+        bestv = -10**18
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if not inb(nx, ny):
+                continue
+            v = (cheb(nx, ny, tx2, ty2) - cheb(nx, ny, ox, oy)) * 50
+            v += cheb(nx, ny, tx, ty) * -2
+            v += (cheb(nx, ny, bx, by)) * 0.5
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    # Evaluate each move with a small, deterministic lookahead: contest-focused greedy.
+    best = (0, 0)
+    bestv = -10**18
+    # Let opponent be a denier: we score moves that both progress to resources and reduce their advantage.
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny):
+            continue
+
+        # Our best approach
+        d_ours_best = 10**9
+        ours_cell = None
+        for rx, ry in resources:
+            d = cheb(nx, ny, rx, ry)
+            if d < d_ours_best:
+                d_ours_best = d
+                ours_cell = (rx, ry)
+
+        # Opponent's ability to take resources if we move there (opponent position unchanged this turn)
+        # We consider the "most deniable" resource: where they are closest relative to us.
+        denom_best = -10**18
+        worst_for_us = 10**9
+        for rx, ry in resources:
+            d_opp = cheb(ox, oy, rx, ry)
+            d_ours = cheb(nx, ny, rx, ry)
+            # if we are closer than opponent, this is good; if not, this is bad.
+            rel = d_opp - d_ours
+            if rel < worst_for_us:
+                worst_for_us = rel
+
+        # Main objective: maximize (opponent advantage we remove) and progress.
+        # Encourage reaching a resource quickly and also being closer than opponent on at least one.
+        # Use a convex shaping to avoid ties.
+        v = 0.0
+        if ours_cell is not None:
+            v += (6 - d_ours_best) * 20
+            v += -(abs(ours_cell[0] - nx) + abs(ours_cell[1] - ny)) * 0.2
+
+        # "Contest" term: maximize the minimum relative advantage we leave them (higher is better)
+        v += (worst_for_us) * 15
+
+        #
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    x, y = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    obs = set(obstacles)
+
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    if resources:
+        best = None
+        bestv = 10**9
+        cx = w // 2
+        cy = h // 2
+        for rx, ry in resources:
+            d = cheb(x, y, rx, ry)
+            v = d * 1000 + abs(rx - cx) + abs(ry - cy)
+            if v < bestv:
+                bestv = v
+                best = (rx, ry)
+        tx, ty = best
+        threatx, threaty = ox, oy
+    else:
+        tx, ty = (0, h - 1) if x < w // 2 else (w - 1, 0)
+        threatx, threaty = ox, oy
+
+    bestmove = (0, 0)
+    bestscore = -10**18
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not valid(nx, ny):
+            continue
+        # Prefer reducing distance to target, avoid moving toward opponent if no resources
+        dtar = cheb(nx, ny, tx, ty)
+        score = -dtar * 1000
+        if resources:
+            # small nudge to discourage getting too close to opponent
+            score -= cheb(nx, ny, ox, oy) * 5
+        else:
+            # with no resources, keep away from opponent
+            score += cheb(nx, ny, threatx, threaty) * 10
+        # deterministic tie-break: prefer smaller (dx,dy) lexicographically
+        if score > bestscore or (score == bestscore and (dx, dy) < bestmove):
+            bestscore = score
+            bestmove = (dx, dy)
+
+    return [bestmove[0], bestmove[1]]

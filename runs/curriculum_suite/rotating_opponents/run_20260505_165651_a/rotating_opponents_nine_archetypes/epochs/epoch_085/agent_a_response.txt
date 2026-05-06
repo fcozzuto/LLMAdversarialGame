@@ -1,0 +1,177 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [7, 7])
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    def blocked(x, y):
+        return (not inb(x, y)) or ((x, y) in obs)
+
+    def man(a, b, c, d):
+        dx = a - c
+        if dx < 0:
+            dx = -dx
+        dy = b - d
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    valid_res = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rx, ry = r[0], r[1]
+            if inb(rx, ry) and (rx, ry) not in obs:
+                valid_res.append((rx, ry))
+
+    if not valid_res:
+        return [0, 0]
+
+    # pick the best resource "target" deterministically based on advantage
+    best = None
+    best_val = -10**9
+    for rx, ry in valid_res:
+        ds = man(rx, ry, sx, sy)
+        do = man(rx, ry, ox, oy)
+        # Prefer resources we can reach sooner and that are not too exposed
+        val = (do - ds) * 10 - ds
+        # Mild preference for closer to boundary (opponent center_rush tends to ignore corners)
+        if rx in (0, w - 1) or ry in (0, h - 1):
+            val += 2
+        # Avoid ones that are very close to opponent (likely to be contested immediately)
+        if man(rx, ry, ox, oy) <= 2:
+            val -= 8
+        if val > best_val:
+            best_val = val
+            best = (rx, ry)
+
+    tx, ty = best
+
+    # Evaluate next move by progress to target + contest safety
+    best_move = (0, 0)
+    best_score = -10**9
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        ds_next = man(tx, ty, nx, ny)
+        ds_now = man(tx, ty, sx, sy)
+
+        # If we reduce distance, reward; otherwise small penalty
+        score = (ds_now - ds_next) * 6 - ds_next * 0.2
+
+        # Avoid stepping into opponent "reach" while contesting
+        dpo = man(nx, ny, ox, oy)
+        if dpo <= 1:
+            score -= 6
+        elif dpo == 2:
+            score -= 2
+
+        # If opponent is much closer to target right now, prioritize moving laterally to escape contest
+        do_target = man(tx, ty, ox, oy)
+        if do_target <= ds_now:
+            # keep moving that increases opponent-target distance
+            d_op_now = man(tx, ty, ox, oy)
+            # approximate opponent move influence by just measuring new opponent-to-target distance trend via symmetry:
+            # if we move toward opponent, we may be blocked; so penalize moving closer to opponent
+            d_so = man(nx, ny, ox, oy)
+            score -= d_so * 0.15
+
+        # Extra: if this move would land on a resource, boost strongly
+        if (nx, ny) in obs:
+            score -= 9999
+        for rx, ry in valid_res:
+            if nx == rx and ny == ry:
+                score += 25
+
+        # Deterministic tie-breaker: prefer staying if equal? We'll prefer lexicographically by (dx,dy)
+        if score > best_score or (score == best_score and (dx, dy) < best_move):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+
+    obs = set()
+    for p in (observation.get("obstacles") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def blocked(x, y):
+        return (not inb(x, y)) or ((x, y) in obs)
+
+    def md(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    resources = observation.get("resources") or []
+    targets = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rx, ry = r[0], r[1]
+            if inb(rx, ry) and (rx, ry) not in obs:
+                targets.append((rx, ry))
+
+    if not targets:
+        for dx, dy in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]:
+            nx, ny = sx + dx, sy + dy
+            if not blocked(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    best = None
+    best_val = None
+    for rx, ry in targets:
+        ds = md(rx, ry, sx, sy)
+        do = md(rx, ry, ox, oy)
+        # higher is better: we want resources where we are closer than opponent
+        val = (do - ds) * 100000 - ds
+        if best_val is None or val > best_val or (val == best_val and (rx, ry) < best):
+            best_val = val
+            best = (rx, ry)
+
+    tx, ty = best
+    # choose among valid 8-neighborhood (including stay) the move that reduces distance to target
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    chosen = [0, 0]
+    chosen_dist = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        d = md(nx, ny, tx, ty)
+        # tie-break deterministically: prefer closer, then lexicographically smaller move
+        if chosen_dist is None or d < chosen_dist or (d == chosen_dist and (dx, dy) < tuple(chosen)):
+            chosen_dist = d
+            chosen = [dx, dy]
+    if chosen_dist is None:
+        return [0, 0]
+    return chosen

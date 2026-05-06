@@ -1,0 +1,162 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources", []) or []
+    obstacles = set((p[0], p[1]) for p in (observation.get("obstacles", []) or []))
+
+    legal = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                legal.append((dx, dy))
+    if not legal:
+        return [0, 0]
+
+    if not resources:
+        cx, cy = (w - 1) // 2, (h - 1) // 2
+        best = None
+        bestv = None
+        for dx, dy in sorted(legal):
+            nx, ny = sx + dx, sy + dy
+            v = abs(nx - cx) + abs(ny - cy)
+            if bestv is None or v < bestv:
+                bestv = v
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    def man(a, b, c, d):
+        da = a - c
+        if da < 0: da = -da
+        db = b - d
+        if db < 0: db = -db
+        return da + db
+
+    # Find candidate resources deterministically: top few by "priority"
+    # priority: resources that are closer to us and farther from opponent
+    cand = []
+    for r in resources:
+        rx, ry = r
+        ds = man(rx, ry, sx, sy)
+        do = man(rx, ry, ox, oy)
+        pri = (do - ds, -ds)  # maximize (do-ds), then minimize ds
+        cand.append((pri, (rx, ry)))
+    cand.sort(key=lambda x: (-(x[0][0]), x[0][1], x[1][0], x[1][1]))
+    cand = [c[1] for c in cand[:6]]  # small deterministic set
+
+    best = None
+    best_score = None
+    best_tiebreak = None
+
+    for dx, dy in sorted(legal):
+        nx, ny = sx + dx, sy + dy
+
+        # Evaluate: how quickly we can get some high-value resource,
+        # while simultaneously being hard to intercept.
+        self_best = None
+        opp_best = None
+        for rx, ry in cand:
+            ds = man(rx, ry, nx, ny)
+            do = man(rx, ry, ox, oy)
+            if self_best is None or ds < self_best:
+                self_best = ds
+            # how close opponent is to that same resource (lower is worse for us)
+            if opp_best is None or do < opp_best:
+                opp_best = do
+
+        # Additional shaping: prefer reducing distance to the currently best resource
+        # (by same priority notion) and avoid stepping into tight obstacle pockets.
+        # "Obstacle pressure": count blocked adjacent cells around next position.
+        blocked = 0
+        for tx in (-1, 0, 1):
+            for ty in (-1, 0, 1):
+                if tx == 0 and ty == 0:
+                    continue
+                px, py = nx + tx, ny + ty
+                if 0 <= px < w and 0 <= py < h:
+                    if (px, py) in obstacles:
+                        blocked += 1
+
+        # Core score: maximize (opp close? penalize) and minimize time for us.
+        # If resources are few, this guides more directly.
+        dist_term = self_best if self_best is not None else 0
+        opp_term = opp_best if opp_best is not None else 0
+        score = (opp_term - dist_term, -dist_term, -blocked)
+
+        tiebreak = (dx, dy, nx, ny)
+        if best_score is None or score > best_score or (score == best_score and tiebreak < best_tiebreak):
+            best_score = score
+            best_tiebreak = tiebreak
+            best = (dx, dy)
+
+    return [best[0], best[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+
+    obstacles = observation.get("obstacles", []) or []
+    obs = set((p[0], p[1]) for p in obstacles)
+
+    resources = observation.get("resources", []) or []
+    rem = observation.get("remaining_resource_count", None)
+    if rem is not None and rem <= 0:
+        resources = []
+
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    legal = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:
+                legal.append((dx, dy))
+    if not legal:
+        return [0, 0]
+
+    if resources:
+        best = None
+        best_key = None
+        for rx, ry in resources:
+            ds = man(rx, ry, sx, sy)
+            do = man(rx, ry, ox, oy)
+            key = (-do + ds, ds, rx, ry)  # closer to us, farther from opponent
+            if best_key is None or key < best_key:
+                best_key = key
+                best = (rx, ry)
+
+        tx, ty = best
+        best_move = None
+        best_move_key = None
+        for dx, dy in legal:
+            nx, ny = sx + dx, sy + dy
+            ds2 = man(nx, ny, tx, ty)
+            do2 = man(nx, ny, ox, oy)
+            key = (ds2, -do2, dx, dy)
+            if best_move_key is None or key < best_move_key:
+                best_move_key = key
+                best_move = (dx, dy)
+        return [best_move[0], best_move[1]]
+
+    cx, cy = (w - 1) // 2, (h - 1) // 2
+    best_move = None
+    best_move_key = None
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        ds2 = man(nx, ny, cx, cy)
+        do2 = man(nx, ny, ox, oy)
+        key = (ds2, -do2, dx, dy)
+        if best_move_key is None or key < best_move_key:
+            best_move_key = key
+            best_move = (dx, dy)
+    return [best_move[0], best_move[1]]

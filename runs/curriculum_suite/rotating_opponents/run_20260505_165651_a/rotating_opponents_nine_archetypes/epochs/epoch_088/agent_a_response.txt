@@ -1,0 +1,165 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def blocked(x, y):
+        return (not inb(x, y)) or ((x, y) in obs)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def dist(a, b, c, d):
+        dx = a - c
+        if dx < 0: dx = -dx
+        dy = b - d
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    def cheb(a, b, c, d):
+        dx = a - c
+        if dx < 0: dx = -dx
+        dy = b - d
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    valid_res = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = r[0], r[1]
+            if inb(x, y) and (x, y) not in obs:
+                valid_res.append((x, y))
+
+    if not valid_res:
+        # If no resource, move to reduce distance to opponent's corner (deterministic patrol)
+        tx = w - 1 if oy < h // 2 else 0
+        ty = h - 1
+        best = (0, 0)
+        bestv = -10**9
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if blocked(nx, ny): 
+                continue
+            v = -cheb(nx, ny, tx, ty) + 0.01 * (dx * 3 + dy)
+            if v > bestv:
+                bestv, best = v, [dx, dy]
+        return best
+
+    # Choose target: prefer resources we can reach first; break ties by closeness and "escape" from opponent.
+    best_t = valid_res[0]
+    best_score = -10**18
+    for x, y in valid_res:
+        ds = cheb(sx, sy, x, y)
+        do = cheb(ox, oy, x, y)
+        # Higher score is better
+        score = 0
+        score += (2.0 if ds < do else (-0.8 if ds > do else 0.2))
+        score += 0.05 * (do - ds)  # advantage
+        score += -0.03 * dist(sx, sy, x, y)
+        # Encourage moving away from opponent when grabbing contested targets
+        score += 0.01 * (dist(x, y, ox, oy) - dist(x, y, sx, sy))
+        # Deterministic tie-break
+        score += -1e-6 * (x * 10 + y)
+        if score > best_score:
+            best_score, best_t = score, (x, y)
+
+    tx, ty = best_t
+
+    # Select move: legal, deterministic; maximize progress while staying ahead of opponent.
+    best = [0, 0]
+    bestv = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        my = cheb(nx, ny, tx, ty)
+        opp = cheb(ox, oy, tx, ty)
+        # progress and safety
+        progress = (cheb(sx, sy, tx, ty) - my)
+        # prefer moves that keep being at least as fast as opponent would be after their turn
+        safety = 0.0
+        if my < opp:
+            safety = 1.0
+        elif my == opp:
+            safety = 0.2
+        else:
+            safety = -0.6
+        v = 3.0 * progress + 2.0 * safety - 0.01 * dist(nx, ny, ox, oy) - 1e-6 * (dx * 9 + dy)
+        if v > bestv:
+            bestv, best = v, [dx, dy]
+    return best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int):
+                obs.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def blocked(x, y):
+        return (not inb(x, y)) or ((x, y) in obs)
+
+    res = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = r[0], r[1]
+            if isinstance(x, int) and isinstance(y, int) and inb(x, y) and (x, y) not in obs:
+                res.append((x, y))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def man(a, b, c, d):
+        dx = a - c
+        if dx < 0:
+            dx = -dx
+        dy = b - d
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    best = (0, 0)
+    bestv = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        rv = 0
+        if res:
+            md = 10**9
+            for rx, ry in res:
+                d = man(nx, ny, rx, ry)
+                if d < md:
+                    md = d
+            rv = -md
+        # Slightly prefer moving away from opponent to avoid contests
+        ov = man(nx, ny, ox, oy) * 0.1
+        v = rv + ov
+        if v > bestv or (v == bestv and (dx, dy) < best):
+            bestv = v
+            best = (dx, dy)
+
+    return [best[0], best[1]]

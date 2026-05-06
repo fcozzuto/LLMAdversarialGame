@@ -1,0 +1,168 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+
+    blocked = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            blocked.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def legal(x, y):
+        return inb(x, y) and (x, y) not in blocked
+
+    def parse_pos(r):
+        if isinstance(r, dict):
+            pos = r.get("position")
+            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                return (pos[0], pos[1])
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            return (r[0], r[1])
+        return None
+
+    targets = []
+    for r in resources:
+        p = parse_pos(r)
+        if p is not None and legal(p[0], p[1]):
+            targets.append(p)
+
+    moves = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    if not legal(sx, sy):
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if legal(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    if not targets:
+        # deterministic safe-ish: move to increase distance from opponent along diagonal preference
+        best = None
+        bestv = -10**9
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not legal(nx, ny):
+                continue
+            v = man(nx, ny, sx, sy) - man(nx, ny, ox, oy) * 0.01
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+        return list(best) if best is not None else [0, 0]
+
+    # Evaluate: for each move, best target it can reach, but penalize targets the opponent can contest immediately.
+    best_move = (0, 0)
+    best_val = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        # if we step onto a resource, prefer heavily
+        base = 0
+        for t in targets:
+            if t[0] == nx and t[1] == ny:
+                base += 1000
+        best_target_val = -10**18
+        for tx, ty in targets:
+            self_d = man(nx, ny, tx, ty)
+            opp_d = man(ox, oy, tx, ty)
+            # contest if opponent can reach in <=1 after its move (approximate)
+            contest = 1 if opp_d <= 1 else 0
+            # Prefer being closer than opponent, and avoid immediate contesting targets
+            v = (opp_d - self_d) * 10 - self_d - contest * 80 + (base * 0.001)
+            # small tie-breaker: move reduces distance to the chosen target in a "directional" way
+            v -= abs((tx - nx) - (tx - sx)) * 0.01
+            if v > best_target_val:
+                best_target_val = v
+        # If opponent could capture some nearby resource next, slightly bias away by maximizing min distance to resources
+        opp_threat = 0
+        for tx, ty in targets:
+            if man(ox, oy, tx, ty) <= 1:
+                opp_threat = 1
+                break
+        total = best_target_val - opp_threat * 20
+        if total > best_val:
+            best_val = total
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    sp = observation.get("self_position", (0, 0))
+    op = observation.get("opponent_position", (0, 0))
+    sx, sy = sp if isinstance(sp, (list, tuple)) and len(sp) >= 2 else (0, 0)
+    ox, oy = op if isinstance(op, (list, tuple)) and len(op) >= 2 else (0, 0)
+
+    blocked = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int):
+                blocked.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def legal(x, y):
+        return inb(x, y) and (x, y) not in blocked
+
+    def get_pos(item):
+        if isinstance(item, dict):
+            pos = item.get("position")
+            if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+                return pos[0], pos[1]
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            return item[0], item[1]
+        return None
+
+    resources = observation.get("resources", []) or []
+    targets = []
+    for r in resources:
+        p = get_pos(r)
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and legal(x, y):
+                targets.append((x, y))
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    if not legal(sx, sy):
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if legal(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    if targets:
+        tx, ty = min(targets, key=lambda t: (man(sx, sy, t[0], t[1]), t[0], t[1]))
+    else:
+        tx, ty = ox, oy
+
+    best = None
+    best_val = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        d = man(nx, ny, tx, ty)
+        val = d
+        if best_val is None or val < best_val or (val == best_val and (dx, dy) < best):
+            best_val = val
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[0], best[1]]

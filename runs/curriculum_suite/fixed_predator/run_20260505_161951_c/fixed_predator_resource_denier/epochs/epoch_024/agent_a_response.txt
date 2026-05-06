@@ -1,0 +1,162 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    obstacles = observation.get("obstacles", [])
+    obs = set((a, b) for a, b in obstacles)
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def best_target(px, py):
+        if not resources:
+            return None
+        # Choose resource that opponent is more likely to reach (we want to deny by reaching it first)
+        best_r = resources[0]
+        best_v = None
+        for rx, ry in resources:
+            ds = cheb(px, py, rx, ry)
+            do = cheb(ox if px == x else px, oy if py == y else py, rx, ry)  # unused but keeps deterministic shape
+            # For self: prioritize high (opp_dist - self_dist) with closeness tie-break
+            v = (cheb(x, y, rx, ry), rx, ry)
+            # We'll compute final ordering outside; here just return closest for a stable move direction
+            # (reused in move steering)
+            if best_v is None or v < best_v:
+                best_v = v
+                best_r = (rx, ry)
+        return best_r
+
+    if not resources:
+        # Keep separation using Chebyshev distance; stable tie-break by lexicographic move.
+        best = [0, 0]
+        bestv = -10**18
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if not valid(nx, ny):
+                continue
+            d = cheb(nx, ny, ox, oy)
+            v = d * 1000 - (abs(nx - (w - 1)) + abs(ny - (h - 1)))
+            if v > bestv or (v == bestv and (dx, dy) < (best[0], best[1])):
+                bestv = v
+                best = [dx, dy]
+        return best
+
+    # For each move: pick the resource that maximizes (opp_adv - self_adv) after the move (one-step greedy).
+    best_move = [0, 0]
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not valid(nx, ny):
+            continue
+        # Determine our best target after move: maximize denial potential, then proximity
+        best_r = None
+        best_t = None
+        for rx, ry in resources:
+            ds = cheb(nx, ny, rx, ry)
+            do = cheb(ox, oy, rx, ry)
+            # Higher is better: we want ds small and do large
+            t = (do - ds, -ds, -rx, -ry)
+            if best_t is None or t > best_t:
+                best_t = t
+                best_r = (rx, ry)
+        rx, ry = best_r
+
+        # Opponent one-step response assumption: it moves to minimize Chebyshev distance to our chosen target.
+        opp_best_d = None
+        opp_best_move = [0, 0]
+        for odx, ody in dirs:
+            mx, my = ox + odx, oy + ody
+            if not valid(mx, my):
+                continue
+            d = cheb(mx, my, rx, ry)
+            if opp_best_d is None or d < opp_best_d or (d == opp_best_d and (odx, ody) < (opp_best_move[0], opp_best_move[1])):
+                opp_best_d = d
+                opp_best_move = [odx, ody]
+
+        # Evaluate outcome: difference in who is closer now/after one step; also discourage letting them keep access to many resources.
+        my_d_self = cheb(nx, ny, rx, ry)
+        my_d_opp = opp_best_d if opp_best_d is not None else cheb(ox, oy, rx, ry)
+        # Secondary: prefer
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    if w <= 0 or h <= 0:
+        return [0, 0]
+    x, y = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (x, y))
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    obs = set(obstacles) if obstacles else set()
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def dist(a, b, c, d):
+        dx = a - c
+        if dx < 0:
+            dx = -dx
+        dy = b - d
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    best = None
+    best_score = -10**18
+    if resources:
+        for rx, ry in resources:
+            ds = dist(x, y, rx, ry)
+            do = dist(ox, oy, rx, ry)
+            score = (do - ds) * 100 - ds  # deny high first, then be closer
+            if score > best_score:
+                best_score = score
+                best = (rx, ry)
+
+    if best is None:
+        for rx, ry in resources[:1]:
+            best = (rx, ry)
+
+    # If still none, just stay or move away from opponent
+    if best is None:
+        best_move = [0, 0]
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if not valid(nx, ny):
+                continue
+            s = dist(nx, ny, ox, oy)
+            if s > dist(x, y, ox, oy):
+                best_move = [dx, dy]
+                break
+        return best_move
+
+    tx, ty = best
+    cur_ds = dist(x, y, tx, ty)
+    # Choose move that reduces distance to target; tie-break: increases distance from opponent
+    best_move = [0, 0]
+    best_val = -10**18
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not valid(nx, ny):
+            continue
+        nds = dist(nx, ny, tx, ty)
+        ndo = dist(nx, ny, ox, oy)
+        val = (cur_ds - nds) * 1000 + ndo - nds
+        if val > best_val:
+            best_val = val
+            best_move = [dx, dy]
+    return [best_move[0], best_move[1]]

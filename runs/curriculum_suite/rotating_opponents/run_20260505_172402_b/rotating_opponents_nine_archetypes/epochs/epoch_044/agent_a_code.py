@@ -1,0 +1,74 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obs = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obs:
+                resources.append((x, y))
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    moves = [(0, 0), (1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)]
+
+    if not resources:
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    best_r = None
+    best_adv = None
+    best_oppd = None
+    for rx, ry in resources:
+        sd = cheb(sx, sy, rx, ry)
+        od = cheb(ox, oy, rx, ry)
+        adv = od - sd
+        if best_adv is None or adv > best_adv or (adv == best_adv and (best_oppd is None or od < best_oppd)):
+            best_adv = adv
+            best_oppd = od
+            best_r = (rx, ry)
+
+    rx, ry = best_r
+    cur_d = cheb(sx, sy, rx, ry)
+
+    best_move = None
+    best_val = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        nd = cheb(nx, ny, rx, ry)
+        od = cheb(ox, oy, rx, ry)
+        val = (od - nd, -nd)  # maximize advantage; then minimize distance
+        if best_val is None or val > best_val or (val == best_val and nd < cur_d):
+            best_val = val
+            best_move = (dx, dy)
+
+    if best_move is None:
+        return [0, 0]
+    return [int(best_move[0]), int(best_move[1])]

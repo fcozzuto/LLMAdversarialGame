@@ -1,0 +1,57 @@
+def choose_move(observation):
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    w = int(observation.get("grid_width", 1)) or 1
+    h = int(observation.get("grid_height", 1)) or 1
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    ob = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                ob.add((x, y))
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+    inb = lambda x, y: 0 <= x < w and 0 <= y < h
+    def valid(x, y):
+        return inb(x, y) and (x, y) not in ob
+    cx, cy = (w - 1) // 2, (h - 1) // 2
+    if not resources:
+        best = (0, 0, -10**12)
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                nx, ny = sx, sy
+            sc = - (abs(nx - cx) + abs(ny - cy)) - (abs(nx - ox) + abs(ny - oy) == 0) * 10**6
+            if sc > best[2]:
+                best = (dx, dy, sc)
+        return [best[0], best[1]]
+    best_t = None
+    best_d = 10**12
+    for r in resources:
+        if not r or len(r) < 2:
+            continue
+        rx, ry = int(r[0]), int(r[1])
+        if not inb(rx, ry) or (rx, ry) in ob:
+            continue
+        d = abs(ox - rx) + abs(oy - ry)
+        if d < best_d:
+            best_d = d
+            best_t = (rx, ry)
+    if best_t is None:
+        tx, ty = cx, cy
+    else:
+        tx, ty = best_t
+    best = (0, 0, -10**12)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        my = abs(nx - tx) + abs(ny - ty)
+        op = abs(nx - ox) + abs(ny - oy)
+        res_here = 1 if (nx, ny) == (tx, ty) else 0
+        sc = res_here * 10**7 - my * 1000 - op
+        if sc > best[2]:
+            best = (dx, dy, sc)
+    return [best[0], best[1]]

@@ -1,0 +1,57 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    resources = observation.get("resources") or []
+    targets = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obs:
+                targets.append((x, y))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    if not inb(sx, sy) or (sx, sy) in obs:
+        sx, sy = 0, 0
+
+    best_move = (0, 0)
+    best_key = None
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+
+        d_opp = abs(nx - ox) + abs(ny - oy)
+        if targets:
+            mind = None
+            for tx, ty in targets:
+                d = abs(nx - tx) + abs(ny - ty)
+                if mind is None or d < mind:
+                    mind = d
+            d_res = mind if mind is not None else 10**9
+        else:
+            d_res = 10**9
+
+        center_bias = -abs(nx - (w - 1) // 2) - abs(ny - (h - 1) // 2)
+        key = (d_res, -d_opp, center_bias, -(dx * dx + dy * dy), dx, dy)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_move = [dx, dy]
+
+    return best_move

@@ -1,0 +1,155 @@
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    def manh(a, b, c, d):
+        dx = a - c
+        if dx < 0:
+            dx = -dx
+        dy = b - d
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    if not resources:
+        cx, cy = w // 2, h // 2
+        best = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            v = manh(nx, ny, cx, cy)
+            if best is None or v < best[0] or (v == best[0] and (nx, ny) < best[1]):
+                best = (v, (nx, ny), dx, dy)
+        return [best[2], best[3]] if best else [0, 0]
+
+    # Opponent "nearby targets" (edge_patrol tends to contest accessible resources on its side)
+    opp_targets = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rx, ry = r[0], r[1]
+            opp_targets.append((manh(ox, oy, rx, ry), rx, ry))
+    opp_targets.sort(key=lambda t: (t[0], t[1], t[2]))
+    opp_near = set((t[1], t[2]) for t in opp_targets[:min(4, len(opp_targets))])
+
+    # Evaluate each possible next position using greedy "advantage" over opponent.
+    best = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+
+        # Prefer moves that reduce our distance and increase (or at least not reduce) opponent disadvantage.
+        val = 10**9
+        for r in resources:
+            rx, ry = r[0], r[1]
+            our_d = manh(nx, ny, rx, ry)
+            opp_d = manh(ox, oy, rx, ry)
+            # Lower is better: our approach while making it harder for opponent to reach first.
+            advantage = our_d - 1.15 * opp_d
+            # If opponent is likely already targeting it, penalize less-effective approaches.
+            if (rx, ry) in opp_near:
+                advantage -= 0.25 * our_d
+            # Slight tie-break toward closer resources and center.
+            center_bias = 0.02 * manh(nx, ny, w // 2, h // 2)
+            score = (advantage, our_d, center_bias, rx, ry)
+            if score < val:
+                val = score
+
+        # Deterministic tie-break: lexicographic on next cell
+        key = (val, nx, ny)
+        if best is None or key < best[0]:
+            best = (key, dx, dy)
+
+    return [best[1], best[2]] if best else [0, 0]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    obstacles = observation.get("obstacles") or []
+    resources = observation.get("resources") or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((int(p[0]), int(p[1])))
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def manh(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    move_dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    best = None
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if valid(rx, ry):
+                best = (0, 0, 0, 0)
+                break
+
+    if resources:
+        targets = []
+        for r in resources:
+            if isinstance(r, (list, tuple)) and len(r) >= 2:
+                rx, ry = int(r[0]), int(r[1])
+                if valid(rx, ry):
+                    targets.append((rx, ry))
+        if targets:
+            cx = ox
+            cy = oy
+            for dx, dy in move_dirs:
+                nx, ny = int(sx) + dx, int(sy) + dy
+                if not valid(nx, ny):
+                    continue
+                d_to_res = min(manh(nx, ny, tx, ty) for tx, ty in targets)
+                d_to_opp = manh(nx, ny, cx, cy)
+                # Prefer closer to resources; break ties by farther from opponent; then deterministic tie-break
+                score = (d_to_res, -d_to_opp, nx, ny)
+                if best is None or score < best[0]:
+                    best = (score, dx, dy)
+
+    if best is not None:
+        return [int(best[1]), int(best[2])]
+
+    # Fallback: move toward center while avoiding opponent when possible
+    tx, ty = w // 2, h // 2
+    best2 = None
+    for dx, dy in move_dirs:
+        nx, ny = int(sx) + dx, int(sy) + dy
+        if not valid(nx, ny):
+            continue
+        score = (manh(nx, ny, tx, ty), -manh(nx, ny, ox, oy), nx, ny)
+        if best2 is None or score < best2[0]:
+            best2 = (score, dx, dy)
+    if best2 is None:
+        return [0, 0]
+    return [int(best2[1]), int(best2[2])]

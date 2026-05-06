@@ -1,0 +1,140 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    if not resources:
+        # Contest: move towards center if possible, but keep some distance from opponent.
+        tx, ty = (w - 1) // 2, (h - 1) // 2
+        best = [0, 0]
+        best_key = None
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            key = (-man(nx, ny, tx, ty), man(nx, ny, ox, oy), dx, dy)
+            if best_key is None or key < best_key:
+                best_key = key
+                best = [dx, dy]
+        return best if best_key is not None else [0, 0]
+
+    # Primary: maximize advantage over opponent for the most valuable resource.
+    # Secondary: avoid obstacles, then prefer moves that improve our distance to contested resources,
+    # finally prefer closer-to-center to reduce edge_patrol vulnerability.
+    cx, cy = (w - 1) // 2, (h - 1) // 2
+    best_move = [0, 0]
+    best_key = None
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        # Score as max over resources: (opp_d - my_d) with tie-break by opp proximity and our closeness.
+        # Also penalize moving into squares that are closer to opponent than we are (low tempo).
+        best_res = None
+        for rx, ry in resources:
+            if (rx, ry) in obstacles:
+                continue
+            myd = man(nx, ny, rx, ry)
+            opd = man(ox, oy, rx, ry)
+            # advantage if we can reach earlier/equal
+            adv = opd - myd
+            # value prefers resources opponent would reach soon, so we contest those more
+            value = -opd
+            key_res = (-adv, value, myd, man(nx, ny, ox, oy))
+            if best_res is None or key_res < best_res:
+                best_res = key_res
+
+        if best_res is None:
+            continue
+
+        # Convert best_res into move key: favor higher adv => smaller -adv in best_res already,
+        # add small deterministic biases.
+        -adv_component = best_res[0]  # equals -adv
+        center_d = man(nx, ny, cx, cy)
+        edge_dist = min(nx, w - 1 - nx, ny, h - 1 - ny)
+        # Prefer not hugging edges (opponent archetype), while still allowing central contest.
+        key = (best_res[0], best_res[1], best_res[2], center_d, -edge_dist, dx, dy)
+
+        if best_key is None or key < best_key:
+            best_key = key
+            best_move = [dx, dy]
+
+    return best_move if best_key is not None else [0, 0]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    resources = observation.get("resources") or []
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    cx, cy = (w - 1) // 2, (h - 1) // 2
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    best_move = [0, 0]
+    best_key = None
+
+    if resources:
+        scored = []
+        for r in resources:
+            if not r:
+                continue
+            rx, ry = r
+            dS = abs(sx - rx) + abs(sy - ry)
+            dO = abs(ox - rx) + abs(oy - ry)
+            # Prefer resources we can reach sooner; break ties by closeness to center
+            scored.append((dS - dO, dS, abs(rx - cx) + abs(ry - cy), rx, ry))
+        scored.sort()
+        # Consider only top few to stay fast
+        targets = scored[:3]
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            # Evaluate against best target
+            key = None
+            for _, _, _, tx, ty in targets:
+                dS = abs(nx - tx) + abs(ny - ty)
+                dO = abs(ox - tx) + abs(oy - ty)
+                # maximize advantage -> minimize (dS-dO)
+                local = (dS - dO, dS, abs(nx - cx) + abs(ny - cy), abs(nx - ox) + abs(ny - oy))
+                if key is None or local < key:
+                    key = local
+            if key is None:
+                key = (10**9, 10**9, 10**9, 10**9)
+            if best_key is None or key < best_key:
+                best_key = key
+                best_move = [dx, dy]
+        return best_move
+
+    # No resources: go to center while staying away from opponent
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        key = (-dist((nx, ny), (ox, oy)), abs(nx - cx) + abs(ny - cy))
+        if best_key is None or key < best_key:
+            best_key = key
+            best_move = [dx, dy]
+    return best_move if best_key is not None else [0, 0]

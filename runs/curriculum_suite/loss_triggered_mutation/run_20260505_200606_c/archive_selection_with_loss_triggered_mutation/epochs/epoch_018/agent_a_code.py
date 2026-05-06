@@ -1,0 +1,81 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 1)
+    h = observation.get("grid_height", 1)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles_list = observation.get("obstacles", []) or []
+    obstacles = set((p[0], p[1]) for p in obstacles_list)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def ok(x, y):
+        return (x, y) not in obstacles
+
+    def dist2(ax, ay, bx, by):
+        dx = ax - bx
+        dy = ay - by
+        return dx * dx + dy * dy
+
+    def valid_moves():
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and ok(nx, ny):
+                yield dx, dy, nx, ny
+
+    if resources:
+        best_t = None
+        best_adv = -10**18
+        for r in resources:
+            tx, ty = r[0], r[1]
+            ds = dist2(sx, sy, tx, ty)
+            do = dist2(ox, oy, tx, ty)
+            adv = do - ds
+            if adv > best_adv:
+                best_adv = adv
+                best_t = (tx, ty)
+        if best_adv <= 0:
+            best_t = None
+
+        if best_t is None:
+            tx, ty = -1, -1
+        else:
+            tx, ty = best_t
+
+        best = (0, 0)
+        bestv = -10**18
+        for dx, dy, nx, ny in valid_moves():
+            if best_t is None:
+                v = dist2(nx, ny, ox, oy) * 0.001
+                # small deterministic pull toward nearest resource
+                mres = resources[0]
+                md = dist2(nx, ny, mres[0], mres[1])
+                for r in resources[1: min(len(resources), 30)]:
+                    d = dist2(nx, ny, r[0], r[1])
+                    if d < md:
+                        md = d
+                v -= md
+            else:
+                v = -dist2(nx, ny, tx, ty)
+                if (nx, ny) == (tx, ty):
+                    v += 10**9
+                v += dist2(nx, ny, ox, oy) * 0.0001
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    # No resources: move away from opponent, toward center
+    cx = (w - 1) // 2
+    cy = (h - 1) // 2
+    best = (0, 0)
+    bestv = -10**18
+    for dx, dy, nx, ny in valid_moves():
+        v = dist2(nx, ny, ox, oy) - dist2(nx, ny, cx, cy) * 0.1
+        if v > bestv:
+            bestv = v
+            best = (dx, dy)
+    return [best[0], best[1]]

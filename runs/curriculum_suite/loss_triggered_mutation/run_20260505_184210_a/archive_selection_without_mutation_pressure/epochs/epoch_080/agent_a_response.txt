@@ -1,0 +1,142 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = []
+    for r in observation.get("resources") or []:
+        if isinstance(r, (list, tuple)) and len(r) == 2:
+            resources.append((int(r[0]), int(r[1])))
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    legal = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if inside(nx, ny):
+            legal.append((dx, dy))
+    if not legal:
+        return [0, 0]
+
+    if resources:
+        # Predict opponent greedy target
+        t = resources[0]
+        bestd = man(ox, oy, t[0], t[1])
+        for r in resources[1:]:
+            d = man(ox, oy, r[0], r[1])
+            if d < bestd:
+                bestd, t = d, r
+        tx, ty = t
+
+        # Blocking heuristic: take a neighbor of target that is closest for opponent next step
+        neigh = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = tx + dx, ty + dy
+                if inside(nx, ny):
+                    neigh.append((nx, ny))
+        if neigh:
+            # Opponent's "best approach" neighbor is one minimizing its distance to target
+            opp_best = min(neigh, key=lambda p: (man(ox, oy, p[0], p[1]), man(p[0], p[1], tx, ty)))
+            ax, ay = opp_best
+            my_to = man(sx, sy, ax, ay)
+            opp_to = man(ox, oy, tx, ty)
+            should_block = my_to <= opp_to - 1
+
+            if should_block:
+                # Move toward the blocking cell; if we can't, move to cut off by distance to target
+                bx, by = ax, ay
+                def score_move(dx, dy):
+                    nx, ny = sx + dx, sy + dy
+                    return (man(nx, ny, bx, by), -man(nx, ny, tx, ty), man(nx, ny, ox, oy))
+                best = min(legal, key=lambda m: (score_move(m[0], m[1]), m[0] * 2 + m[1]))
+                return [best[0], best[1]]
+
+        # Offensive/anti-safe-collector: alternate between nearest and "harder" far resources by parity
+        parity = observation.get("turn_index", 0) & 1
+        def res_priority(rx, ry):
+            ds = man(sx, sy, rx, ry)
+            do = man(ox, oy, rx, ry)
+            # If parity==0 grab nearer, else contest far from opponent more
+            return (ds + (0 if parity == 0 else -min(do, 15)), -do, rx, ry)
+
+        target = min(resources, key=lambda r: res_priority(r[0], r[1]))
+        rx, ry = target
+
+        # Evaluate moves: prioritize progressing to target, but also avoid giving opponent shorter access
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w, h = observation.get("grid_width", 0), observation.get("grid_height", 0)
+    resources = observation.get("resources") or []
+    obstacles_list = observation.get("obstacles") or []
+    obstacles = set()
+    for p in obstacles_list:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def man(ax, ay, bx, by):
+        ax, ay, bx, by = int(ax), int(ay), int(bx), int(by)
+        return abs(ax - bx) + abs(ay - by)
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    legal = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if inside(nx, ny):
+            legal.append((dx, dy))
+    if not legal:
+        return [0, 0]
+
+    best_move = legal[0]
+    best_score = None
+
+    # Target: nearest resource (tie-breaker: lowest (x,y))
+    target = None
+    if resources:
+        best_t = None
+        best_d = None
+        for r in resources:
+            if isinstance(r, (list, tuple)) and len(r) >= 2:
+                rx, ry = int(r[0]), int(r[1])
+                d = man(sx, sy, rx, ry)
+                if best_d is None or d < best_d or (d == best_d and (rx, ry) < best_t):
+                    best_d, best_t = d, (rx, ry)
+        target = best_t
+
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        if target is not None:
+            # Prefer closer to our target; slightly avoid being closer to opponent than us
+            score = man(nx, ny, target[0], target[1])
+            opp_adv = man(nx, ny, ox, oy) - man(ox, oy, sx, sy)
+            score += 0.1 * opp_adv
+        else:
+            # No resources: move to reduce distance to opponent
+            score = man(nx, ny, ox, oy) - 0.1 * man(nx, ny, sx, sy)
+
+        if best_score is None or score < best_score or (score == best_score and (dx, dy) < best_move):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

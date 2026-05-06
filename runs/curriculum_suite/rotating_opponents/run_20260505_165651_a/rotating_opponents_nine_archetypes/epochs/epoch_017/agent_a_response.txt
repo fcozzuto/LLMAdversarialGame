@@ -1,0 +1,129 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    if not resources:
+        return [0, 0]
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    def best_target(x, y):
+        best = None
+        best_key = None
+        for rx, ry in resources:
+            d = man(x, y, rx, ry)
+            od = man(ox, oy, rx, ry)
+            lead = od - d  # positive => we are closer than opponent
+            # prioritize positive lead; then smaller our distance; then avoid far/edge resources for robustness
+            key = (lead, -d, -abs(rx - (w - 1) / 2.0) - abs(ry - (h - 1) / 2.0), -rx, -ry)
+            if best_key is None or key > best_key:
+                best_key = key
+                best = (rx, ry, d, od, lead)
+        return best
+
+    best_move = [0, 0]
+    best_score = None
+
+    for dx1, dy1 in moves:
+        x1, y1 = sx + dx1, sy + dy1
+        if not inb(x1, y1):
+            continue
+        # Depth-2: choose our best target after move, and then assume our second move greedily improves lead.
+        t1 = best_target(x1, y1)
+        if t1 is None:
+            continue
+        rx, ry, d1, od1, lead1 = t1
+
+        second_best = None
+        second_best_key = None
+        for dx2, dy2 in moves:
+            x2, y2 = x1 + dx2, y1 + dy2
+            if not inb(x2, y2):
+                continue
+            d2 = man(x2, y2, rx, ry)
+            lead2 = od1 - d2  # opponent position unchanged; evaluate improvement on same target
+            # also add tiny "commitment" bonus to keep trajectory towards target
+            commit = -man(x2, y2, rx, ry)
+            # slight preference for not drifting away from first-step lead
+            key = (lead2, -d2, commit, -dx2, -dy2)
+            if second_best_key is None or key > second_best_key:
+                second_best_key = key
+                second_best = (lead2, d2)
+
+        if second_best is None:
+            score = lead1 - d1 * 0.01
+        else:
+            lead2, d2 = second_best
+            score = (lead2 * 10.0) - (d2 * 0.1)  # strong focus on race advantage
+
+        # Deterministic tie-break: prefer moves that move "towards" chosen target initially, then smaller dx/dy lexicographically
+        tx = 0 if rx == sx else (1 if rx > sx else -1)
+        ty = 0 if ry == sy else (1 if ry > sy else -1)
+        toward_bonus = (dx1 == tx and dy1 == ty)
+
+        key = (score, toward_bonus, -abs(dx1) - abs(dy1), -dx1, -dy1)
+        if best_score is None or key > best_move[2] if len(best_move) > 2 else True:
+            best_score = score
+            best_move = [dx1, dy1]
+            best_move_key = key
+
+    if best_move == [0, 0]:
+        # Fallback deterministic: go to resource that maximizes lead on this turn (no depth-2)
+        best = None
+        best_key = None
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources") or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    if not resources:
+        return [0, 0]
+
+    best_move = [0, 0]
+    best_key = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        best_for_move = None
+        for rx, ry in resources:
+            ds = man(nx, ny, rx, ry)
+            do = man(ox, oy, rx, ry)
+            lead = do - ds
+            key = (lead, -ds, -abs(rx - (w - 1) / 2.0) - abs(ry - (h - 1) / 2.0))
+            if best_for_move is None or key > best_for_move:
+                best_for_move = key
+        if best_for_move is None:
+            continue
+        if best_key is None or best_for_move > best_key:
+            best_key = best_for_move
+            best_move = [dx, dy]
+
+    return best_move if ok(sx + best_move[0], sy + best_move[1]) else [0, 0]

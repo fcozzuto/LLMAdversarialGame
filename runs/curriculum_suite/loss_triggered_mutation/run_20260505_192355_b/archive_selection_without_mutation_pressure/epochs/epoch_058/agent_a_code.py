@@ -1,0 +1,53 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sp = observation.get("self_position", [0, 0])
+    op = observation.get("opponent_position", [0, 0])
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    resources = observation.get("resources") or []
+    if not resources:
+        return [0, 0]
+
+    obs_list = observation.get("obstacles") or []
+    obstacles = set((int(p[0]), int(p[1])) for p in obs_list if p is not None and len(p) >= 2)
+
+    def dist(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    dirs = [(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)]
+    moves = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+            moves.append((dx, dy))
+
+    best = None
+    best_key = None
+    for r in resources:
+        rx, ry = int(r[0]), int(r[1])
+        dself = dist(sx, sy, rx, ry)
+        dop = dist(ox, oy, rx, ry)
+        edge = (rx == 0 or rx == w - 1 or ry == 0 or ry == h - 1)
+        # Prefer safer targets (interior), then win the race (smaller dself, larger dop-dself)
+        key = (edge, dself, -(dop - dself))
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (rx, ry)
+
+    rx, ry = best
+    options = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        dself = dist(nx, ny, rx, ry)
+        edge_pen = 1 if (rx == 0 or rx == w - 1 or ry == 0 or ry == h - 1) else 0
+        options.append((edge_pen, dself, dx, dy))
+    options.sort()
+    return [options[0][2], options[0][3]]

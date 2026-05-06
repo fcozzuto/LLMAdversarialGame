@@ -1,0 +1,130 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def legal(nx, ny):
+        return inb(nx, ny) and (nx, ny) not in obstacles
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        dy = ay - by
+        return abs(dx) if abs(dx) > abs(dy) else abs(dy)
+
+    def score_target(tx, ty):
+        d_self = cheb(sx, sy, tx, ty)
+        d_opp = cheb(ox, oy, tx, ty)
+        # Prefer clear time advantage; otherwise take safest closer-to-us option.
+        adv = d_opp - d_self
+        # Small center pressure to avoid getting herded.
+        cx, cy = w // 2, h // 2
+        center = cheb(tx, ty, cx, cy)
+        # Penalty if opponent is already very close.
+        close_opp = 1 if d_opp <= 1 else 0
+        return (-adv * 10 + d_self + center * 0.2 + close_opp * 3, d_self)
+
+    if not resources:
+        cx, cy = w // 2, h // 2
+        best = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not legal(nx, ny):
+                continue
+            d = cheb(nx, ny, cx, cy)
+            key = (d, abs(nx - ox) + abs(ny - oy), dx, dy)
+            if best is None or key < best:
+                best = key
+        return [best[2], best[3]] if best else [0, 0]
+
+    # Two-stage target selection: strongest advantage, else best self progress.
+    ordered = sorted(resources, key=lambda p: score_target(p[0], p[1]))
+    t1 = ordered[0]
+    t2 = ordered[1] if len(ordered) > 1 else t1
+    # Decide deterministically: if t1 is only marginally better, switch to t2 for novelty.
+    s1 = score_target(t1[0], t1[1])
+    s2 = score_target(t2[0], t2[1])
+    target = t1 if (s1 < s2 and (s2[0] - s1[0]) >= 1) else t2
+
+    tx, ty = target
+    best_move = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        d_self = cheb(nx, ny, tx, ty)
+        # Obstacle proximity heuristic: discourage moves adjacent to obstacles.
+        adj_obs = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                if ax == 0 and ay == 0:
+                    continue
+                if (nx + ax, ny + ay) in obstacles:
+                    adj_obs += 1
+        # Also reduce opponent reachability to that target.
+        d_opp = cheb(ox, oy, tx, ty)
+        # If opponent can take it next, prioritize moves that increase distance to opponent.
+        opp_pressure = 2 if d_opp <= cheb(sx, sy, tx, ty) else 0
+        key = (d_self + adj_obs * 0.4 + opp_pressure, cheb(nx, ny, ox, oy), dx, dy)
+        if best_move is None or key < best_move:
+            best_move = key
+    return [best_move[2], best_move[3]] if best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    resources = observation.get("resources", []) or []
+    rem = observation.get("remaining_resource_count", None)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def legal(nx, ny):
+        return inb(nx, ny) and (nx, ny) not in obstacles
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        dy = ay - by
+        if abs(dx) > abs(dy):
+            return abs(dx)
+        return abs(dy)
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    bestv = None
+
+    targets = resources if resources else [(w // 2, h // 2)]
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        # If standing on/near a resource, prioritize it
+        if resources:
+            d_self = min(cheb(nx, ny, tx, ty) for tx, ty in targets)
+            d_opp = min(cheb(ox, oy, tx, ty) for tx, ty in targets)
+            # Prefer moves that reduce our distance to resources relative to opponent
+            v = (d_opp - d_self) * 100 - d_self
+        else:
+            # Fallback: move toward center while avoiding opponent
+            cx, cy = w // 2, h // 2
+            v = -cheb(nx, ny, cx, cy) * 10 + cheb(nx, ny, ox, oy) * 2
+        # Strongly avoid immediate contact with opponent if possible
+        if cheb(nx, ny, ox, oy) <= 1 and (resources or rem):
+            v -= 80
+        if best is None or v > bestv:
+            best = (dx, dy)
+            bestv = v
+
+    return list(best if best is not None else (0, 0))

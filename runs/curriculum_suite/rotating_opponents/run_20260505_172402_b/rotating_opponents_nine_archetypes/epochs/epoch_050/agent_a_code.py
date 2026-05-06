@@ -1,0 +1,58 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    res = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                res.append((x, y))
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    cornerx = 0 if sx <= (w - 1) / 2 else w - 1
+    cornery = 0 if sy <= (h - 1) / 2 else h - 1
+    if res:
+        tx, ty = min(res, key=lambda r: (cheb(r[0], r[1], sx, sy), r[0], r[1]))
+    else:
+        tx, ty = cornerx, cornery
+
+    moves = [(0, 0), (1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)]
+    best = None
+    best_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        d = cheb(nx, ny, tx, ty)
+        od = cheb(nx, ny, ox, oy)
+        score = d * 1000 - od  # prefer smaller distance to target, then farther from opponent
+        if best_score is None or score < best_score:
+            best_score = score
+            best = (dx, dy)
+        elif score == best_score:
+            if (dx, dy) < best:
+                best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

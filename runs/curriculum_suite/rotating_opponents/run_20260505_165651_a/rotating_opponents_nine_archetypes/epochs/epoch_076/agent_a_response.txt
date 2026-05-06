@@ -1,0 +1,134 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+    obs = {(p[0], p[1]) for p in obstacles if isinstance(p, (list, tuple)) and len(p) >= 2}
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def blocked(x, y): return (not inb(x, y)) or ((x, y) in obs)
+    def man(a, b, c, d):
+        t = a - c
+        if t < 0: t = -t
+        u = b - d
+        if u < 0: u = -u
+        return t + u
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    if not resources:
+        # flee from opponent a bit (deterministic)
+        best = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if blocked(nx, ny): continue
+            v = (man(ox, oy, nx, ny), -abs(nx - (w-1)/2) - abs(ny - (h-1)/2))
+            if best is None or v > best[0]:
+                best = (v, dx, dy)
+        return [best[1], best[2]] if best else [0, 0]
+
+    # Choose an opponent-leaning target to contest (center-rush tends to claim early)
+    opp_target = None
+    opp_best = None
+    for r in resources:
+        x, y = r[0], r[1]
+        if not inb(x, y) or (x, y) in obs: continue
+        d = man(ox, oy, x, y)
+        if opp_best is None or d < opp_best:
+            opp_best = d
+            opp_target = (x, y)
+
+    # Competitive resource scoring: maximize (opp_d - self_d), but also consider absolute self distance.
+    best = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny): continue
+        # Prefer increasing distance from opponent while moving toward a contested resource.
+        best_res = None
+        for r in resources:
+            x, y = r[0], r[1]
+            if not inb(x, y) or (x, y) in obs: continue
+            self_d = man(nx, ny, x, y)
+            opp_d = man(ox, oy, x, y)
+            adv = opp_d - self_d  # larger => we are relatively closer
+            # Boost contesting the opponent's likely target
+            boost = -self_d if opp_target == (x, y) else 0
+            cell_pref = (adv + boost, -self_d, -man(ox, oy, nx, ny), x, y)
+            if best_res is None or cell_pref > best_res:
+                best_res = cell_pref
+        if best_res is None:
+            cell_pref = (0, -1, man(ox, oy, nx, ny), nx, ny)
+        # Primary: maximize advantage; secondary: maximize opponent distance; tertiary: deterministic tie-break.
+        overall = (best_res[0], best_res[1], best_res[2], best_res[3], best_res[4])
+        if best is None or overall > best[0]:
+            best = (overall, dx, dy)
+
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    raw_res = observation.get("resources") or []
+    raw_obs = observation.get("obstacles") or []
+    obs = set()
+    for p in raw_obs:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+        elif isinstance(p, dict) and "x" in p and "y" in p:
+            obs.add((p["x"], p["y"]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def blocked(x, y):
+        return (not inb(x, y)) or ((x, y) in obs)
+
+    res = []
+    for r in raw_res:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = r[0], r[1]
+        elif isinstance(r, dict) and "x" in r and "y" in r:
+            x, y = r["x"], r["y"]
+        else:
+            continue
+        if inb(x, y) and (x, y) not in obs:
+            res.append((x, y))
+
+    def man(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    best_move = (0, 0)
+    best_score = -10**18
+    if res:
+        tx, ty = min(res, key=lambda p: (man(p[0], p[1], sx, sy), p[0], p[1]))
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if blocked(nx, ny):
+                continue
+            dres = man(nx, ny, tx, ty)
+            dreac = man(nx, ny, ox, oy)
+            score = -dres + (0 if dreac == 0 else 0.1 / dreac) - 0.2 * dreac
+            if score > best_score or (score == best_score and (dx, dy) < best_move):
+                best_score = score
+                best_move = (dx, dy)
+    else:
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if blocked(nx, ny):
+                continue
+            dreac = man(nx, ny, ox, oy)
+            score = dreac - 0.01 * (abs(nx - (w // 2)) + abs(ny - (h // 2)))
+            if score > best_score or (score == best_score and (dx, dy) < best_move):
+                best_score = score
+                best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]

@@ -1,0 +1,165 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    # If no resources, move to maximize distance from opponent.
+    if not resources:
+        best = (None, -10**9)
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            v = cheb(nx, ny, ox, oy)
+            if v > best[1]:
+                best = ((dx, dy), v)
+        return [best[0][0], best[0][1]]
+
+    # Choose a target resource to contest.
+    best_target = None
+    best_score = -10**18
+    for rx, ry in resources:
+        if (rx, ry) in obstacles:
+            continue
+        my_t = cheb(sx, sy, rx, ry)
+        op_t = cheb(ox, oy, rx, ry)
+        # Prefer resources where we are earlier or at least not much later; also prefer closer overall.
+        score = (op_t - my_t) * 100 - my_t
+        if score > best_score:
+            best_score = score
+            best_target = (rx, ry)
+
+    tx, ty = best_target
+
+    # Step greedily toward target, but if we can grab a nearby resource or prevent opponent proximity, do it.
+    best_move = (0, 0)
+    best_val = -10**18
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        # Immediate resource gain proxy: prefer moving onto a resource.
+        gain = 0
+        for rx, ry in resources:
+            if (rx, ry) in obstacles:
+                continue
+            if rx == nx and ry == ny:
+                gain = 1000000
+                break
+
+        # Contest value: how our next position compares to opponent for the target.
+        my_tn = cheb(nx, ny, tx, ty)
+        op_tt = cheb(ox, oy, tx, ty)
+        contest = (op_tt - my_tn) * 100 - my_tn
+
+        # Safety: avoid getting too close to opponent unless contesting.
+        dist_opp = cheb(nx, ny, ox, oy)
+        safety = dist_opp if contest < 0 else dist_opp * 0.3
+
+        val = gain + contest + safety
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    # Small deterministic "interceptor" twist: if we are not beating opponent on target, drift to reduce their distance to us.
+    my_t_now = cheb(sx, sy, tx, ty)
+    op_t_now = cheb(ox, oy, tx, ty)
+    if op_t_now < my_t_now:
+        # Move to increase distance from opponent while still not stepping onto obstacles; this often forces delays.
+        best = (best_move, -10**18)
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            v = cheb(nx, ny, ox, oy) - 0.2 * cheb(nx, ny, tx, ty)
+            if v > best[1]:
+                best = ((dx, dy), v)
+        best_move = best[0]
+
+    return [best_move[0], best_move[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obs_list = observation.get("obstacles") or []
+    obstacles = set(tuple(p) for p in obs_list)
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def best_move_for_target(tx, ty):
+        best = None
+        best_val = None
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            myd = cheb(nx, ny, tx, ty)
+            opd = cheb(ox, oy, tx, ty)
+            val = (opd - myd, -myd, -cheb(nx, ny, ox, oy))
+            if best is None or val > best_val:
+                best = [dx, dy]
+                best_val = val
+        return best
+
+    valid_targets = [(rx, ry) for (rx, ry) in resources if inb(rx, ry) and (rx, ry) not in obstacles]
+    if valid_targets:
+        best_t = None
+        best_t_val = None
+        for tx, ty in valid_targets:
+            myd = cheb(sx, sy, tx, ty)
+            opd = cheb(ox, oy, tx, ty)
+            val = (opd - myd, -myd, -cheb(sx, sy, ox, oy))
+            if best_t is None or val > best_t_val:
+                best_t = (tx, ty)
+                best_t_val = val
+        mv = best_move_for_target(best_t[0], best_t[1])
+        if mv is not None:
+            return mv
+
+    # Fallback: move to maximize distance from opponent
+    best = None
+    best_d = -1
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        d = cheb(nx, ny, ox, oy)
+        if d > best_d:
+            best_d = d
+            best = [dx, dy]
+    return best if best is not None else [0, 0]

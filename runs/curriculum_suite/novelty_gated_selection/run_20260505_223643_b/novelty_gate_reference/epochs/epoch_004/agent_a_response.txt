@@ -1,0 +1,158 @@
+def choose_move(observation):
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    resources = observation.get("resources", [])
+    obstacles = set((p[0], p[1]) for p in observation.get("obstacles", []))
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def cheb(a, b, c, d):
+        da = a - c
+        if da < 0:
+            da = -da
+        db = b - d
+        if db < 0:
+            db = -db
+        return da if da >= db else db
+
+    if not resources:
+        # Hold position unless obstacle nearby; then step to free cell deterministically.
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                return [dx, dy]
+        return [0, 0]
+
+    # Target scoring: prioritize resources where we are closer or can beat opponent; otherwise take "next-best" safe routes.
+    best_tx, best_ty = resources[0]
+    best_sc = -10**9
+    for rx, ry in resources:
+        my_d = cheb(x, y, rx, ry)
+        op_d = cheb(ox, oy, rx, ry)
+        # If we can beat opponent, make it strongly attractive.
+        beat = op_d - my_d
+        # Prefer keeping distance from opponent when we're behind.
+        sc = 20 * beat - 2 * my_d
+        if ny_on_same_row := (ry == oy):
+            sc += 2  # slight bias when opponent shares resource row (often causes contest movement)
+        # Mild tie-breaker: prefer lexicographically smaller resource to stay deterministic.
+        if beat > 0:
+            sc += 100
+        if beat == 0:
+            sc += 10
+        if beat < 0:
+            sc -= 8 * (-beat)
+        if sc > best_sc or (sc == best_sc and (rx, ry) < (best_tx, best_ty)):
+            best_sc = sc
+            best_tx, best_ty = rx, ry
+
+    tx, ty = best_tx, best_ty
+
+    # Intercept heuristic: if opponent is much closer to our chosen target, try to move toward a cell that reduces their reach.
+    op_to_target = cheb(ox, oy, tx, ty)
+    my_to_target = cheb(x, y, tx, ty)
+    intercept = (op_to_target - my_to_target >= 2)
+
+    # Score each move by (1) reducing distance to target (or intercept), (2) avoiding giving opponent immediate access.
+    best_move = (0, 0)
+    best_ms = -10**9
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h or (nx, ny) in obstacles:
+            continue
+        # Primary objective
+        if intercept:
+            # Choose an intercept point near where opponent would step closer: aim for a cell closer to both opponent and target.
+            # Deterministic: take among neighbor cells the one minimizing cheb(op_next, target) with our move affecting op distance only via contention.
+            # Since we can't move opponent, approximate by aiming for positions that keep us near the "target line" in Chebyshev.
+            my_primary = -cheb(nx, ny, tx, ty)
+            # Also prefer aligning with opponent in x or y to increase contest chance.
+            align = (nx == ox) or (ny == oy)
+            my_primary += 2 if align else 0
+        else:
+            my_primary = -cheb(nx, ny, tx, ty)
+
+        # Secondary objective: deny resources where opponent would be closest next.
+        deny = 0
+        for rx, ry in resources:
+            # Only consider resources that are currently threatening (opponent close).
+            op_d = cheb(ox, oy, rx, ry)
+            if op_d <= 2:
+                my_d_next = cheb(nx, ny, rx, ry)
+                op_d_next = cheb(ox, oy, rx, ry) - 1 if cheb(ox, oy, rx, ry) > 0 else 0
+                # If moving here makes us closer than opponent by a margin, reward.
+                if my_d_next <= op_d_next:
+                    deny += 3
+
+        # Tertiary: avoid stepping into positions adjacent to obstacles too often (path robustness).
+        edge_pen = 0
+        for adx in (-1, 0, 1):
+            for ady in (-1, 0, 1):
+                if adx == 0 and ady == 0:
+                    continue
+                ax, ay = nx + adx, ny + ady
+               
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    resources = observation.get("resources", []) or []
+    obs = observation.get("obstacles", []) or []
+    obstacles = set((p[0], p[1]) for p in obs)
+
+    def cd(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    if resources:
+        best_r = None
+        best_sc = -10**18
+        for rx, ry in resources:
+            myd = cd(x, y, rx, ry)
+            opd = cd(ox, oy, rx, ry)
+            sc = 10 * (opd - myd) - myd
+            if sc > best_sc:
+                best_sc = sc
+                best_r = (rx, ry)
+        tx, ty = best_r
+        best_move = [0, 0]
+        best_val = -10**18
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if not (0 <= nx < w and 0 <= ny < h):
+                continue
+            if (nx, ny) in obstacles:
+                continue
+            myd = cd(nx, ny, tx, ty)
+            opd = cd(ox, oy, tx, ty)
+            sc = 10 * (opd - myd) - myd - 2 * cd(nx, ny, ox, oy)
+            if sc > best_val:
+                best_val = sc
+                best_move = [dx, dy]
+        return best_move
+
+    best_move = [0, 0]
+    best_val = -10**18
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        val = cd(nx, ny, ox, oy) - 3 * cd(nx, ny, x, y)
+        if val > best_val:
+            best_val = val
+            best_move = [dx, dy]
+    return best_move

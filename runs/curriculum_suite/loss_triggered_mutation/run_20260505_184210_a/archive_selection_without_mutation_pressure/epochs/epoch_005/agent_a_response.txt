@@ -1,0 +1,148 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    w, h = observation["grid_width"], observation["grid_height"]
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    legal = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+            legal.append((dx, dy, nx, ny))
+    if not legal:
+        return [0, 0]
+
+    if not resources:
+        best = None
+        bestk = None
+        for dx, dy, nx, ny in legal:
+            k = abs(nx - (w - 1)) + abs(ny - (h - 1)) + 0.5 * (abs(nx - ox) + abs(ny - oy))
+            if bestk is None or k < bestk:
+                bestk = k
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    def cheb(x1, y1, x2, y2):
+        dx = abs(x1 - x2)
+        dy = abs(y1 - y2)
+        return dx if dx > dy else dy
+
+    # Prefer resources where we are closer than opponent (steal), otherwise move to deny
+    candidates = []
+    for rx, ry in resources:
+        ds = cheb(sx, sy, rx, ry)
+        do = cheb(ox, oy, rx, ry)
+        candidates.append((rx, ry, ds, do))
+    best_steal = None
+    best_gap = None
+    for rx, ry, ds, do in candidates:
+        gap = (do - ds)  # positive = we are closer
+        if best_gap is None or gap > best_gap:
+            best_gap = gap
+            best_steal = (rx, ry, ds, do)
+
+    target = None
+    for rx, ry, ds, do in candidates:
+        if ds <= do - 1:
+            if target is None or (do - ds) > (target[3] - target[2]):
+                target = (rx, ry, ds, do)
+    if target is None:
+        target = best_steal
+
+    tx, ty, _, _ = target
+
+    # Deny/support: if we can't steal, shadow the opponent's nearest resource by maximizing our advantage after our move
+    # Compute opponent nearest resource
+    best_o = None
+    best_do = None
+    for rx, ry, ds, do in candidates:
+        if best_do is None or do < best_do:
+            best_do = do
+            best_o = (rx, ry)
+
+    oxr, oyr = best_o
+
+    want_steal = 1 if best_gap is not None and best_gap >= 1 else 0
+    best_move = None
+    best_val = None
+    for dx, dy, nx, ny in legal:
+        # primary: move toward target or improve advantage
+        ds_n = cheb(nx, ny, tx, ty)
+        do_now = cheb(ox, oy, tx, ty)
+        advantage = (do_now - ds_n)  # higher is better
+
+        # secondary: reduce opponent progress to their nearest resource (deny/shadow)
+        do_next_est = cheb(ox, oy, oxr, oyr)  # without sim, keep static; use our closeness as proxy
+        shadow = -cheb(nx, ny, oxr, oyr) + 0.25 * do_next_est
+
+        # tie-break: avoid moving closer to opponent only when stealing is possible; otherwise allow shadowing
+        prox_opp = -cheb(nx, ny, ox, oy)
+
+        val = (2.0 * advantage if want_steal else 1.2 * advantage) + shadow + 0.1 * prox_opp
+        if best_val is None or val > best_val:
+            best_val = val
+            best_move = (dx,
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = int(observation.get("grid_width", 1))
+    h = int(observation.get("grid_height", 1))
+    resources = observation.get("resources", []) or []
+    obs_list = observation.get("obstacles", []) or []
+    obstacles = set((p[0], p[1]) for p in obs_list)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    legal = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+            legal.append((dx, dy))
+
+    if not legal:
+        return [0, 0]
+
+    def cheb(x1, y1, x2, y2):
+        ax = x1 - x2
+        if ax < 0:
+            ax = -ax
+        ay = y1 - y2
+        if ay < 0:
+            ay = -ay
+        return ax if ax > ay else ay
+
+    if resources:
+        best_score = None
+        best_move = (0, 0)
+        for dx, dy in legal:
+            nx, ny = sx + dx, sy + dy
+            score = 10**9
+            for rx, ry in resources:
+                myd = cheb(nx, ny, rx, ry)
+                opd = cheb(ox, oy, rx, ry)
+                # Prefer positions where we are closer than opponent (steal); otherwise deny by minimizing opp advantage.
+                s = myd - opd
+                if s < score:
+                    score = s
+            # Tie-break: also prefer staying closer to some resource.
+            score2 = score + 0.01 * cheb(nx, ny, resources[0][0], resources[0][1])
+            if best_score is None or score2 < best_score:
+                best_score = score2
+                best_move = (dx, dy)
+        return [int(best_move[0]), int(best_move[1])]
+
+    # No resources: move to reduce distance to opponent's corner (deterministic pressure).
+    tx, ty = w - 1, h - 1
+    best_score = None
+    best_move = (0, 0)
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        score = cheb(nx, ny, tx, ty)
+        if best_score is None or score < best_score or (score == best_score and (nx + ny) < (sx + sy)):
+            best_score = score
+            best_move = (dx, dy)
+    return [int(best_move[0]), int(best_move[1])]

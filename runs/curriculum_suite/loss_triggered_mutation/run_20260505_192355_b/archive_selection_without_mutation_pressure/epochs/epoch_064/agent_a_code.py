@@ -1,0 +1,71 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sp = observation.get("self_position", [0, 0])
+    op = observation.get("opponent_position", [0, 0])
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        try:
+            obstacles.add((int(p[0]), int(p[1])))
+        except Exception:
+            pass
+
+    resources = observation.get("resources") or []
+    if not resources:
+        for dx, dy in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                return [dx, dy]
+        return [0, 0]
+
+    res = []
+    for r in resources:
+        try:
+            res.append((int(r[0]), int(r[1])))
+        except Exception:
+            pass
+    if not res:
+        return [0, 0]
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def md(x1, y1, x2, y2):
+        a = x1 - x2
+        if a < 0:
+            a = -a
+        b = y1 - y2
+        if b < 0:
+            b = -b
+        return a + b
+
+    moves = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+    best = None
+    best_val = None
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        # Score: prefer positions that reduce our distance to the nearest resource
+        # and increase opponent distance to that same nearest resource.
+        my_d, op_d = 10**9, 10**9
+        for rx, ry in res:
+            d1 = md(nx, ny, rx, ry)
+            d2 = md(ox, oy, rx, ry)
+            if d1 < my_d:
+                my_d = d1
+                op_d = d2
+            elif d1 == my_d and d2 > op_d:
+                op_d = d2
+        val = (-(op_d - my_d), my_d, dx, dy)
+        if best_val is None or val < best_val:
+            best_val = val
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[0], best[1]]

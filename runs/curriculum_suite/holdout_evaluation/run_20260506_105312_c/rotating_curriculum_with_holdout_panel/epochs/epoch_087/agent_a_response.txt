@@ -1,0 +1,148 @@
+def choose_move(observation):
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def md(ax, ay, bx, by): return abs(ax - bx) + abs(ay - by)
+    def clamp(v, lo, hi):
+        return lo if v < lo else hi if v > hi else v
+
+    rlist = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if inb(rx, ry) and (rx, ry) not in obs:
+                rlist.append((rx, ry))
+    if not rlist:
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and (nx, ny) not in obs:
+                return [dx, dy]
+        return [0, 0]
+
+    midx, midy = (w - 1) / 2.0, (h - 1) / 2.0
+    t = float(observation.get("turn_index", 0))
+
+    # Late-game: less edge-avoid, more direct racing.
+    edge_weight = clamp((t / 40.0), 0.0, 1.0)
+    # Early-game: stronger preference for central lanes.
+    center_weight = 1.0 - edge_weight
+
+    best = None
+    best_score = None
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+
+        # Base: choose move that secures "race advantage" to some resource.
+        # Score: maximize (opp_dist - self_dist) with small tie-breaks.
+        local_best = None
+        for rx, ry in rlist:
+            sd = md(nx, ny, rx, ry)
+            od = md(ox, oy, rx, ry)
+            race = od - sd  # higher is better for us
+            # Encourage nearer immediate resources even if race ties.
+            immed = -sd * 0.03
+            # Discourage paths that aim for corners early (edge patrol tends to pressure edges).
+            edge_pen = (min(nx, w - 1 - nx) + min(ny, h - 1 - ny)) * 0.02
+            # We'll prefer larger edge_pen early (central-ish), less later.
+            sc = race + immed + center_weight * edge_pen
+            if local_best is None or sc > local_best:
+                local_best = sc
+
+        # Additional deterministic tie-break: prefer reducing distance to best target.
+        # Use current best resource target to estimate.
+        # (Compute representative target by same criterion on resources.)
+        rep = None
+        repd = None
+        for rx, ry in rlist:
+            sd = md(nx, ny, rx, ry)
+            od = md(ox, oy, rx, ry)
+            race = od - sd
+            sc = race - sd * 0.03
+            if rep is None or sc > rep:
+                rep, repd = sc, sd
+
+        # Final move score
+        # If edge_weight is high (late), slightly encourage moving closer to opponent's pressure line:
+        # prefer increasing our distance to opponent if we are not racing strongly.
+        opp_dist_now = md(nx, ny, ox, oy)
+        opp_term = (opp_dist_now * 0.001) * (0.3 + edge_weight)  # small, deterministic
+        final = local_best + opp_term - edge_weight * (md(nx, ny, clamp(int(0.5 * ox + 0.5), 0, w - 1), clamp(int(0.5 * oy + 0.5), 0, h - 1)) * 0.0001)
+
+        if best_score is None or final > best_score:
+            best_score = final
+           
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    resources = observation.get("resources") or []
+    targets = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if inb(x, y) and (x, y) not in obs:
+                targets.append((x, y))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = None
+    best_score = None
+
+    if targets:
+        # Greedy toward nearest resource; slight preference to moves that reduce opponent distance less.
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obs:
+                continue
+            d_self = min(abs(nx - tx) + abs(ny - ty) for (tx, ty) in targets)
+            d_opp = abs(nx - ox) + abs(ny - oy)
+            score = (-(d_self * 10 + d_opp), -d_self)
+            if best_score is None or score > best_score:
+                best_score, best = score, [dx, dy]
+    else:
+        # No visible resources: move toward opponent if possible, else toward center-ish.
+        cx, cy = (w - 1) // 2, (h - 1) // 2
+        tx, ty = ox, oy if abs(ox - sx) + abs(oy - sy) > 0 else (cx, cy)
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obs:
+                continue
+            score = -(abs(nx - tx) + abs(ny - ty))
+            if best_score is None or score > best_score:
+                best_score, best = score, [dx, dy]
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

@@ -1,0 +1,163 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(ax, ay, bx, by):
+        da = abs(ax - bx)
+        db = abs(ay - by)
+        return da if da > db else db
+
+    def step_score(tx, ty, px, py):
+        if (px, py) in obstacles:
+            return -10**9
+        ds = cheb(px, py, tx, ty)
+        do = cheb(ox, oy, tx, ty)
+        # Prefer targets we reach sooner than opponent; add small bias to corner/center neutrality.
+        return (do - ds, -ds, -abs(tx - (w - 1) / 2) - abs(ty - (h - 1) / 2), -((tx + ty) & 1))
+
+    def best_target(px, py):
+        if not resources:
+            return (ox, oy), None
+        best = None
+        for rx, ry in resources:
+            if (rx, ry) in obstacles:
+                continue
+            ds = cheb(px, py, rx, ry)
+            do = cheb(ox, oy, rx, ry)
+            # If opponent can take it too quickly, still allow for denial but with lower weight.
+            priority = (do - ds, -ds)
+            if best is None or priority > best[0]:
+                best = (priority, (rx, ry))
+        return best[1] if best else (ox, oy), None
+
+    tx, ty = best_target(sx, sy)[0], best_target(sx, sy)[1] if False else None  # deterministic no-op to avoid extra branches
+    # Fix target computation without re-calling best_target
+    if not resources:
+        tx, ty = ox, oy
+    else:
+        target = best_target(sx, sy)[0]
+        tx, ty = target[0], target[1] if isinstance(target, (list, tuple)) else (ox, oy)
+
+    best_move = (0, 0)
+    best_val = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        # Resource-seeking / denial: evaluate by target, but also steer away from being too far from resources.
+        if resources:
+            # Choose best target from current move in a lightweight way: evaluate up to 4 closest resources to self.
+            best_local = None
+            # Deterministically iterate by cheb distance then coord sum.
+            # Limit to keep cheap.
+            cand = []
+            for r in resources:
+                rx, ry = r
+                if (rx, ry) in obstacles:
+                    continue
+                cand.append((cheb(nx, ny, rx, ry), rx, ry))
+            cand.sort(key=lambda t: (t[0], t[1], t[2]))
+            cand = cand[:4]
+            for _, rx, ry in cand:
+                v = step_score(rx, ry, nx, ny)
+                if best_local is None or v > best_local:
+                    best_local = v
+            # If all resources would be bad, still reduce distance to opponent for denial.
+            if best_local is None:
+                v = (-cheb(nx, ny, ox, oy), -cheb(nx, ny, ox, oy))
+            else:
+                v = best_local
+        else:
+            ds_op = cheb(nx, ny, ox, oy)
+            v = (-ds_op, -ds_op)
+        # Obstacle adjacency penalty to reduce future collisions (deterministic).
+        adj_pen = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                if ax == 0 and ay == 0:
+                    continue
+                xx, yy = nx + ax, ny + ay
+                if (xx, yy) in obstacles:
+                    adj_pen += 1
+        v = (v[0] - adj_pen, v[1] - adj_pen, dx, dy) if isinstance(v, tuple) else (-adj_pen,)
+        if v > (best_val, 0, best_move[0], best_move[1]) if isinstance(v, tuple) else (best_val,):
+            best_val = v[0] if isinstance(v, tuple) else v
+           
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def pick_target():
+        if resources:
+            best = None
+            for rx, ry in resources:
+                if (rx, ry) in obstacles:
+                    continue
+                ds = cheb(sx, sy, rx, ry)
+                do = cheb(ox, oy, rx, ry)
+                val = (do - ds, -ds, -(rx + ry))
+                if best is None or val > best[0]:
+                    best = (val, (rx, ry))
+            if best is not None:
+                return best[1]
+        return (ox, oy)
+
+    tx, ty = pick_target()
+    best_move = (0, 0)
+    best_val = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        ds = cheb(nx, ny, tx, ty)
+        do = cheb(ox, oy, tx, ty)
+        dpo = cheb(nx, ny, ox, oy)
+        val = (-ds, do - ds, -dpo, -abs(nx - tx) - abs(ny - ty), -((nx + ny) & 1))
+        if val > (best_val,):  # keep deterministic comparison shape
+            best_val = val[0] * 0 + 1  # no-op to avoid tuple math issues
+        # Use direct lexicographic tuple score
+        if (-ds, do - ds, -dpo, -abs(nx - tx) - abs(ny - ty), -((nx + ny) & 1)) > (-cheb(sx, sy, tx, ty), -10**9, -10**9, -10**9, -10**9):
+            pass
+
+    # Recompute with proper comparison
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        ds = cheb(nx, ny, tx, ty)
+        do = cheb(ox, oy, tx, ty)
+        dpo = cheb(nx, ny, ox, oy)
+        val = (-ds, do - ds, -dpo, -abs(nx - tx) - abs(ny - ty), -((nx + ny) & 1))
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]
