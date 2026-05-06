@@ -51,6 +51,7 @@ def write_epoch_map_svg(
     initial_resources: list[list[int]],
     obstacles: list[list[int]],
     paths: dict[str, list[list[int]]],
+    environment_summary: dict[str, object] | None = None,
     agent_labels: dict[str, str] | None = None,
 ) -> None:
     cell = 42
@@ -85,6 +86,18 @@ def write_epoch_map_svg(
         parts.append(
             f'<text x="{label_x}" y="{top_margin + height * cell + 22}" text-anchor="middle" font-family="Arial" font-size="12" fill="#555555">{x}</text>'
         )
+
+    if environment_summary and environment_summary.get("name") == "territory_control":
+        for entry in environment_summary.get("controlled_cells", []):
+            if not isinstance(entry, list) or len(entry) != 3:
+                continue
+            x, y, owner = entry
+            rx = left_margin + int(x) * cell
+            ry = top_margin + int(y) * cell
+            fill = colors.get(str(owner), "#999999")
+            parts.append(
+                f'<rect x="{rx + 2}" y="{ry + 2}" width="{cell - 4}" height="{cell - 4}" fill="{fill}" opacity="0.18" stroke="none"/>'
+            )
 
     for x, y in obstacles:
         rx = left_margin + x * cell
@@ -131,6 +144,13 @@ def write_epoch_map_svg(
             f'<text x="{legend_x}" y="{legend_y + 140}" font-family="Arial" font-size="16" font-weight="bold" fill="#111111">Agents</text>',
         ]
     )
+    if environment_summary and environment_summary.get("name") == "territory_control":
+        parts.extend(
+            [
+                f'<rect x="{legend_x + 3}" y="{legend_y + 122}" width="14" height="14" fill="#1f77b4" opacity="0.18"/>',
+                f'<text x="{legend_x + 28}" y="{legend_y + 135}" font-family="Arial" font-size="13" fill="#333333">Shaded cell = owned territory</text>',
+            ]
+        )
     for index, name in enumerate(paths):
         row_y = legend_y + 166 + index * 28
         color = colors.get(name, "#000000")

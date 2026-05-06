@@ -44,14 +44,18 @@ def decide_candidate_acceptance(
         return decision
 
     current_gate_passed = False
-    base_reason = "no_score_or_diversity_gain"
+    base_reason = "no_score_gain"
     if baseline_score is None:
         current_gate_passed = True
         base_reason = "no_baseline_for_opponent"
     elif float(score_delta or 0.0) >= 0.0:
         current_gate_passed = True
         base_reason = "score_improved_or_matched"
+    elif policy.mode == "score_only":
+        current_gate_passed = False
+        base_reason = "score_regressed"
     else:
+        base_reason = "no_score_or_diversity_gain"
         diversity_pass = False
         if (
             policy.elite_archive_enabled

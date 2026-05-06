@@ -71,10 +71,38 @@ def extract_code(text: str) -> str:
 def default_agent_code() -> str:
     return """
 def choose_move(observation):
+    env = observation.get("environment_name", "resource_collection")
     sx, sy = observation["self_position"]
-    resources = observation.get("resources", [])
+    ox, oy = observation["opponent_position"]
+    if env == "pursuit_evasion":
+        role = observation.get("self_role", "pursuer")
+        if role == "pursuer":
+            dx = 0 if ox == sx else (1 if ox > sx else -1)
+            dy = 0 if oy == sy else (1 if oy > sy else -1)
+            return [dx, dy]
+        corners = [
+            [0, 0],
+            [0, observation["grid_height"] - 1],
+            [observation["grid_width"] - 1, 0],
+            [observation["grid_width"] - 1, observation["grid_height"] - 1],
+        ]
+        target = max(corners, key=lambda item: abs(item[0] - ox) + abs(item[1] - oy))
+        dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+        dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+        return [dx, dy]
+    if env == "territory_control":
+        targets = observation.get("unclaimed_cells") or observation.get("opponent_territory") or []
+        if not targets:
+            return [0, 0]
+        best = min(targets, key=lambda item: abs(item[0] - sx) + abs(item[1] - sy))
+        dx = 0 if best[0] == sx else (1 if best[0] > sx else -1)
+        dy = 0 if best[1] == sy else (1 if best[1] > sy else -1)
+        return [dx, dy]
+    resources = observation.get("resources") or []
     if not resources:
-        return [0, 0]
+        dx = 0 if ox == sx else (1 if ox > sx else -1)
+        dy = 0 if oy == sy else (1 if oy > sy else -1)
+        return [dx, dy]
     best = min(resources, key=lambda item: abs(item[0] - sx) + abs(item[1] - sy))
     dx = 0 if best[0] == sx else (1 if best[0] > sx else -1)
     dy = 0 if best[1] == sy else (1 if best[1] > sy else -1)
@@ -227,6 +255,151 @@ def choose_move(observation):
         if best is None or key < best[0]:
             best = (key, dx, dy)
     return [best[1], best[2]] if best else [0, 0]
+""".strip()
+    if normalized == "pursuit_direct":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    role = observation.get("self_role", "pursuer")
+    if role == "evader":
+        dx = 0 if ox == sx else (-1 if ox > sx else 1)
+        dy = 0 if oy == sy else (-1 if oy > sy else 1)
+        return [dx, dy]
+    dx = 0 if ox == sx else (1 if ox > sx else -1)
+    dy = 0 if oy == sy else (1 if oy > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "evasion_corner":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    corners = [
+        [0, 0],
+        [0, observation["grid_height"] - 1],
+        [observation["grid_width"] - 1, 0],
+        [observation["grid_width"] - 1, observation["grid_height"] - 1],
+    ]
+    target = max(corners, key=lambda item: abs(item[0] - ox) + abs(item[1] - oy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "evasion_wall_runner":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    width = observation["grid_width"]
+    height = observation["grid_height"]
+    edge_targets = [
+        [0, sy],
+        [width - 1, sy],
+        [sx, 0],
+        [sx, height - 1],
+    ]
+    target = max(edge_targets, key=lambda item: abs(item[0] - ox) + abs(item[1] - oy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "evasion_zigzag":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    width = observation["grid_width"]
+    height = observation["grid_height"]
+    phase = observation.get("turn_index", 0) % 4
+    targets = [
+        [width - 1, 0],
+        [width - 1, height - 1],
+        [0, height - 1],
+        [0, 0],
+    ]
+    target = targets[phase]
+    if abs(target[0] - ox) + abs(target[1] - oy) < abs(sx - ox) + abs(sy - oy):
+        target = max(targets, key=lambda item: abs(item[0] - ox) + abs(item[1] - oy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "territory_sweeper":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    targets = observation.get("unclaimed_cells") or observation.get("opponent_territory") or []
+    if not targets:
+        return [0, 0]
+    target = min(targets, key=lambda item: (abs(item[0] - sx) + abs(item[1] - sy), item[1], item[0]))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "territory_center_claim":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    cx = observation["grid_width"] // 2
+    cy = observation["grid_height"] // 2
+    unclaimed = observation.get("unclaimed_cells") or []
+    targets = unclaimed or observation.get("opponent_territory") or []
+    if not targets:
+        return [0, 0]
+    target = min(targets, key=lambda item: (abs(item[0] - cx) + abs(item[1] - cy), abs(item[0] - sx) + abs(item[1] - sy)))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "territory_counterclaim":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    opponent_territory = observation.get("opponent_territory") or []
+    targets = opponent_territory or observation.get("unclaimed_cells") or []
+    if not targets:
+        return [0, 0]
+    target = min(targets, key=lambda item: abs(item[0] - sx) + abs(item[1] - sy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "territory_edge_claim":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    width = observation["grid_width"]
+    height = observation["grid_height"]
+    edge_targets = [
+        cell for cell in (observation.get("unclaimed_cells") or [])
+        if cell[0] in (0, width - 1) or cell[1] in (0, height - 1)
+    ]
+    targets = edge_targets or observation.get("unclaimed_cells") or observation.get("opponent_territory") or []
+    if not targets:
+        return [0, 0]
+    target = min(targets, key=lambda item: abs(item[0] - sx) + abs(item[1] - sy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "territory_diagonal_claim":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    targets = observation.get("unclaimed_cells") or observation.get("opponent_territory") or []
+    if not targets:
+        return [0, 0]
+    target = min(
+        targets,
+        key=lambda item: (
+            abs((item[0] - sx) - (item[1] - sy)),
+            abs(item[0] - sx) + abs(item[1] - sy),
+        ),
+    )
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
 """.strip()
     return default_agent_code()
 

@@ -21,7 +21,13 @@ from llm_grid_battle.curriculum import (
     resolve_epoch_opponent,
     resolve_holdout_pool,
 )
-from llm_grid_battle.game import build_map, build_observation, clamp_move
+from llm_grid_battle.game import (
+    build_observation,
+    clamp_move,
+    finalize_environment_summary,
+    initialize_environment,
+    resolve_environment_turn,
+)
 from llm_grid_battle.llm import generate_code, judge_text, load_env_files
 from llm_grid_battle.pdf_report import write_pdf_report
 from llm_grid_battle.prompting import build_generation_prompt
@@ -134,15 +140,14 @@ def run_epoch(
     codes: dict[str, str],
     active_agents: list[Any] | None = None,
 ) -> dict[str, Any]:
-    map_state = build_map(
-        width=config.map.width,
-        height=config.map.height,
-        resource_count=config.map.resource_count,
-        obstacle_count=config.map.obstacle_count,
-        seed=map_seed,
-    )
     epoch_agents = active_agents or config.agents
     agent_names = [agent.name for agent in epoch_agents]
+    environment_state = initialize_environment(
+        config=config,
+        seed=map_seed,
+        agent_names=agent_names,
+    )
+    map_state = environment_state["map_state"]
     positions = {
         agent_names[0]: (0, 0),
         agent_names[1]: (config.map.width - 1, config.map.height - 1),
@@ -157,13 +162,15 @@ def run_epoch(
     try:
         for turn_index in range(config.game.max_turns):
             if not map_state.resources:
-                break
+                if str(config.environment.name).lower() == "resource_collection":
+                    break
             observations = {}
             for index, name in enumerate(agent_names):
                 opponent = agent_names[1 - index]
                 observations[name] = build_observation(
                     turn_index=turn_index,
-                    map_state=map_state,
+                    max_turns=config.game.max_turns,
+                    environment_state=environment_state,
                     self_name=name,
                     opponent_name=opponent,
                     positions=positions,
@@ -178,6 +185,7 @@ def run_epoch(
             requested_moves: dict[str, list[int]] = {}
             applied_positions: dict[str, list[int]] = {}
             move_issues: dict[str, list[str]] = {}
+            previous_positions = dict(positions)
 
             for name in agent_names:
                 move, runtime_issue = collect_move(runtimes[name], config.game.move_timeout_seconds)
@@ -199,9 +207,20 @@ def run_epoch(
                 applied_positions[name] = [next_position[0], next_position[1]]
                 move_issues[name] = issues
 
-            score_delta, collections = _resolve_collection(positions, map_state.resources, agent_names, config.game.tie_break)
+            turn_resolution = resolve_environment_turn(
+                config=config,
+                environment_state=environment_state,
+                turn_index=turn_index,
+                previous_positions=previous_positions,
+                positions=positions,
+                scores=scores,
+                agent_names=agent_names,
+            )
+            scores = {name: float(value) for name, value in turn_resolution["scores"].items()}
+            collections = turn_resolution.get("collections", [])
+            environment_events = turn_resolution.get("environment_events", [])
+            done = bool(turn_resolution.get("done", False))
             for name in agent_names:
-                scores[name] += score_delta[name]
                 paths[name].append(positions[name])
 
             turn_log.append(
@@ -211,10 +230,13 @@ def run_epoch(
                     "positions_after_turn": applied_positions,
                     "move_issues": move_issues,
                     "collections": collections,
+                    "environment_events": environment_events,
                     "scores_after_turn": {name: float(value) for name, value in scores.items()},
                     "remaining_resource_count": len(map_state.resources),
                 }
             )
+            if done:
+                break
     finally:
         for runtime in runtimes.values():
             close_agent(runtime)
@@ -231,6 +253,12 @@ def run_epoch(
         "map_dimensions": {"width": config.map.width, "height": config.map.height},
         "initial_resources": initial_resources,
         "obstacles": [list(item) for item in sorted(map_state.obstacles)],
+        "environment": finalize_environment_summary(
+            config=config,
+            environment_state=environment_state,
+            positions=positions,
+            scores=scores,
+        ),
         "codes": codes,
         "scores": {name: float(value) for name, value in scores.items()},
         "winner": winner,
@@ -685,6 +713,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
             initial_resources=epoch_result["initial_resources"],
             obstacles=epoch_result["obstacles"],
             paths=epoch_result["paths"],
+            environment_summary=epoch_result["environment"],
             agent_labels={agent.name: _agent_label(agent) for agent in active_agents},
         )
 
@@ -740,6 +769,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         "feedback": config.feedback.__dict__,
         "observation": config.observation.__dict__,
         "map": config.map.__dict__,
+        "environment": config.environment.__dict__,
         "generation": config.generation.__dict__,
         "curriculum": config.to_dict().get("curriculum", {}),
         "metadata": config.metadata,
@@ -778,6 +808,8 @@ def build_judge_prompt(suite_summary: dict[str, Any]) -> str:
             "- If the run does not include a real feedback-visibility manipulation, say that the feedback-visibility question is not directly tested here.",
             "- If curriculum_metrics are present, discuss looping, oscillation, reversion, post-loss novelty spikes, strategy switches, and degradation as heuristic signals, not perfect ground truth.",
             "- If evaluation summaries are present, treat them as holdout evidence and distinguish them from training-time adaptation metrics.",
+            "- If primary_endpoint summaries are present, prioritize them over training-score differences when describing which curriculum condition generalized best.",
+            "- If multiple environment types are present, say so explicitly and do not imply automatic transfer from one environment to another.",
             "",
             "Output requirements:",
             "- Answer in concise markdown for a research audience.",

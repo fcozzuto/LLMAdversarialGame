@@ -18,6 +18,57 @@ def _format_delta(value: float) -> str:
     return f"{rounded:+.3f}"
 
 
+def _environment_rule_lines(config: ConditionConfig) -> list[str]:
+    name = str(config.environment.name or "resource_collection").lower()
+    if name == "pursuit_evasion":
+        return [
+            "- Environment: pursuit_evasion.",
+            "- The learner maximizes score under the role assignment in the observation.",
+            f"- Capture radius: {config.environment.capture_radius}.",
+            f"- Pursuer receives {config.environment.capture_points} points on capture.",
+            f"- Evader receives {config.environment.survival_points_per_turn} points for each turn survived without capture.",
+            f"- Capture {'ends' if config.environment.capture_ends_game else 'does not automatically end'} the game.",
+        ]
+    if name == "territory_control":
+        bonus_lines = []
+        if int(config.environment.territory_control_bonus_interval) > 0:
+            bonus_lines.append(
+                f"- Every {config.environment.territory_control_bonus_interval} turns, the sole territory leader gains {config.environment.territory_control_bonus} bonus points."
+            )
+        return [
+            "- Environment: territory_control.",
+            "- Occupying a cell claims it for you; entering an opponent-owned cell flips control if flipping is enabled.",
+            f"- Territory flipping on entry is {bool(config.environment.territory_flip_on_entry)}.",
+            "- Scores reflect currently controlled cells plus any accumulated control bonuses.",
+            *bonus_lines,
+        ]
+    return [
+        "- Environment: resource_collection.",
+        "- Collect resources before the opponent. Each collected resource is worth points under the tie-break policy.",
+    ]
+
+
+def _environment_schema_lines(config: ConditionConfig) -> list[str]:
+    name = str(config.environment.name or "resource_collection").lower()
+    common = [
+        "- environment_name: string",
+        "- turns_remaining: int",
+        "- self_role, opponent_role: strings",
+    ]
+    if name == "pursuit_evasion":
+        return common + [
+            "- capture_radius: int",
+            "- capture_history_count: int",
+        ]
+    if name == "territory_control":
+        return common + [
+            "- self_territory, opponent_territory: list[[x, y], ...]",
+            "- self_territory_count, opponent_territory_count: ints",
+            "- unclaimed_cells: list[[x, y], ...]",
+        ]
+    return common
+
+
 def build_generation_prompt(
     *,
     config: ConditionConfig,
@@ -38,6 +89,7 @@ def build_generation_prompt(
         f"- Grid size: {config.map.width} x {config.map.height}",
         f"- Resources per game: {config.map.resource_count}",
         f"- Obstacles per game: {config.map.obstacle_count}",
+        *_environment_rule_lines(config),
         "- Agents start in opposite corners.",
         "- Your function is called every turn and must return one move delta [dx, dy].",
         f"- Allowed dx/dy values are -1, 0, or 1. Diagonal moves are {'allowed' if config.observation.allow_diagonal else 'not allowed'}.",
@@ -61,6 +113,7 @@ def build_generation_prompt(
         "- turn_index: int",
         "- grid_width, grid_height: ints",
         "- self_name, opponent_name: strings",
+        *_environment_schema_lines(config),
         "- self_position, opponent_position: [x, y]",
         "- resources: list[[x, y], ...]",
         "- obstacles: list[[x, y], ...]",

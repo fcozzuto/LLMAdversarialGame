@@ -23,6 +23,10 @@ DESCRIPTOR_KEYS = (
     "resource_switch_ratio",
     "center_bias",
     "move_direction_entropy",
+    "tag_success_ratio",
+    "survival_reward_ratio",
+    "territory_claim_ratio",
+    "territory_contest_ratio",
 )
 
 
@@ -116,6 +120,10 @@ def compute_behavioral_descriptor(epoch: dict[str, Any], agent_name: str) -> dic
     opponent_pursuit_moves = 0
     opponent_avoidance_moves = 0
     resource_target_switches = 0
+    tag_successes = 0
+    survival_ticks = 0
+    territory_claims = 0
+    territory_contests = 0
     direction_counter: Counter[tuple[int, int]] = Counter()
     previous_nearest_resource: tuple[int, int] | None = None
     seen: set[tuple[int, int]] = set()
@@ -145,6 +153,17 @@ def compute_behavioral_descriptor(epoch: dict[str, Any], agent_name: str) -> dic
             if previous_nearest_resource is not None and nearest_resource != previous_nearest_resource:
                 resource_target_switches += 1
             previous_nearest_resource = nearest_resource
+    for turn in turn_log:
+        for event in turn.get("environment_events", []):
+            event_type = str(event.get("type", ""))
+            if event_type == "capture" and event.get("pursuer") == agent_name:
+                tag_successes += 1
+            elif event_type == "survival_tick" and event.get("evader") == agent_name:
+                survival_ticks += 1
+            elif event_type == "territory_claim" and event.get("owner") == agent_name:
+                territory_claims += 1
+            elif event_type == "territory_contested" and agent_name in event.get("claimants", []):
+                territory_contests += 1
 
     agent_names = list(epoch.get("paths", {}).keys())
     opponent_name = next((name for name in agent_names if name != agent_name), agent_name)
@@ -189,6 +208,10 @@ def compute_behavioral_descriptor(epoch: dict[str, Any], agent_name: str) -> dic
         "resource_switch_ratio": round(resource_target_switches / move_count, 4),
         "center_bias": _center_bias(path, width, height),
         "move_direction_entropy": _normalized_entropy(direction_counter),
+        "tag_success_ratio": round(tag_successes / turns, 4),
+        "survival_reward_ratio": round(survival_ticks / turns, 4),
+        "territory_claim_ratio": round(territory_claims / move_count, 4),
+        "territory_contest_ratio": round(territory_contests / turns, 4),
     }
     return descriptor
 
@@ -213,6 +236,12 @@ def behavioral_profile_label(descriptor: dict[str, float] | None) -> str:
         return "avoider"
     if float(descriptor.get("resource_switch_ratio", 0.0)) >= 0.35 and float(descriptor.get("exploration_ratio", 0.0)) >= 0.35:
         return "opportunistic_switcher"
+    if float(descriptor.get("tag_success_ratio", 0.0)) >= 0.08:
+        return "tagger"
+    if float(descriptor.get("survival_reward_ratio", 0.0)) >= 0.75:
+        return "survivor"
+    if float(descriptor.get("territory_claim_ratio", 0.0)) >= 0.3:
+        return "claimer"
     if float(descriptor.get("exploration_ratio", 0.0)) >= 0.45 and float(descriptor.get("revisit_ratio", 0.0)) <= 0.25:
         return "explorer"
     if float(descriptor.get("resource_pursuit_ratio", 0.0)) >= 0.45:

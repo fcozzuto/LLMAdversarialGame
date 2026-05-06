@@ -80,6 +80,19 @@ class GameConfig:
 
 
 @dataclass
+class EnvironmentConfig:
+    name: str = "resource_collection"
+    role_assignments: dict[str, str] = field(default_factory=dict)
+    capture_radius: int = 0
+    capture_points: float = 10.0
+    survival_points_per_turn: float = 0.15
+    capture_ends_game: bool = True
+    territory_flip_on_entry: bool = True
+    territory_control_bonus_interval: int = 0
+    territory_control_bonus: float = 0.0
+
+
+@dataclass
 class JudgeConfig:
     enabled: bool = True
     provider: str = "openai"
@@ -166,6 +179,7 @@ class ConditionConfig:
     observation: ObservationConfig
     map: MapConfig
     game: GameConfig
+    environment: EnvironmentConfig
     judge: JudgeConfig
     generation: GenerationConfig
     curriculum: CurriculumConfig
@@ -185,6 +199,7 @@ class ConditionConfig:
             observation=ObservationConfig(**data.get("observation", {})),
             map=MapConfig(**data.get("map", {})),
             game=GameConfig(**data.get("game", {})),
+            environment=EnvironmentConfig(**data.get("environment", {})),
             judge=JudgeConfig(**data.get("judge", {})),
             generation=GenerationConfig(**data.get("generation", {})),
             curriculum=CurriculumConfig(
@@ -217,6 +232,7 @@ class ConditionConfig:
             "observation": self.observation.__dict__,
             "map": self.map.__dict__,
             "game": self.game.__dict__,
+            "environment": self.environment.__dict__,
             "judge": self.judge.__dict__,
             "generation": self.generation.__dict__,
             "curriculum": {
