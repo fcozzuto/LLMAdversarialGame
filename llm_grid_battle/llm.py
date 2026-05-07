@@ -325,6 +325,62 @@ def choose_move(observation):
     dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
     return [dx, dy]
 """.strip()
+    if normalized == "evasion_center_weave":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    width = observation["grid_width"]
+    height = observation["grid_height"]
+    center = [width // 2, height // 2]
+    waypoints = [
+        [center[0], max(0, center[1] - 2)],
+        [max(0, center[0] - 2), center[1]],
+        [center[0], min(height - 1, center[1] + 2)],
+        [min(width - 1, center[0] + 2), center[1]],
+    ]
+    phase = observation.get("turn_index", 0) % len(waypoints)
+    target = waypoints[phase]
+    if abs(target[0] - ox) + abs(target[1] - oy) < abs(sx - ox) + abs(sy - oy):
+        target = max(waypoints, key=lambda item: abs(item[0] - ox) + abs(item[1] - oy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "evasion_axis_flip":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    turn = observation.get("turn_index", 0)
+    if abs(ox - sx) >= abs(oy - sy):
+        dx = -1 if ox > sx else (1 if ox < sx else (1 if turn % 2 == 0 else -1))
+        dy = 1 if turn % 2 == 0 else -1
+    else:
+        dy = -1 if oy > sy else (1 if oy < sy else (1 if turn % 2 == 0 else -1))
+        dx = 1 if turn % 2 == 0 else -1
+    return [dx, dy]
+""".strip()
+    if normalized == "evasion_midline_dodge":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    width = observation["grid_width"]
+    height = observation["grid_height"]
+    mid_x = width // 2
+    mid_y = height // 2
+    targets = [
+        [mid_x, 0],
+        [width - 1, mid_y],
+        [mid_x, height - 1],
+        [0, mid_y],
+    ]
+    target = max(targets, key=lambda item: abs(item[0] - ox) + abs(item[1] - oy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
     if normalized == "territory_sweeper":
         return """
 def choose_move(observation):
@@ -361,6 +417,50 @@ def choose_move(observation):
     if not targets:
         return [0, 0]
     target = min(targets, key=lambda item: abs(item[0] - sx) + abs(item[1] - sy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "territory_quadrant_claim":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    width = observation["grid_width"]
+    height = observation["grid_height"]
+    quadrants = [
+        [width // 4, height // 4],
+        [3 * width // 4, height // 4],
+        [3 * width // 4, 3 * height // 4],
+        [width // 4, 3 * height // 4],
+    ]
+    phase = observation.get("turn_index", 0) % len(quadrants)
+    targets = observation.get("unclaimed_cells") or observation.get("opponent_territory") or []
+    if not targets:
+        return [0, 0]
+    anchor = quadrants[phase]
+    target = min(targets, key=lambda item: (abs(item[0] - anchor[0]) + abs(item[1] - anchor[1]), abs(item[0] - sx) + abs(item[1] - sy)))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]
+""".strip()
+    if normalized == "territory_far_corner_claim":
+        return """
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    width = observation["grid_width"]
+    height = observation["grid_height"]
+    corners = [
+        [0, 0],
+        [0, height - 1],
+        [width - 1, 0],
+        [width - 1, height - 1],
+    ]
+    targets = observation.get("unclaimed_cells") or observation.get("opponent_territory") or []
+    if not targets:
+        return [0, 0]
+    anchor = max(corners, key=lambda item: abs(item[0] - ox) + abs(item[1] - oy))
+    target = min(targets, key=lambda item: (abs(item[0] - anchor[0]) + abs(item[1] - anchor[1]), abs(item[0] - sx) + abs(item[1] - sy)))
     dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
     dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
     return [dx, dy]

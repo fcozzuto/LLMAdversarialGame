@@ -354,6 +354,11 @@ def _condition_by_name(aggregate_summary: dict[str, Any], name: str) -> dict[str
     return None
 
 
+def _aggregate_is_curriculum_only(aggregate_summary: dict[str, Any]) -> bool:
+    conditions = aggregate_summary.get("conditions", [])
+    return bool(conditions) and all(condition.get("learner_agent") for condition in conditions)
+
+
 def _min_rate(condition: dict[str, Any], metric_name: str) -> float:
     learner_agent = condition.get("learner_agent")
     if learner_agent:
@@ -429,11 +434,12 @@ def _aggregate_conclusions(aggregate_summary: dict[str, Any]) -> list[str]:
     mixed_suite_families = len(aggregate_summary.get("suite_families", [])) > 1
     mixed_suite_types = len(aggregate_summary.get("suite_types", [])) > 1
     mixed_campaign = mixed_suite_families or mixed_suite_types
+    curriculum_only = _aggregate_is_curriculum_only(aggregate_summary)
     if mixed_campaign:
         lines.append(
             "- This aggregate mixes multiple suite families or suite types, so treat it as a campaign-level inventory and sanity check rather than a causal comparison report."
         )
-    elif any(condition.get("learner_agent") for condition in conditions):
+    elif curriculum_only:
         lines.append(
             "- This aggregate includes curriculum conditions, so the learner policy is the primary unit of analysis and opponent-role metrics are contextual."
         )
@@ -472,6 +478,10 @@ def _aggregate_conclusions(aggregate_summary: dict[str, Any]) -> list[str]:
         lines.append(
             "- Family-level novelty comparisons are not the main interpretation target here because the aggregate mixes core, ablation, control, or opportunity suites."
         )
+    elif curriculum_only:
+        lines.append(
+            "- This aggregate is organized around learner-versus-opponent-pool curriculum conditions, so same-model versus cross-model novelty is not the main comparison axis."
+        )
     elif _has_samples(same_novelty) and _has_samples(cross_novelty):
         if float(same_novelty["mean"]) > float(cross_novelty["mean"]):
             strong_novelty = int(aggregate_summary.get("run_count", 0)) >= 3 and not _ci_overlaps(same_novelty, cross_novelty)
@@ -506,6 +516,11 @@ def _aggregate_conclusions(aggregate_summary: dict[str, Any]) -> list[str]:
         lines.append(
             "- Rule-boundary indicator totals should also be interpreted at the family level rather than as one combined same-model versus cross-model comparison."
         )
+    elif curriculum_only:
+        if _has_samples(same_markers) or _has_samples(cross_markers):
+            lines.append(
+                "- Rule-boundary indicators should be interpreted condition by condition here, because these curriculum families compare opponent-pool recipes rather than same-model versus cross-model matchups."
+            )
     elif _has_samples(same_markers) and _has_samples(cross_markers) and float(same_markers["mean"]) <= 0.5 and float(cross_markers["mean"]) <= 0.5:
         lines.append(
             f"- Rule-boundary indicator rates remained low across the aggregate "
@@ -772,6 +787,7 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
             "## Cross-Run Summary",
         ]
     )
+    curriculum_only = _aggregate_is_curriculum_only(aggregate_summary)
     same_novelty = aggregate_summary["cross_run_summary"]["same_model_avg_novelty"]
     cross_novelty = aggregate_summary["cross_run_summary"]["cross_model_avg_novelty"]
     same_markers = aggregate_summary["cross_run_summary"]["same_model_avg_policy_markers"]
@@ -783,22 +799,25 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
     curriculum_cells = aggregate_summary["cross_run_summary"]["curriculum_avg_behavior_cell_coverage"]
     primary_holdout_win_rate = aggregate_summary["cross_run_summary"]["avg_primary_holdout_win_rate"]
     primary_holdout_margin = aggregate_summary["cross_run_summary"]["avg_primary_holdout_margin"]
-    if _has_samples(same_novelty):
-        lines.append(f"- {_format_stat('Same-model novelty', same_novelty)}.")
+    if curriculum_only:
+        lines.append("- This aggregate uses curriculum-style learner-versus-opponent-pool conditions, so same-model versus cross-model summaries are intentionally de-emphasized.")
     else:
-        lines.append("- No same-model conditions were included in this aggregate.")
-    if _has_samples(cross_novelty):
-        lines.append(f"- {_format_stat('Cross-model novelty', cross_novelty)}.")
-    else:
-        lines.append("- No cross-model conditions were included in this aggregate.")
-    if _has_samples(same_markers):
-        lines.append(f"- {_format_stat('Same-model rule-boundary indicators', same_markers)}.")
-    else:
-        lines.append("- No same-model rule-boundary indicator summary is available for this aggregate.")
-    if _has_samples(cross_markers):
-        lines.append(f"- {_format_stat('Cross-model rule-boundary indicators', cross_markers)}.")
-    else:
-        lines.append("- No cross-model rule-boundary indicator summary is available for this aggregate.")
+        if _has_samples(same_novelty):
+            lines.append(f"- {_format_stat('Same-model novelty', same_novelty)}.")
+        else:
+            lines.append("- No same-model conditions were included in this aggregate.")
+        if _has_samples(cross_novelty):
+            lines.append(f"- {_format_stat('Cross-model novelty', cross_novelty)}.")
+        else:
+            lines.append("- No cross-model conditions were included in this aggregate.")
+        if _has_samples(same_markers):
+            lines.append(f"- {_format_stat('Same-model rule-boundary indicators', same_markers)}.")
+        else:
+            lines.append("- No same-model rule-boundary indicator summary is available for this aggregate.")
+        if _has_samples(cross_markers):
+            lines.append(f"- {_format_stat('Cross-model rule-boundary indicators', cross_markers)}.")
+        else:
+            lines.append("- No cross-model rule-boundary indicator summary is available for this aggregate.")
     if _has_samples(curriculum_loops):
         lines.append(f"- {_format_stat('Curriculum loop count', curriculum_loops)}.")
         lines.append(f"- {_format_stat('Curriculum strategy switches', curriculum_switches)}.")
@@ -885,12 +904,13 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
 
     for condition in aggregate_summary.get("conditions", []):
         lines.append(f"### {condition['condition_name']}")
-        lines.append(
-            f"- Matchup type: {'same-model' if condition.get('same_model_matchup') else 'cross-model'}."
-        )
         if condition.get("learner_agent"):
             lines.append(
                 f"- Curriculum roles: learner = {condition.get('learner_label', condition.get('learner_agent'))}; opponent role = {condition.get('opponent_role_label', condition.get('opponent_role_agent'))}."
+            )
+        else:
+            lines.append(
+                f"- Matchup type: {'same-model' if condition.get('same_model_matchup') else 'cross-model'}."
             )
         lines.append(f"- Environment: {condition.get('environment_name', 'resource_collection')}.")
         lines.append(

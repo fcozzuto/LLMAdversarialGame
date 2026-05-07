@@ -64,9 +64,9 @@ def _environment_templates(mode: str) -> list[dict]:
                     "enabled": True,
                     "games_per_opponent": 5,
                     "holdout_opponents": [
-                        {"library_key": "nearest_resource"},
-                        {"library_key": "edge_patrol"},
-                        {"library_key": "center_rush"},
+                        {"library_key": "evasion_center_weave"},
+                        {"library_key": "evasion_axis_flip"},
+                        {"library_key": "evasion_midline_dodge"},
                     ],
                 },
             },
@@ -90,8 +90,8 @@ def _environment_templates(mode: str) -> list[dict]:
                     "games_per_opponent": 5,
                     "holdout_opponents": [
                         {"library_key": "territory_diagonal_claim"},
-                        {"library_key": "nearest_resource"},
-                        {"library_key": "center_rush"},
+                        {"library_key": "territory_quadrant_claim"},
+                        {"library_key": "territory_far_corner_claim"},
                     ],
                 },
             },

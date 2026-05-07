@@ -893,6 +893,10 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
         "data_quality_warnings": data_quality_warnings,
         "conditions": condition_summaries,
         "cross_condition_comparison": {
+            "condition_count": len(condition_summaries),
+            "curriculum_condition_count": sum(
+                1 for item in condition_summaries if item.get("curriculum_policy", {}).get("enabled")
+            ),
             "same_model_condition_count": len(same_model),
             "cross_model_condition_count": len(cross_model),
             "environment_names": sorted({item.get("environment_name", "resource_collection") for item in condition_summaries}),
@@ -944,7 +948,18 @@ def _format_agent_model_list(condition: dict[str, Any]) -> list[str]:
     ]
 
 
+def _uses_curriculum_opponent_pool(condition: dict[str, Any]) -> bool:
+    curriculum = condition.get("curriculum_policy") or {}
+    if curriculum.get("enabled") and condition.get("learner_agent"):
+        return True
+    return False
+
+
 def _format_matchup_comparison_summary(comparison: dict[str, Any]) -> list[str]:
+    if int(comparison.get("curriculum_condition_count", 0)) == int(comparison.get("condition_count", 0)):
+        return [
+            "- This run is organized around curriculum-style learner-versus-opponent-pool conditions, so same-model versus cross-model comparisons are not the main interpretation axis.",
+        ]
     same_count = int(comparison.get("same_model_condition_count", 0))
     cross_count = int(comparison.get("cross_model_condition_count", 0))
     same_novelty = comparison.get("same_model_avg_novelty")
@@ -1424,9 +1439,14 @@ def render_markdown_report(
 
     for condition in suite_summary["conditions"]:
         lines.append(f"### {condition['condition_name']}")
-        lines.append(
-            f"- Matchup type: {'same-model' if condition['same_model_matchup'] else 'cross-model'}."
-        )
+        if _uses_curriculum_opponent_pool(condition):
+            lines.append(
+                f"- Curriculum setup: learner = {condition.get('learner_label', condition.get('learner_agent'))}; opponent role = {condition.get('opponent_role_label', condition.get('opponent_role_agent'))}."
+            )
+        else:
+            lines.append(
+                f"- Matchup type: {'same-model' if condition['same_model_matchup'] else 'cross-model'}."
+            )
         lines.append(
             f"- Feedback visibility: { _format_feedback_policy(condition.get('feedback_policy', {})) }."
         )
