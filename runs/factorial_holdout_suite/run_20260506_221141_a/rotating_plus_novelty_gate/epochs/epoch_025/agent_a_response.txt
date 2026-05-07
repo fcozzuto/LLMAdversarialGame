@@ -1,0 +1,170 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = map(int, observation.get("self_position", [0, 0]))
+    ox, oy = map(int, observation.get("opponent_position", [w - 1, h - 1]))
+
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    if not resources:
+        return [0, 0]
+
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    dirs = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+
+    # Opponent assumed policy: chase their best available resource (greedy by denial).
+    best_for_opp = None
+    best_opp_key = None
+    for p in resources:
+        tx, ty = int(p[0]), int(p[1])
+        if not (0 <= tx < w and 0 <= ty < h) or (tx, ty) in obs:
+            continue
+        ds = cheb(ox, oy, tx, ty)
+        key = (ds, -tx, -ty)
+        if best_opp_key is None or key < best_opp_key:
+            best_opp_key = key
+            best_for_opp = (tx, ty)
+    if best_for_opp is None:
+        best_for_opp = (int(resources[0][0]), int(resources[0][1]))
+
+    def step_toward(px, py, tx, ty):
+        bestm = (0, 0)
+        bestk = None
+        for dx, dy in dirs:
+            nx, ny = px + dx, py + dy
+            if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obs:
+                continue
+            k = (cheb(nx, ny, tx, ty), dx, dy)
+            if bestk is None or k < bestk:
+                bestk = k
+                bestm = (dx, dy)
+        return bestm
+
+    # Choose our target to maximize lead (opponent farther than us).
+    best_target = None
+    best_key = None
+    for p in resources:
+        tx, ty = int(p[0]), int(p[1])
+        if not (0 <= tx < w and 0 <= ty < h) or (tx, ty) in obs:
+            continue
+        ds = cheb(sx, sy, tx, ty)
+        do = cheb(ox, oy, tx, ty)
+        # Prefer breaking ties by distance-to-intersection parity and coord order deterministically
+        key = (-(do - ds), ds, ((tx + ty) & 1), tx, ty)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_target = (tx, ty)
+
+    tx, ty = best_target
+
+    best_move = (0, 0)
+    best_score = None
+    # Estimate opponent's next move towards its greedy target (not necessarily our target).
+    opp_tx, opp_ty = best_for_opp
+    odx, ody = step_toward(ox, oy, opp_tx, opp_ty)
+    nox, noy = ox + odx, oy + ody
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obs:
+            continue
+        # Higher is better: we want to reduce our distance to our target,
+        # and also keep opponent far from our target.
+        self_after = cheb(nx, ny, tx, ty)
+        opp_after = cheb(nox, noy, tx, ty)
+        score = (opp_after - self_after, -self_after, -abs(nx - sx) - abs(ny - sy))
+       
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = observation.get("obstacles", []) or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, dict):
+            x, y = p.get("x", None), p.get("y", None)
+            if x is not None and y is not None:
+                x, y = int(x), int(y)
+            else:
+                continue
+        else:
+            if not p or len(p) < 2:
+                continue
+            x, y = int(p[0]), int(p[1])
+        if 0 <= x < w and 0 <= y < h:
+            obs.add((x, y))
+
+    resources = observation.get("resources", []) or []
+    res = []
+    for r in resources:
+        if isinstance(r, dict):
+            x, y = r.get("x", None), r.get("y", None)
+            if x is None or y is None:
+                pos = r.get("position", None)
+                if pos and len(pos) >= 2:
+                    x, y = pos[0], pos[1]
+                else:
+                    continue
+        else:
+            if not r or len(r) < 2:
+                continue
+            x, y = r[0], r[1]
+        x, y = int(x), int(y)
+        if 0 <= x < w and 0 <= y < h and (x, y) not in obs:
+            res.append((x, y))
+    if not res:
+        return [0, 0]
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    # Pick a resource that favors self (closer) and discourages opponent (not too close for them).
+    best = None
+    best_key = None
+    for (rx, ry) in res:
+        ds = dist((sx, sy), (rx, ry))
+        do = dist((ox, oy), (rx, ry))
+        key = (ds - do, ds, -do, rx, ry)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (rx, ry)
+
+    tx, ty = best
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best_move = None
+    best_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obs:
+            continue
+        ns = dist((nx, ny), (tx, ty))
+        no = dist((nx, ny), (ox, oy))
+        score = (ns, -no, abs(dx) + abs(dy))
+        if best_score is None or score < best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    if best_move is None:
+        return [0, 0]
+    return [int(best_move[0]), int(best_move[1])]

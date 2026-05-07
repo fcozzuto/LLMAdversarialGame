@@ -1,0 +1,160 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for b in observation.get("obstacles") or []:
+        if b and len(b) >= 2:
+            bx, by = int(b[0]), int(b[1])
+            if 0 <= bx < w and 0 <= by < h:
+                obstacles.add((bx, by))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if r and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in obstacles:
+                resources.append((rx, ry))
+
+    def cheb(a, b):
+        dx = a[0] - b[0]
+        if dx < 0: dx = -dx
+        dy = a[1] - b[1]
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def step_options():
+        opts = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                nx, ny = sx + dx, sy + dy
+                if 0 <= nx < w and 0 <= ny < h:
+                    if (nx, ny) not in obstacles:
+                        opts.append((dx, dy, nx, ny))
+        # deterministic preference order: stay last, move in increasing dx then dy
+        opts.sort(key=lambda t: (0 if (t[0] == 0 and t[1] == 0) else 1, t[0], t[1]))
+        return opts
+
+    dirs = step_options()
+    if not dirs:
+        return [0, 0]
+
+    if not resources:
+        # Move toward center slightly while avoiding obstacles
+        cx, cy = (w - 1) // 2, (h - 1) // 2
+        best = None
+        bestv = None
+        for dx, dy, nx, ny in dirs:
+            v = cheb((nx, ny), (cx, cy))
+            cand = (v, -dx, -dy)
+            if bestv is None or cand < bestv:
+                bestv, best = cand, (dx, dy)
+        return [best[0], best[1]]
+
+    # Choose a target resource where we have an advantage (strictly closer), else best overall.
+    best_r = None
+    best_key = None
+    for r in resources:
+        sd = cheb((sx, sy), r)
+        od = cheb((ox, oy), r)
+        # Prefer: we can reach first; then closer to us; then farther from opponent; then deterministic tie-break.
+        adv = od - sd
+        key = (-1 if sd == 0 else 0, -(adv > 0), -adv, sd, -od, r[0], r[1])
+        # Primary: any advantage beats any non-advantage; within, maximize adv and minimize sd.
+        main = (0 if adv > 0 else 1, -adv, sd, r[0], r[1])
+        if best_key is None or main < best_key:
+            best_key = main
+            best_r = r
+
+    tx, ty = best_r
+
+    # If target is currently blocked (shouldn't be), reselect deterministically.
+    if (tx, ty) in obstacles:
+        best_r = sorted(resources, key=lambda r: (cheb((sx, sy), r), r[0], r[1]))[0]
+        tx, ty = best_r
+
+    # Greedy local evaluation with obstacle avoidance; consider all legal immediate moves.
+    best_move = (0, 0)
+    best_val = None
+    for dx, dy, nx, ny in dirs:
+        # Move value: reduce distance to target more than opponent does next
+        nsd = cheb((nx, ny), (tx, ty))
+        nod = cheb((ox, oy), (tx, ty))  # opponent unchanged this turn
+        # Also discourage getting stuck against obstacles by preferring open-ish direction.
+        open_bonus = 0
+        for ex in (-1, 0, 1):
+            for ey in (-1, 0, 1):
+                ax, ay = nx + ex, ny + ey
+                if 0 <= ax < w and 0 <= ay < h and (ax, ay) not in obstacles:
+                    open_bonus += 1
+        val = (0 if nsd < cheb((sx, sy), (tx, ty)) else 1, nsd - nod, nsd, -open_bonus, dx, dy)
+        if best_val is None or val < best_val:
+            best_val, best_move = val, (dx, dy)
+
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for b in observation.get("obstacles") or []:
+        if b and len(b) >= 2:
+            bx, by = int(b[0]), int(b[1])
+            if 0 <= bx < w and 0 <= by < h:
+                obstacles.add((bx, by))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if r and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in obstacles:
+                resources.append((rx, ry))
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    if resources:
+        tx, ty = min(resources, key=lambda p: (cheb(sx, sy, p[0], p[1]), p[0], p[1]))  # deterministic
+    else:
+        tx, ty = w // 2, h // 2
+
+    dx = 0 if tx == sx else (1 if tx > sx else -1)
+    dy = 0 if ty == sy else (1 if ty > sy else -1)
+
+    prefs = []
+    prefs.append((dx, dy))
+    prefs.append((dx, 0))
+    prefs.append((0, dy))
+    prefs.append((0, 0))
+    # fallback: scan 8 moves in fixed order, avoid obstacles first
+    for ddx in (-1, 0, 1):
+        for ddy in (-1, 0, 1):
+            if (ddx, ddy) == (dx, dy) or (ddx == dx and ddy == 0) or (ddx == 0 and ddy == dy) or (ddx, ddy) == (0, 0):
+                continue
+            prefs.append((ddx, ddy))
+
+    # optionally avoid opponent if extremely close
+    if cheb(sx, sy, ox, oy) <= 1:
+        prefs = [m for m in prefs if cheb(sx + m[0], sy + m[1], ox, oy) >= cheb(sx, sy, ox, oy)] + prefs
+
+    for mdx, mdy in prefs:
+        nx, ny = sx + mdx, sy + mdy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+            return [int(mdx), int(mdy)]
+
+    return [0, 0]

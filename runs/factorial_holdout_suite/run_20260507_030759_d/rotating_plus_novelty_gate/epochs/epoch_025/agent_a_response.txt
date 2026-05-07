@@ -1,0 +1,133 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    # Local candidate moves (stay allowed)
+    best_moves = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                best_moves.append((dx, dy))
+
+    if not best_moves:
+        return [0, 0]
+
+    if not resources:
+        # Deterministic fallback: head toward opponent.
+        dx = 0 if ox == sx else (1 if ox > sx else -1)
+        dy = 0 if oy == sy else (1 if oy > sy else -1)
+        return [dx, dy]
+
+    # Greedy-but-denying: maximize how much closer we are than the opponent to some resource after the move.
+    # Tie-break: prefer reaching a "safer" resource sooner (lexicographic-ish deterministic).
+    rem = observation.get("remaining_resource_count", len(resources))
+    urgency = 1.0 if rem <= 4 else 0.6  # earlier: be slightly more denying; later: greedier
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    best = None  # (score, -opp_to_tgt?, -me_to_tgt, dx, dy)
+    for dx, dy in best_moves:
+        px, py = sx + dx, sy + dy
+        d_me_min = 10**9
+        best_gap = -10**9
+        best_tb = 10**9
+        best_dopp = 10**9
+        for rx, ry in resources:
+            d_me = abs(rx - px) + abs(ry - py)
+            d_op = abs(rx - ox) + abs(ry - oy)
+            gap = d_op - d_me  # positive means we are closer to that resource
+            tb = rx * 16 + ry  # deterministic secondary (no randomness)
+            if gap > best_gap or (gap == best_gap and d_me < d_me_min) or (gap == best_gap and d_me == d_me_min and tb < best_tb):
+                best_gap = gap
+                d_me_min = d_me
+                best_dopp = d_op
+                best_tb = tb
+
+        # Combine: primarily maximize gap, then minimize our distance; lightly incorporate opponent distance.
+        # urgency: later game prioritize reaching (min d_me), earlier game emphasize denying (gap).
+        score = (urgency * best_gap) * 1000 - (1.0 - urgency) * best_dopp - best_d_me_min
+        cand = (score, best_gap, -d_me_min, -best_dopp, best_tb, dx, dy)
+        if best is None or cand > best:
+            best = cand
+
+    return [best[-2], best[-1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    resources = observation.get("resources", []) or []
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    moves = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                pass
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                moves.append((dx, dy))
+    if not moves:
+        return [0, 0]
+
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    me = (sx, sy)
+    opp = (ox, oy)
+
+    if not resources:
+        if ox == sx:
+            return [0, 1 if oy > sy else (-1 if oy < sy else 0)]
+        return [1 if ox > sx else -1, 0 if oy == sy else (1 if oy > sy else -1)]
+
+    resources = [tuple(r) for r in resources]
+
+    def best_target_from(pos):
+        best = None
+        px, py = pos
+        for rx, ry in resources:
+            d = abs(rx - px) + abs(ry - py)
+            key = (d, rx, ry)
+            if best is None or key < best[0]:
+                best = (key, (rx, ry))
+        return best[1]
+
+    best_move = None
+    best_score = None
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        newpos = (nx, ny)
+
+        if newpos == opp:
+            score = -10**9
+        else:
+            tgt = best_target_from(newpos)
+            me_d = man(newpos, tgt)
+            opp_d = man(opp, tgt)
+            score = (opp_d - me_d) * 10 - me_d
+            if abs(nx - ox) + abs(ny - oy) == 1:
+                score -= 2  # mild safety
+
+        if best_score is None or score > best_score or (score == best_score and (dx, dy) < best_move):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

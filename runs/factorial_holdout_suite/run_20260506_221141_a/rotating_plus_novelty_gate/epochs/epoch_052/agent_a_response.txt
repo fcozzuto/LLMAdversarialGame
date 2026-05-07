@@ -1,0 +1,154 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0]) or [0, 0]
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    blocked = set()
+    for p in observation.get("obstacles", []) or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                blocked.add((x, y))
+
+    resources = []
+    for p in observation.get("resources", []) or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in blocked:
+                resources.append((x, y))
+    if not resources:
+        return [0, 0]
+
+    move_deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def king_dist(x1, y1, x2, y2):
+        dx = x1 - x2
+        dy = y1 - y2
+        if dx < 0:
+            dx = -dx
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    res_set = set(resources)
+    cur_best_resource = None
+    cur_best_score = -10**9
+
+    # Score resources by: we arrive sooner (+), also prefer central-ish (+), and prefer resources not behind opponent.
+    for rx, ry in resources:
+        myd = king_dist(sx, sy, rx, ry)
+        opd = king_dist(ox, oy, rx, ry)
+        # If we're already on it, take it.
+        if myd == 0:
+            cur_best_resource = (rx, ry)
+            cur_best_score = 10**9
+            break
+        # Margin: how much sooner we are.
+        margin = opd - myd
+        # Tie-break: prefer closer when margin is similar.
+        center_bias = -0.03 * (abs(rx - (w - 1) / 2.0) + abs(ry - (h - 1) / 2.0))
+        score = 50.0 * margin - 2.0 * myd + center_bias
+        # Extra: if opponent is much closer, strongly de-prioritize.
+        if margin < 0:
+            score -= 35.0 * (-margin)
+        if score > cur_best_score:
+            cur_best_score = score
+            cur_best_resource = (rx, ry)
+
+    if cur_best_resource is None:
+        return [0, 0]
+    tx, ty = cur_best_resource
+
+    # If opponent is extremely close to our current target resource, consider harassing them to reduce denier steals.
+    my_to_t = king_dist(sx, sy, tx, ty)
+    op_to_t = king_dist(ox, oy, tx, ty)
+    enemy_pressure = (op_to_t != 0 and op_to_t <= 2 and my_to_t >= op_to_t)
+
+    best_move = [0, 0]
+    best_val = -10**9
+
+    for dx, dy in move_deltas:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in blocked:
+            nx, ny = sx, sy
+        # Evaluate move by predicted progress toward target and chance to beat opponent.
+        myd2 = king_dist(nx, ny, tx, ty)
+        opd2 = king_dist(ox, oy, tx, ty)  # opponent position unchanged this turn (deterministic 1-step lookahead)
+
+        progress = (my_to_t - myd2)  # positive if closer
+        margin2 = opd2 - myd2
+        val = 100.0 * margin2 + 6.0 * progress - 2.0 * myd2
+
+        # If we can step onto a resource, boost a lot.
+        if (nx, ny) in res_set:
+            val += 250.0
+
+        # If enemy pressure, occasionally steer to reduce their reach (move to square that increases their distance to our target).
+        if enemy_pressure:
+            enemy_dist_after = king_dist(ox, oy, tx, ty)
+            # If we can also block by occupying/approaching squares adjacent to their likely path, nudge toward opponent.
+            opp_dist_from_new = king_dist(nx, ny, ox, oy)
+            val += 2.0 * (enemy_dist_after) - 0.
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    sx, sy = observation.get("self_position", [0, 0]) or [0, 0]
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = observation.get("obstacles", []) or []
+    blocked = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < int(w) and 0 <= y < int(h):
+                blocked.add((x, y))
+
+    resources = observation.get("resources", []) or []
+    res = []
+    for p in resources:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < int(w) and 0 <= y < int(h) and (x, y) not in blocked:
+                res.append((x, y))
+
+    def kingd(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    cx, cy = int(w) // 2, int(h) // 2
+
+    if res:
+        target = min(res, key=lambda r: (kingd(sx, sy, r[0], r[1]), r[0], r[1]))
+    else:
+        target = (ox, oy)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = None
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < int(w) and 0 <= ny < int(h)): 
+            continue
+        if (nx, ny) in blocked:
+            continue
+        dcur = kingd(sx, sy, target[0], target[1])
+        dnew = kingd(nx, ny, target[0], target[1])
+        score = (dcur - dnew) * 1000 - dnew
+        score += -kingd(nx, ny, target[0], target[1]) * 0  # keep deterministic structure
+        score += -kingd(nx, ny, cx, cy) * 0.01
+        if score > best_score or (score == best_score and (dx, dy) < best):
+            best_score = score
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

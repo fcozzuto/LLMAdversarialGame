@@ -1,0 +1,162 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation["resources"]
+    obstacles = set(tuple(p) for p in observation["obstacles"])
+
+    if not resources:
+        return [0, 0]
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def man(ax, ay, bx, by):
+        d1 = ax - bx
+        if d1 < 0:
+            d1 = -d1
+        d2 = ay - by
+        if d2 < 0:
+            d2 = -d2
+        return d1 + d2
+
+    def best_target(fromx, fromy, prefer_opponent=False):
+        best_v = -10**18
+        best = None
+        for rx, ry in resources:
+            ds = man(fromx, fromy, rx, ry)
+            do = man(ox, oy, rx, ry)
+            if ds == 0:
+                v = 10**12
+            else:
+                lead = do - ds  # positive means we are closer
+                # If prefer_opponent, we prefer stealing from their advantage (most negative lead)
+                v = (lead * 320) - (ds * 10)
+                if prefer_opponent:
+                    v = ((-lead) * 260) - (ds * 6)
+            if v > best_v or (v == best_v and (rx, ry) < best):
+                best_v = v
+                best = (rx, ry)
+        return best
+
+    # Decide whether we should race for a resource we can win soon, else move to contest opponent's closest.
+    my_target = best_target(sx, sy, prefer_opponent=False)
+    opp_target = best_target(sx, sy, prefer_opponent=True)  # heuristic contest
+
+    def target_lead(tx, ty):
+        return man(ox, oy, tx, ty) - man(sx, sy, tx, ty)
+
+    if my_target is None:
+        my_target = resources[0]
+    lead = target_lead(my_target[0], my_target[1])
+    if lead < 1:
+        tx, ty = opp_target
+        contest_mode = True
+    else:
+        tx, ty = my_target
+        contest_mode = False
+
+    best_score = -10**18
+    best_move = [0, 0]
+    for mx, my in moves:
+        nx, ny = sx + mx, sy + my
+        if not inb(nx, ny):
+            continue
+
+        # Score next state: immediate pickup, then distance advantage vs opponent for the chosen target,
+        # plus slight incentive to also move closer to other resources when contesting.
+        pickup = 10**9 if (nx, ny) in set(tuple(r) for r in resources) else 0
+
+        ds = man(nx, ny, tx, ty)
+        do = man(ox, oy, tx, ty)
+        adv = do - ds
+
+        # Small lookahead: if contesting, also reward reducing opponent's best achievable lead by approaching
+        # the closest resource to opponent.
+        extra = 0
+        if contest_mode:
+            opp_best = None
+            opp_best_d = 10**9
+            for rx, ry in resources:
+                d = man(ox, oy, rx, ry)
+                if d < opp_best_d:
+                    opp_best_d = d
+                    opp_best = (rx, ry)
+            if opp_best is not None:
+                extra = (opp_best_d - man(nx, ny, opp_best[0], opp_best[1])) * 40
+
+        # Prefer staying valid and reducing distance to our target; heavier weight on being closer than opponent.
+        score = pickup + (adv * (420 if not contest_mode else 260)) - ds * (9 if not contest_mode else 12) + extra
+
+        # Tie-break deterministically by lexicographic move preference
+        move_key = (0 if mx == 0 else 1, 0 if my == 0 else 1, mx, my)
+        best_key = (0 if best_move[0] == 0 else 1, 0 if best_move[1] == 0 else 1, best_move[0], best_move[1])
+        if score > best_score or (score == best_score and move_key < best_key):
+            best_score = score
+            best_move = [mx, my]
+
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    obstacles = observation.get("obstacles", [])
+    obs = obstacles if isinstance(obstacles, set) else set(tuple(p) for p in obstacles)
+
+    def man(ax, ay, bx, by):
+        d = ax - bx
+        if d < 0:
+            d = -d
+        e = ay - by
+        if e < 0:
+            e = -e
+        return d + e
+
+    if not resources:
+        return [0, 0]
+
+    best = None
+    bestv = -10**18
+    for rx, ry in resources:
+        ds = man(sx, sy, rx, ry)
+        do = man(ox, oy, rx, ry)
+        v = (do - ds) * 120 - ds * 5
+        if v > bestv or (v == bestv and (rx, ry) < best):
+            bestv = v
+            best = (rx, ry)
+
+    tx, ty = best
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    bestm = None
+    bestmv = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        nds = man(nx, ny, tx, ty)
+        ndo = man(ox, oy, tx, ty)
+        mv = (ndo - nds) * 120 - nds * 7
+        if bestm is None or mv > bestmv or (mv == bestmv and (dx, dy) < bestm):
+            bestmv = mv
+            bestm = (dx, dy)
+
+    if bestm is None:
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if valid(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    return [bestm[0], bestm[1]]

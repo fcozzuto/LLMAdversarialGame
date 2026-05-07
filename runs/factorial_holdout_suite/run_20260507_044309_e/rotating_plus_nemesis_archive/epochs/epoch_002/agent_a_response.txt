@@ -1,0 +1,165 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", [])
+    obs_list = observation.get("obstacles", [])
+    blocked = set()
+    for p in obs_list:
+        blocked.add((p[0], p[1]))
+
+    deltas = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    dirs = deltas  # include diagonals and stay
+
+    def bfs_from(start):
+        inf = 10**9
+        dist = [[inf] * h for _ in range(w)]
+        x0, y0 = start
+        if x0 < 0 or y0 < 0 or x0 >= w or y0 >= h or (x0, y0) in blocked:
+            return dist
+        qx = [x0]
+        qy = [y0]
+        dist[x0][y0] = 0
+        head = 0
+        while head < len(qx):
+            x = qx[head]
+            y = qy[head]
+            head += 1
+            nd = dist[x][y] + 1
+            for dx, dy in dirs:
+                nx, ny = x + dx, y + dy
+                if nx < 0 or ny < 0 or nx >= w or ny >= h:
+                    continue
+                if (nx, ny) in blocked:
+                    continue
+                if nd < dist[nx][ny]:
+                    dist[nx][ny] = nd
+                    qx.append(nx)
+                    qy.append(ny)
+        return dist
+
+    if not resources:
+        return [0, 0]
+
+    ds = bfs_from((sx, sy))
+    do = bfs_from((ox, oy))
+
+    best_cell = None
+    best_key = None
+    for r in resources:
+        rx, ry = r[0], r[1]
+        if (rx, ry) in blocked:
+            continue
+        my = ds[rx][ry]
+        op = do[rx][ry]
+        if my >= 10**9:
+            continue
+        if op >= 10**9:
+            adv = 1000
+        else:
+            adv = op - my
+        # Prefer: guaranteed/large advantage, then smaller my distance, then farther-from-op (implicitly via adv)
+        key = (adv, -my, -(abs(rx - sx) + abs(ry - sy)), -abs(rx - ox) - abs(ry - oy))
+        if best_key is None or key > best_key:
+            best_key = key
+            best_cell = (rx, ry)
+
+    if best_cell is None:
+        return [0, 0]
+    tx, ty = best_cell
+
+    cur_adv = do[tx][ty] - ds[tx][ty]
+    best_move = [0, 0]
+    best_score = None
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or ny < 0 or nx >= w or ny >= h:
+            continue
+        if (nx, ny) in blocked:
+            continue
+        my_next = ds[nx][ny]
+        # If move is stay, still allowed; ds provides distance to target from new position
+        my_to_target = 0 if (nx, ny) == (tx, ty) else ds[tx][ty]  # placeholder overwritten below
+        # Better: estimate by dist-to-target from nx,ny via ds computed only from (sx,sy).
+        # So we use local Manhattan tie-break instead for short-range correctness.
+        my_est = abs(nx - tx) + abs(ny - ty)
+        op_est = abs(ox - tx) + abs(oy - ty)
+        next_adv_est = op_est - my_est
+
+        # Score: improve estimated advantage first; then reduce est distance to target; then keep away from opponent a bit.
+        score = (next_adv_est - cur_adv, next_adv_est, -my_est, -(abs(nx - ox) + abs(ny - oy)))
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    blocked = set()
+    for p in observation.get("obstacles", []):
+        try:
+            x, y = p[0], p[1]
+            blocked.add((x, y))
+        except Exception:
+            pass
+
+    resources = observation.get("resources", [])
+    res_pos = []
+    for r in resources:
+        try:
+            x, y = r[0], r[1]
+            if 0 <= x < w and 0 <= y < h and (x, y) not in blocked:
+                res_pos.append((x, y))
+        except Exception:
+            pass
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    best_val = -10**18
+
+    if res_pos:
+        # Pick the nearest resource to us as a target (deterministic).
+        target = min(res_pos, key=lambda t: (abs(t[0] - sx) + abs(t[1] - sy), t[0], t[1]))
+
+        tx, ty = target
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if nx < 0 or ny < 0 or nx >= w or ny >= h or (nx, ny) in blocked:
+                continue
+            # Prefer decreasing Manhattan distance to target; break ties deterministically.
+            d = abs(tx - nx) + abs(ty - ny)
+            val = -d
+            if dx == 0 and dy == 0:
+                val -= 0.01  # slight penalty to avoid staying
+            # Small deterministic tiebreak toward opponent direction (harmless if opponent irrelevant).
+            val += (nx - ox) * 1e-6 - (ny - oy) * 1e-6
+            if val > best_val:
+                best_val = val
+                best = [dx, dy]
+
+        if best is not None:
+            return best
+
+    # If no resources or no legal move toward them: try to avoid opponent; else stay.
+    best = [0, 0]
+    best_val = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or ny < 0 or nx >= w or ny >= h or (nx, ny) in blocked:
+            continue
+        d_opp = abs(ox - nx) + abs(oy - ny)
+        # Prefer maximizing distance; deterministic tie-break.
+        val = d_opp + (dx == 0 and dy == 0) * 0.001
+        if val > best_val:
+            best_val = val
+            best = [dx, dy]
+    return best

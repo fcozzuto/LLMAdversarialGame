@@ -1,0 +1,168 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obs_list = observation.get("obstacles") or []
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(a, b):
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+    obs_set = set(map(tuple, obs_list))
+
+    def obstacle_pen(x, y):
+        if (x, y) in obs_set:
+            return 1e9
+        p = 0.0
+        for ax, ay in obs_list:
+            d = cheb((x, y), (ax, ay))
+            if d == 0:
+                p += 1e8
+            elif d == 1:
+                p += 30.0
+            elif d == 2:
+                p += 5.0
+        return p
+
+    dirs = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    if not resources:
+        # Move to center while avoiding obstacles
+        cx, cy = w // 2, h // 2
+        best = (0, 0)
+        bestv = -1e18
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                nx, ny = sx, sy
+            v = -(cheb((nx, ny), (cx, cy))) - 0.05 * obstacle_pen(nx, ny)
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    # Precompute target priority: prefer resources where we are closer than opponent
+    def target_value(tx, ty):
+        sd = cheb((sx, sy), (tx, ty))
+        od = cheb((ox, oy), (tx, ty))
+        # Encourage taking resources before opponent; also prefer closer targets overall
+        return (od - sd) * 10.0 - sd
+
+    # Keep small set of best targets for speed and determinism
+    ranked = []
+    for rx, ry in resources:
+        ranked.append((target_value(rx, ry), rx, ry))
+    ranked.sort(reverse=True)
+    top = ranked[:min(6, len(ranked))]
+
+    best_move = (0, 0)
+    best_score = -1e18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            nx, ny = sx, sy
+        op = obstacle_pen(nx, ny)
+        # If stuck at obstacle penalty, likely bad; still compute deterministically
+        score = -op
+
+        # Evaluate best achievable target after this move
+        # Use cheb distance (diag allowed) to estimate who can reach first
+        move_best = -1e18
+        for _, tx, ty in top:
+            sd2 = cheb((nx, ny), (tx, ty))
+            od2 = cheb((ox, oy), (tx, ty))
+            # If we get closer than opponent, big reward; else, still prefer reducing their lead
+            v = (od2 - sd2) * 10.0 - sd2
+            # Also slightly prefer moving toward the target to smooth paths
+            v -= 0.2 * cheb((nx, ny), (tx, ty))
+            if v > move_best:
+                move_best = v
+        score += move_best
+
+        # Additional nudge: if we can directly collect, strongly prefer staying/going there
+        # (collection likely occurs on landing tile)
+        for tx, ty in resources:
+            if nx == tx and ny == ty:
+                score += 1e6
+                break
+
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+    obs = set(map(tuple, obstacles))
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def absmax(x, y):
+        ax = x if x >= 0 else -x
+        ay = y if y >= 0 else -y
+        return ax if ax > ay else ay
+
+    def obstacle_pen(x, y):
+        if (x, y) in obs:
+            return 1e9
+        p = 0
+        for a, b in obstacles:
+            d = absmax(x - a, y - b)
+            if d == 0:
+                return 1e9
+            if d == 1:
+                p += 30
+            elif d == 2:
+                p += 6
+        return p
+
+    if resources:
+        tgt = resources[0]
+        bestd = 10**18
+        for rx, ry in resources:
+            d = absmax(sx - rx, sy - ry)
+            if d < bestd:
+                bestd = d
+                tgt = (rx, ry)
+        cx, cy = tgt
+    else:
+        cx, cy = (w // 2), (h // 2)
+
+    bestv = -1e18
+    best = (0, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            nx, ny = sx, sy
+        if (nx, ny) in obs:
+            continue
+        d_me = absmax(nx - cx, ny - cy)
+        v = -d_me * 10
+        if resources:
+            for rx, ry in resources[:6]:
+                if (nx, ny) == (rx, ry):
+                    v += 5000
+                else:
+                    dr = absmax(nx - rx, ny - ry)
+                    v += (20 if dr == 1 else 0) + (8 if dr == 2 else 0)
+        d_opp = absmax(nx - ox, ny - oy)
+        v += -d_opp * 1.2
+        v -= obstacle_pen(nx, ny)
+        if v > bestv:
+            bestv = v
+            best = (dx, dy)
+    return [int(best[0]), int(best[1])]

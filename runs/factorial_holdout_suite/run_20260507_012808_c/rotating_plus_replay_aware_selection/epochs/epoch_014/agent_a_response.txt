@@ -1,0 +1,159 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    moves = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if ok(nx, ny):
+                moves.append((dx, dy))
+    if not moves:
+        return [0, 0]
+
+    # If we can see resources: prefer those we can secure first; if uncertain, steer to deny opponent the closest resource.
+    if resources:
+        best_r = None
+        best_score = None
+        for rx, ry in resources:
+            d_self = cheb(sx, sy, rx, ry)
+            d_opp = cheb(ox, oy, rx, ry)
+            # Main: maximize time advantage (opp later). Secondary: smaller self distance.
+            # Tertiary: prefer resources closer to opponent only if we are still not too behind (deny/disrupt).
+            score = (d_opp - d_self, -d_self, -cheb(rx, ry, ox, oy))
+            if best_score is None or score > best_score:
+                best_score = score
+                best_r = (rx, ry)
+
+        tx, ty = best_r
+
+        # Occasionally bias toward cutting the opponent off by moving toward the "front" between them and target.
+        # Deterministic: if opponent is closer than we are, step toward the midpoint shell.
+        d_self = cheb(sx, sy, tx, ty)
+        d_opp = cheb(ox, oy, tx, ty)
+        if d_opp < d_self:
+            mx = (tx + ox) // 2
+            my = (ty + oy) // 2
+            # Choose between true target and midpoint based on which is closer from the available next moves.
+            candidates = [("target", tx, ty), ("mid", mx, my)]
+        else:
+            candidates = [("target", tx, ty)]
+
+        # Evaluate next moves by minimizing distance to whichever candidate is best for us; keep deterministic tie-break.
+        best_move = None
+        best_tuple = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            # Avoid stepping onto obstacles is already handled by ok()
+            # Pick best candidate distance for this move, then maximize (opponent advantage after move).
+            best_my = None
+            for _, cx, cy in candidates:
+                d_after = cheb(nx, ny, cx, cy)
+                if best_my is None or d_after < best_my:
+                    best_my = d_after
+            # Opponent can also move; approximate with their current ability toward our chosen target.
+            d_opp_now = cheb(ox, oy, tx, ty)
+            # Encourage moves that reduce our distance more than the opponent's current distance.
+            my_adv = (d_opp_now - best_my, -best_my, -(abs(tx - nx) + abs(ty - ny)))
+            t = my_adv
+            if best_tuple is None or t > best_tuple:
+                best_tuple = t
+                best_move = [dx, dy]
+        return best_move
+
+    # If we can't see resources: move toward the center band to increase chance of encountering visible resources,
+    # while also drifting away from opponent corner pressure.
+    center = (w // 2, h // 2)
+    # Deterministic "repel": target is center plus a small component away from opponent, then clamp to grid.
+    tx = center[0] + (-1 if ox > sx else (1 if ox < sx else 0))
+    ty = center[1] + (-1 if oy > sy else (1 if oy < sy else 0))
+    if tx < 0: tx = 0
+    if tx > w - 1: tx = w - 1
+    if ty < 0: ty = 0
+    if ty > h - 1: ty = h - 1
+
+    best_move = None
+    best_t = None
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    obstacles = observation.get("obstacles", []) or []
+    obs = set((p[0], p[1]) for p in obstacles)
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    legal = [(dx, dy) for dx, dy in dirs if ok(sx + dx, sy + dy)]
+    if not legal:
+        return [0, 0]
+
+    resources = observation.get("resources", []) or []
+    if resources:
+        best = None
+        best_val = None
+        for dx, dy in legal:
+            nx, ny = sx + dx, sy + dy
+            # Choose move that most improves "resource advantage": opponent further than us.
+            # Score: (min opp-dist - min self-dist), then prefer being closer to a resource.
+            min_self = 10**9
+            min_opp = 10**9
+            min_denial = -10**9
+            for rx, ry in resources:
+                ds = cheb(nx, ny, rx, ry)
+                do = cheb(ox, oy, rx, ry)
+                if ds < min_self: min_self = ds
+                if do < min_opp: min_opp = do
+                # Deny score favors resources where our move tightens the gap vs opponent.
+                gap = do - ds
+                if gap > min_denial: min_denial = gap
+            val = (min_opp - min_self, -min_self, min_denial)
+            if best_val is None or val > best_val:
+                best_val = val
+                best = [dx, dy]
+        return best
+
+    # No visible resources: move to maximize distance from opponent (and avoid being trapped).
+    best = None
+    best_val = None
+    for dx, dy in legal:
+        nx, ny = sx + dx, sy + dy
+        d = cheb(nx, ny, ox, oy)
+        # Prefer moves that keep some mobility next step.
+        mobility = 0
+        for ddx, ddy in dirs:
+            xx, yy = nx + ddx, ny + ddy
+            if ok(xx, yy):
+                mobility += 1
+        val = (d, mobility)
+        if best_val is None or val > best_val:
+            best_val = val
+            best = [dx, dy]
+    return best

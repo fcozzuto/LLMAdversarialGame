@@ -1,0 +1,62 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not resources:
+        return [0, 0]
+
+    def dist(x1, y1, x2, y2):
+        a = x1 - x2
+        if a < 0:
+            a = -a
+        b = y1 - y2
+        if b < 0:
+            b = -b
+        return a + b
+
+    def nearest_dist(x, y):
+        best = 10**9
+        for rx, ry in resources:
+            if (rx, ry) in obstacles:
+                continue
+            d = dist(x, y, rx, ry)
+            if d < best:
+                best = d
+        return best
+
+    best_move = (0, 0)
+    best_val = 10**18
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h or (nx, ny) in obstacles:
+            continue
+        v = nearest_dist(nx, ny)
+        # Small deterministic pressure to avoid walking into opponent's cell.
+        if (nx, ny) == (ox, oy):
+            v += 1
+        # Tie-break by deterministic ordering of moves.
+        if v < best_val:
+            best_val = v
+            best_move = (dx, dy)
+
+    # If all moves invalid (shouldn't happen), stay.
+    return [int(best_move[0]), int(best_move[1])]

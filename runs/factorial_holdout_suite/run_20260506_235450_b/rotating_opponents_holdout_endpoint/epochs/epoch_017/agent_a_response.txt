@@ -1,0 +1,179 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obs = set()
+    for a in obstacles:
+        if isinstance(a, (list, tuple)) and len(a) >= 2:
+            obs.add((int(a[0]), int(a[1])))
+        elif isinstance(a, dict) and "x" in a and "y" in a:
+            obs.add((int(a["x"]), int(a["y"])))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def parse_xy(r):
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            return int(r[0]), int(r[1])
+        if isinstance(r, dict) and "x" in r and "y" in r:
+            return int(r["x"]), int(r["y"])
+        return None
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    res_xy = []
+    for r in resources:
+        p = parse_xy(r)
+        if p:
+            res_xy.append(p)
+
+    if not res_xy:
+        return [0, 0]
+
+    # Choose a strategic target: prefer resources where we are closer than opponent,
+    # but also hedge when ahead by going for nearer overall.
+    best_target = None
+    best_key = None
+    for (rx, ry) in res_xy:
+        ds = man(sx, sy, rx, ry)
+        do = man(ox, oy, rx, ry)
+        if ds == 0:
+            return [0, 0]
+        # Key: maximize our relative advantage; tie-break by shorter ds.
+        key = (do - ds, -ds)
+        if best_key is None or key > best_key:
+            best_key = key
+            best_target = (rx, ry)
+
+    tx, ty = best_target
+
+    moves = [(-1, -1), (0, -1), (1, -1),
+             (-1, 0),  (0, 0),  (1, 0),
+             (-1, 1),  (0, 1),  (1, 1)]
+    # Deterministic tie-break ordering already in list.
+    best_move = [0, 0]
+    best_move_key = None
+
+    # Evaluate moves by how they change our advantage towards target and
+    # whether they also reduce the opponent's ability.
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        nds = man(nx, ny, tx, ty)
+        ods = man(ox, oy, tx, ty)
+
+        # Also consider if opponent has a closer resource (pick-up race pressure):
+        # approximate by looking at the closest resource to opponent and how we move away from it.
+        opp_best = None
+        opp_best_ds_diff = None
+        for (rx, ry) in res_xy:
+            myd = man(nx, ny, rx, ry)
+            od = man(ox, oy, rx, ry)
+            d = od - myd  # higher means we're closer
+            if opp_best_ds_diff is None or d > opp_best_ds_diff:
+                opp_best_ds_diff = d
+                opp_best = (rx, ry)
+
+        # If opponent is already much closer to current target, prioritize quickest improvement to any race.
+        if ods < nds:
+            adv = opp_best_ds_diff if opp_best_ds_diff is not None else (ods - nds)
+        else:
+            adv = ods - nds
+
+        # Secondary: minimize distance to target; tertiary: minimize distance to opponent to avoid duel? (slight)
+        key = (adv, -nds, -man(nx, ny, ox, oy))
+        if best_move_key is None or key > best_move_key:
+            best_move_key = key
+            best_move = [dx, dy]
+
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 0) or 0)
+    h = int(observation.get("grid_height", 0) or 0)
+    if w <= 0 or h <= 0:
+        return [0, 0]
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obs = set()
+    for a in (observation.get("obstacles") or []):
+        if isinstance(a, (list, tuple)) and len(a) >= 2:
+            obs.add((int(a[0]), int(a[1])))
+        elif isinstance(a, dict) and "x" in a and "y" in a:
+            obs.add((int(a["x"]), int(a["y"])))
+
+    def parse_xy(r):
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            return int(r[0]), int(r[1])
+        if isinstance(r, dict) and "x" in r and "y" in r:
+            return int(r["x"]), int(r["y"])
+        return None
+
+    resources = []
+    for r in observation.get("resources") or []:
+        p = parse_xy(r)
+        if p is not None:
+            resources.append(p)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    target = None
+    best = 10**9
+    for (rx, ry) in resources:
+        d = man(sx, sy, rx, ry)
+        if d < best or (d == best and (rx, ry) < target):
+            best = d
+            target = (rx, ry)
+
+    if target is None:
+        target = (ox, oy)
+
+    dxs = (-1, 0, 1)
+    dys = (-1, 0, 1)
+    moves = []
+    for dx in dxs:
+        for dy in dys:
+            if dx == 0 and dy == 0:
+                continue
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny):
+                moves.append((dx, dy))
+
+    if not moves:
+        return [0, 0]
+
+    if resources:
+        best_movescore = 10**18
+        best_move = moves[0]
+        for dx, dy in sorted(moves):
+            nx, ny = sx + dx, sy + dy
+            score = (man(nx, ny, target[0], target[1]), man(ox, oy, target[0], target[1]), dx, dy)
+            if score < best_movescore:
+                best_movescore = score
+                best_move = (dx, dy)
+        return [best_move[0], best_move[1]]
+    else:
+        best_movescore = -10**18
+        best_move = moves[0]
+        for dx, dy in sorted(moves):
+            nx, ny = sx + dx, sy + dy
+            score = (man(nx, ny, ox, oy), -man(nx, ny, target[0], target[1]), -dx, -dy)
+            if score > best_movescore:
+                best_movescore = score
+                best_move = (dx, dy)
+        return [best_move[0], best_move[1]]

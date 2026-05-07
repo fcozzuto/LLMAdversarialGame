@@ -1,0 +1,165 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    oset = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            oset.add((p[0], p[1]))
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def md(a, b, c, d): return abs(a - c) + abs(b - d)
+
+    moves = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    best = [0, 0]
+    best_sc = -10**18
+
+    # If our position is invalid, don't move
+    if not inb(sx, sy):
+        return [0, 0]
+
+    # Choose a target resource that we are likely to reach first
+    def target_score(x, y):
+        if not resources:
+            return None
+        best_t = None
+        best_v = -10**18
+        for rx, ry in resources:
+            if (rx, ry) in oset:
+                continue
+            ds = md(x, y, rx, ry)
+            do = md(ox, oy, rx, ry)
+            # Favor resources we can get sooner; add tie-break by closeness
+            v = (do - ds) * 100 - ds
+            # Encourage taking nearer resources when "race" is bad
+            if ds == 0:
+                v += 10**6
+            if v > best_v:
+                best_v = v
+                best_t = (rx, ry)
+        return best_t
+
+    tgt0 = target_score(sx, sy)
+    if tgt0 is None:
+        # Drift toward center while avoiding obstacles
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in oset:
+                continue
+            sc = -((nx - cx) * (nx - cx) + (ny - cy) * (ny - cy))
+            if sc > best_sc:
+                best_sc = sc
+                best = [dx, dy]
+        return best
+
+    # One-step lookahead: score each move by progress toward the best contested target
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in oset:
+            continue
+
+        tgt = target_score(nx, ny)
+        if tgt is None:
+            tgt = tgt0
+
+        rx, ry = tgt
+        ds = md(nx, ny, rx, ry)
+        do = md(ox, oy, rx, ry)
+        # Main objective: win races; secondary: reduce distance; tertiary: avoid stepping closer to opponent target too early
+        sc = (do - ds) * 100 - ds
+
+        # Obstacle proximity penalty to reduce stuck behavior
+        adj_obs = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                if ax == 0 and ay == 0:
+                    continue
+                xx, yy = nx + ax, ny + ay
+                if inb(xx, yy) and (xx, yy) in oset:
+                    adj_obs += 1
+        sc -= adj_obs * 3
+
+        # Prefer staying if equally good
+        if [dx, dy] == [0, 0]:
+            sc += 0.1
+
+        if sc > best_sc:
+            best_sc = sc
+            best = [dx, dy]
+
+    return best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = observation.get("obstacles", []) or []
+    resources = observation.get("resources", []) or []
+    if not (0 <= sx < w and 0 <= sy < h and 0 <= ox < w and 0 <= oy < h):
+        return [0, 0]
+
+    oset = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int):
+                oset.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def md(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = [0, 0]
+    best_sc = -10**18
+
+    res_list = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = r[0], r[1]
+            if isinstance(x, int) and isinstance(y, int):
+                if (x, y) not in oset:
+                    res_list.append((x, y))
+
+    if not res_list:
+        # No resources: move to increase distance from opponent (deterministic fallback)
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in oset:
+                continue
+            sc = md(nx, ny, ox, oy)
+            if sc > best_sc:
+                best_sc = sc
+                best_move = [dx, dy]
+        return best_move
+
+    # Choose step that maximizes advantage toward a resource we can likely reach sooner
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in oset:
+            continue
+        sc = -md(nx, ny, ox, oy) * 0.01  # small bias: don't run into opponent
+        for rx, ry in res_list:
+            ds = md(nx, ny, rx, ry)
+            do = md(ox, oy, rx, ry)
+            adv = do - ds  # positive if we are closer to this resource after the move
+            sc2 = adv * 200 - ds  # prefer bigger advantage and nearer target
+            if ds == 0:
+                sc2 += 10**6
+            sc += sc2
+        # Normalize by number of resources considered to keep scale stable
+        sc = sc / max(1, len(res_list))
+        if sc > best_sc:
+            best_sc = sc
+            best_move = [dx, dy]
+
+    return best_move

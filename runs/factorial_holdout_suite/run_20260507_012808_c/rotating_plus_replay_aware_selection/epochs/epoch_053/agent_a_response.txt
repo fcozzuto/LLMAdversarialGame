@@ -1,0 +1,57 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist(x1, y1, x2, y2):
+        return max(abs(x2 - x1), abs(y2 - y1))
+
+    res_list = [tuple(r) for r in resources]
+    if not res_list:
+        tx, ty = (w - 1) // 2, (h - 1) // 2
+        dx = 0 if tx == sx else (1 if tx > sx else -1)
+        dy = 0 if ty == sy else (1 if ty > sy else -1)
+        nx, ny = sx + dx, sy + dy
+        return [dx, dy] if valid(nx, ny) else [0, 0]
+
+    opp_to_res = {r: dist(ox, oy, r[0], r[1]) for r in res_list}
+    best_move = (0, 0)
+    best_score = None
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+
+        self_dists = []
+        max_adv = -10**9
+        sum_top = 0
+        for rx, ry in res_list:
+            ds = dist(nx, ny, rx, ry)
+            do = opp_to_res[(rx, ry)]
+            adv = do - ds
+            self_dists.append((ds, adv))
+            if adv > max_adv:
+                max_adv = adv
+
+        self_dists.sort(key=lambda t: (-(t[1]), t[0]))
+        for i in range(min(3, len(self_dists))):
+            sum_top += self_dists[i][1]
+
+        min_self = min(t[0] for t in self_dists)
+        # Prefer positive advantage; otherwise minimize our distance.
+        score = (max_adv, sum_top, -min_self)
+
+        if best_score is None or score > best_score or (score == best_score and (dx, dy) < best_move):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

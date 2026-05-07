@@ -1,0 +1,160 @@
+def choose_move(observation):
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+    turns_remaining = int(observation.get("turns_remaining", 0))
+
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            obs.add((int(p[0]), int(p[1])))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    if not resources:
+        dx = 0 if ox == sx else (1 if ox > sx else -1)
+        dy = 0 if oy == sy else (1 if oy > sy else -1)
+        return [dx, dy]
+
+    best_score = None
+    best_move = (0, 0)
+
+    # Ignore resources too far to matter late: tighten race logic.
+    # Estimate by Manhattan; remaining turns bounds useful progress.
+    max_rel_turns = max(1, turns_remaining)  # keep deterministic
+    filtered = []
+    for rx, ry in resources:
+        d = man(sx, sy, rx, ry)
+        if d <= max_rel_turns + 2:
+            filtered.append((rx, ry))
+    if not filtered:
+        filtered = resources
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+
+        score = 0
+        # Main objective: maximize number of resources we can reach no later than opponent.
+        # Secondary: minimize our best lead distance (and our distance to the "most contestable" resource).
+        win_cnt = 0
+        closest_tie = 10**9
+        best_deficit = -10**9
+        best_us = 10**9
+
+        for rx, ry in filtered:
+            d_us = man(nx, ny, rx, ry)
+            d_op = man(ox, oy, rx, ry)
+            if d_us <= d_op:
+                win_cnt += 1
+                # Prefer resources where we're strictly earlier, else ties with small d_us.
+                deficit = d_op - d_us
+                if deficit > best_deficit:
+                    best_deficit = deficit
+                if d_us < closest_tie:
+                    closest_tie = d_us
+            if d_us < best_us:
+                best_us = d_us
+
+        # Small shaping to discourage wandering and to avoid being blocked by opponent's nearer targets.
+        # Also slightly prefer moves that reduce our distance to nearest resource.
+        score += win_cnt * 1000
+        score += best_deficit * 10
+        score -= closest_tie
+        score -= best_us * 0.2
+
+        # If we can capture quickly, prioritize capturing.
+        # (Takes effect when we step onto a resource.)
+        for rx, ry in filtered:
+            if nx == rx and ny == ry:
+                score += 50000
+                break
+
+        # Deterministic tie-break: smallest (dx,dy) lexicographically among best scores.
+        cand = (score, dx, dy)
+        if best_score is None or cand > (best_score, best_move[0], best_move[1]):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            obs.add((int(p[0]), int(p[1])))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def dist(ax, ay, bx, by):
+        ax = ax - bx
+        if ax < 0:
+            ax = -ax
+        ay = ay - by
+        if ay < 0:
+            ay = -ay
+        return ax + ay
+
+    # Choose target: nearest resource if any, else move toward opponent.
+    if resources:
+        best_t = None
+        best_d = None
+        for r in resources:
+            rx, ry = int(r[0]), int(r[1])
+            d = dist(sx, sy, rx, ry)
+            if best_d is None or d < best_d or (d == best_d and (rx, ry) < best_t):
+                best_d = d
+                best_t = (rx, ry)
+        tx, ty = best_t
+        # If already on a resource, stay (deterministic).
+        if (sx, sy) == (tx, ty):
+            return [0, 0]
+    else:
+        tx, ty = ox, oy
+
+    # One-step greedy: minimize distance to target; if tied, prefer increasing distance from opponent.
+    best = None
+    best_move = (0, 0)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        d_to = dist(nx, ny, tx, ty)
+        d_op = dist(nx, ny, ox, oy)
+        # Favor smaller d_to; then larger d_op; then deterministic ordering.
+        key = (d_to, -d_op, dx, dy)
+        if best is None or key < best:
+            best = key
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

@@ -1,0 +1,141 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0]) or [0, 0]
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    blocked = set()
+    for p in observation.get("obstacles", []) or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                blocked.add((x, y))
+
+    resources = []
+    for p in observation.get("resources", []) or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in blocked:
+                resources.append((x, y))
+    if not resources:
+        return [0, 0]
+
+    def mhd(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    tr = int(observation.get("turns_remaining", 0) or 0)
+    consider = resources
+    if len(resources) > 6:
+        # keep closest few deterministically
+        consider = sorted(resources, key=lambda r: mhd(sx, sy, r[0], r[1]))[:6]
+
+    # pick best resource target
+    best_t = None
+    best_score = -10**18
+    for rx, ry in consider:
+        sd = mhd(sx, sy, rx, ry)
+        od = mhd(ox, oy, rx, ry)
+        # prefer resources where we are earlier; slight preference for nearer overall
+        lead = od - sd
+        contest_bonus = 2 if (od == sd and sd <= max(1, tr // 3)) else 0
+        time_factor = 0.05 * (tr - sd)  # earlier is better
+        score = lead * 2.0 + contest_bonus + time_factor - 0.01 * sd
+        if score > best_score:
+            best_score = score
+            best_t = (rx, ry)
+    rx, ry = best_t
+
+    # evaluate immediate moves toward target while avoiding obstacles
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = [0, 0]
+    best_val = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in blocked:
+            nx, ny = sx, sy
+        self_d = mhd(nx, ny, rx, ry)
+        opp_d = mhd(ox, oy, rx, ry)
+        # if we get to the resource, prioritize strongly
+        pick_val = 1e6 if (nx, ny) == (rx, ry) else 0
+        # also add "blocking" pressure: keep moves that reduce opponent access to target
+        opp_access_after = mhd(ox, oy, rx, ry)
+        # prefer distancing from opponent when leads are negative (avoid races)
+        avoid_opp = -0.02 * mhd(nx, ny, ox, oy)
+        val = pick_val - 1.2 * self_d + 0.15 * (opp_d - self_d) + avoid_opp
+        if self_d == 0:
+            val += 0.01 * tr
+        # tiny deterministic tie-break toward moving right/down
+        val += 1e-6 * (dx * 3 + dy)
+        if val > best_val:
+            best_val = val
+            best_move = [dx if (sx + dx, sy + dy) != (nx, ny) else 0, dy if (sx + dx, sy + dy) != (nx, ny) else 0]
+            # if we had to revert due to obstacle/bounds, best_move should be [0,0]
+            if (nx, ny) == (sx, sy):
+                best_move = [0, 0]
+   
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0]) or [0, 0]
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    blocked = set()
+    for p in observation.get("obstacles", []) or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                blocked.add((x, y))
+
+    def mhd(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    resources = []
+    for p in observation.get("resources", []) or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in blocked:
+                resources.append((x, y))
+
+    if resources:
+        tx, ty = min(resources, key=lambda r: (mhd(sx, sy, r[0], r[1]), r[0], r[1]))
+    else:
+        tx, ty = w // 2, h // 2
+        if (tx, ty) in blocked:
+            tx, ty = sx, sy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    best_key = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in blocked:
+            continue
+        dist_t = mhd(nx, ny, tx, ty)
+        dist_o = mhd(nx, ny, ox, oy)
+        key = (dist_t, -dist_o, nx, ny)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = [dx, dy]
+
+    if best is None:
+        return [0, 0]
+    return best
