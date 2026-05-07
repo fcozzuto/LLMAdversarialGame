@@ -12,18 +12,32 @@ Use the factorial holdout aggregate to pick the winning recipe by the primary en
 
 ## Step 2: Generate the Transfer Suite
 
-Build the environment-transfer suite from that winning condition:
+Build the environment-transfer suite from the chosen transfer condition:
 
 ```powershell
 python build_transfer_suite.py --recipe rotating_plus_nemesis_novelty_replay
 ```
 
-Replace `rotating_plus_nemesis_novelty_replay` with the actual winning factorial condition name.
+Replace `rotating_plus_nemesis_novelty_replay` with the actual chosen condition name if you decide to carry forward a different one.
 
-The generated suite lives at:
+By default, the generator now writes a recipe-specific config and run root so multiple transfer candidates do not overwrite or mix together. For example:
 
 ```text
-configs/transfer_suite/01_cross_environment_transfer.json
+configs/transfer_suite/rotating_plus_nemesis_novelty_replay.json
+runs/transfer_suite/rotating_plus_nemesis_novelty_replay
+```
+
+If you also want to compare the simpler rotating-opponent reference condition, build it separately:
+
+```powershell
+python build_transfer_suite.py --recipe rotating_opponents_holdout_endpoint
+```
+
+That creates:
+
+```text
+configs/transfer_suite/rotating_opponents_holdout_endpoint.json
+runs/transfer_suite/rotating_opponents_holdout_endpoint
 ```
 
 It creates three transfer conditions:
@@ -43,18 +57,22 @@ Use five replicate seed offsets:
 - `e`: `4000`
 
 ```powershell
-python run_suite.py --config configs\transfer_suite\01_cross_environment_transfer.json --seed-offset 0 --replicate-label a
-python run_suite.py --config configs\transfer_suite\01_cross_environment_transfer.json --seed-offset 1000 --replicate-label b
-python run_suite.py --config configs\transfer_suite\01_cross_environment_transfer.json --seed-offset 2000 --replicate-label c
-python run_suite.py --config configs\transfer_suite\01_cross_environment_transfer.json --seed-offset 3000 --replicate-label d
-python run_suite.py --config configs\transfer_suite\01_cross_environment_transfer.json --seed-offset 4000 --replicate-label e
+python run_suite.py --config configs\transfer_suite\rotating_plus_nemesis_novelty_replay.json --seed-offset 0 --replicate-label a
+python run_suite.py --config configs\transfer_suite\rotating_plus_nemesis_novelty_replay.json --seed-offset 1000 --replicate-label b
+python run_suite.py --config configs\transfer_suite\rotating_plus_nemesis_novelty_replay.json --seed-offset 2000 --replicate-label c
+python run_suite.py --config configs\transfer_suite\rotating_plus_nemesis_novelty_replay.json --seed-offset 3000 --replicate-label d
+python run_suite.py --config configs\transfer_suite\rotating_plus_nemesis_novelty_replay.json --seed-offset 4000 --replicate-label e
 ```
+
+If you run the rotating-opponents reference condition as well, use its own config path in the same pattern.
 
 ## Step 4: Aggregate
 
 ```powershell
-python aggregate_runs.py --runs-root runs\transfer_suite
+python aggregate_runs.py --runs-root runs\transfer_suite\rotating_plus_nemesis_novelty_replay
 ```
+
+If you also run `rotating_opponents_holdout_endpoint`, aggregate it separately from its own run root.
 
 ## Interpretation
 

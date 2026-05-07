@@ -4,11 +4,13 @@ import argparse
 import copy
 import json
 from pathlib import Path
+import re
 
 from llm_grid_battle.config import SuiteConfig
 
 
-TRANSFER_OUTPUT = "runs/transfer_suite"
+TRANSFER_OUTPUT_ROOT = "runs/transfer_suite"
+TRANSFER_CONFIG_DIR = Path("configs/transfer_suite")
 
 
 def _deep_copy(value):
@@ -19,6 +21,11 @@ def _training_pool(mode: str, labels: list[str]) -> list[dict[str, str]]:
     if mode == "fixed_predator":
         return [{"library_key": labels[0]}]
     return [{"library_key": label} for label in labels]
+
+
+def _slugify_recipe_name(recipe_name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", recipe_name.lower()).strip("_")
+    return slug or "transfer_recipe"
 
 
 def _environment_templates(mode: str) -> list[dict]:
@@ -100,11 +107,20 @@ def _environment_templates(mode: str) -> list[dict]:
     ]
 
 
-def build_transfer_suite(*, factorial_config: Path, recipe_name: str, output_path: Path) -> Path:
+def build_transfer_suite(
+    *,
+    factorial_config: Path,
+    recipe_name: str,
+    output_path: Path | None = None,
+    output_root: str | None = None,
+) -> Path:
     suite = SuiteConfig.load(factorial_config)
     source = next((condition for condition in suite.conditions if condition.name == recipe_name), None)
     if source is None:
         raise ValueError(f"Recipe condition not found: {recipe_name}")
+    recipe_slug = _slugify_recipe_name(recipe_name)
+    resolved_output_path = output_path or (TRANSFER_CONFIG_DIR / f"{recipe_slug}.json")
+    resolved_output_root = output_root or f"{TRANSFER_OUTPUT_ROOT}/{resolved_output_path.stem}"
     source_dict = source.to_dict()
     base_curriculum = _deep_copy(source_dict["curriculum"])
     base_curriculum.setdefault("selection", {})
@@ -114,7 +130,7 @@ def build_transfer_suite(*, factorial_config: Path, recipe_name: str, output_pat
 
     defaults = {
         "seed": int(source.seed),
-        "output_root": TRANSFER_OUTPUT,
+        "output_root": resolved_output_root,
         "agents": _deep_copy(source_dict["agents"]),
         "feedback": _deep_copy(source_dict["feedback"]),
         "observation": _deep_copy(source_dict["observation"]),
@@ -149,22 +165,24 @@ def build_transfer_suite(*, factorial_config: Path, recipe_name: str, output_pat
         conditions.append(condition)
 
     output = {"defaults": defaults, "conditions": conditions}
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(output, indent=2), encoding="utf-8")
-    return output_path
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_output_path.write_text(json.dumps(output, indent=2), encoding="utf-8")
+    return resolved_output_path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build a cross-environment transfer suite from a winning factorial recipe.")
     parser.add_argument("--factorial-config", default="configs/factorial_holdout_suite/01_factorial_holdout.json")
     parser.add_argument("--recipe", required=True, help="Condition name from the factorial suite to treat as the best curriculum recipe.")
-    parser.add_argument("--output", default="configs/transfer_suite/01_cross_environment_transfer.json")
+    parser.add_argument("--output", help="Optional output config path. Defaults to configs/transfer_suite/<recipe>.json.")
+    parser.add_argument("--output-root", help="Optional runs root. Defaults to runs/transfer_suite/<config-stem>.")
     args = parser.parse_args()
 
     output_path = build_transfer_suite(
         factorial_config=Path(args.factorial_config),
         recipe_name=args.recipe,
-        output_path=Path(args.output),
+        output_path=Path(args.output) if args.output else None,
+        output_root=args.output_root,
     )
     print(output_path)
 
