@@ -803,8 +803,11 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
 def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
     condition_summaries = [summarize_condition(item) for item in condition_payloads]
 
-    same_model = [item for item in condition_summaries if item["same_model_matchup"]]
-    cross_model = [item for item in condition_summaries if not item["same_model_matchup"]]
+    non_curriculum_conditions = [
+        item for item in condition_summaries if not (item.get("curriculum_policy", {}) or {}).get("enabled")
+    ]
+    same_model = [item for item in non_curriculum_conditions if item["same_model_matchup"]]
+    cross_model = [item for item in non_curriculum_conditions if not item["same_model_matchup"]]
 
     def _avg_novelty(items: list[dict[str, Any]]) -> float:
         values: list[float] = []
