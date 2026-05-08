@@ -144,19 +144,19 @@ def aggregate_run_dirs(run_dirs: list[Path]) -> dict[str, Any]:
             same_model_policy_values.append(float(comparison["same_model_avg_policy_markers"]))
         if has_cross_model and "cross_model_avg_policy_markers" in comparison:
             cross_model_policy_values.append(float(comparison["cross_model_avg_policy_markers"]))
-        if "curriculum_avg_loop_count" in comparison:
+        if int(comparison.get("curriculum_condition_count", 0)) > 0 and "curriculum_avg_loop_count" in comparison:
             curriculum_loop_values.append(float(comparison["curriculum_avg_loop_count"]))
-        if "curriculum_avg_strategy_switches" in comparison:
+        if int(comparison.get("curriculum_condition_count", 0)) > 0 and "curriculum_avg_strategy_switches" in comparison:
             curriculum_switch_values.append(float(comparison["curriculum_avg_strategy_switches"]))
-        if "curriculum_avg_post_loss_novelty_spikes" in comparison:
+        if int(comparison.get("curriculum_condition_count", 0)) > 0 and "curriculum_avg_post_loss_novelty_spikes" in comparison:
             curriculum_spike_values.append(float(comparison["curriculum_avg_post_loss_novelty_spikes"]))
-        if "curriculum_avg_specific_adaptation" in comparison:
+        if int(comparison.get("curriculum_condition_count", 0)) > 0 and "curriculum_avg_specific_adaptation" in comparison:
             curriculum_adaptation_values.append(float(comparison["curriculum_avg_specific_adaptation"]))
-        if "curriculum_avg_behavior_cell_coverage" in comparison:
+        if int(comparison.get("curriculum_condition_count", 0)) > 0 and "curriculum_avg_behavior_cell_coverage" in comparison:
             curriculum_cell_values.append(float(comparison["curriculum_avg_behavior_cell_coverage"]))
-        if comparison.get("avg_primary_holdout_win_rate") is not None:
+        if int(comparison.get("evaluation_condition_count", 0)) > 0 and comparison.get("avg_primary_holdout_win_rate") is not None:
             primary_holdout_win_rate_values.append(float(comparison["avg_primary_holdout_win_rate"]))
-        if comparison.get("avg_primary_holdout_margin") is not None:
+        if int(comparison.get("evaluation_condition_count", 0)) > 0 and comparison.get("avg_primary_holdout_margin") is not None:
             primary_holdout_margin_values.append(float(comparison["avg_primary_holdout_margin"]))
         for condition in conditions:
             metadata = condition.get("metadata", {})
@@ -357,6 +357,25 @@ def _condition_by_name(aggregate_summary: dict[str, Any], name: str) -> dict[str
 def _aggregate_is_curriculum_only(aggregate_summary: dict[str, Any]) -> bool:
     conditions = aggregate_summary.get("conditions", [])
     return bool(conditions) and all(condition.get("learner_agent") for condition in conditions)
+
+
+def _condition_has_curriculum_metrics(condition: dict[str, Any]) -> bool:
+    learner_agent = str(condition.get("learner_agent", ""))
+    if not learner_agent:
+        return False
+    learner_metrics = condition.get("curriculum_metrics", {}).get(learner_agent, {})
+    return int(learner_metrics.get("loop_count", {}).get("count", 0)) > 0
+
+
+def _aggregate_has_curriculum_metrics(aggregate_summary: dict[str, Any]) -> bool:
+    return any(_condition_has_curriculum_metrics(condition) for condition in aggregate_summary.get("conditions", []))
+
+
+def _aggregate_has_primary_endpoint(aggregate_summary: dict[str, Any]) -> bool:
+    return any(
+        int(condition.get("primary_endpoint", {}).get("mean_win_rate", {}).get("count", 0)) > 0
+        for condition in aggregate_summary.get("conditions", [])
+    )
 
 
 def _min_rate(condition: dict[str, Any], metric_name: str) -> float:
@@ -625,6 +644,8 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
     conditions = aggregate_summary.get("conditions", [])
     if not conditions:
         return {}
+    has_curriculum_metrics = _aggregate_has_curriculum_metrics(aggregate_summary)
+    has_primary_endpoint = _aggregate_has_primary_endpoint(aggregate_summary)
 
     categories = [_display_condition_name(condition["condition_name"]) for condition in conditions]
     agent_names = sorted({agent for condition in conditions for agent in condition.get("agent_names", [])})
@@ -749,8 +770,13 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
 
     chart_paths: dict[str, str] = {}
     for spec in chart_specs:
+        metric_name = str(spec["metric_name"])
+        if metric_name.startswith("curriculum_metrics.") and not has_curriculum_metrics:
+            continue
+        if metric_name.startswith("primary_endpoint.") and not has_primary_endpoint:
+            continue
         series, error_ranges, labels = collect_stats(
-            spec["metric_name"],
+            metric_name,
             learner_only=bool(spec.get("learner_only", False)),
         )
         chart_path = output_dir / spec["name"]
@@ -765,7 +791,7 @@ def _build_aggregate_charts(output_dir: Path, aggregate_summary: dict[str, Any])
             error_ranges=error_ranges,
             percent_scale=bool(spec["percent_scale"]),
         )
-        chart_paths[spec["metric_name"]] = chart_path.name
+        chart_paths[metric_name] = chart_path.name
     return chart_paths
 
 
@@ -788,6 +814,8 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
         ]
     )
     curriculum_only = _aggregate_is_curriculum_only(aggregate_summary)
+    has_curriculum_metrics = _aggregate_has_curriculum_metrics(aggregate_summary)
+    has_primary_endpoint = _aggregate_has_primary_endpoint(aggregate_summary)
     same_novelty = aggregate_summary["cross_run_summary"]["same_model_avg_novelty"]
     cross_novelty = aggregate_summary["cross_run_summary"]["cross_model_avg_novelty"]
     same_markers = aggregate_summary["cross_run_summary"]["same_model_avg_policy_markers"]
@@ -818,15 +846,15 @@ def render_aggregate_report(aggregate_summary: dict[str, Any], chart_paths: dict
             lines.append(f"- {_format_stat('Cross-model rule-boundary indicators', cross_markers)}.")
         else:
             lines.append("- No cross-model rule-boundary indicator summary is available for this aggregate.")
-    if _has_samples(curriculum_loops):
+    if has_curriculum_metrics and _has_samples(curriculum_loops):
         lines.append(f"- {_format_stat('Curriculum loop count', curriculum_loops)}.")
         lines.append(f"- {_format_stat('Curriculum strategy switches', curriculum_switches)}.")
         lines.append(f"- {_format_stat('Curriculum post-loss novelty spikes', curriculum_spikes)}.")
         lines.append(f"- {_format_stat('Curriculum specific adaptation count', curriculum_adaptation)}.")
         lines.append(f"- {_format_stat('Curriculum behavior-cell coverage', curriculum_cells)}.")
-    if _has_samples(primary_holdout_win_rate):
+    if has_primary_endpoint and _has_samples(primary_holdout_win_rate):
         lines.append(f"- {_format_stat('Primary holdout win rate', primary_holdout_win_rate)}.")
-    if _has_samples(primary_holdout_margin):
+    if has_primary_endpoint and _has_samples(primary_holdout_margin):
         lines.append(f"- {_format_stat('Primary holdout score margin', primary_holdout_margin)}.")
     if len(aggregate_summary.get("suite_families", [])) > 1 or len(aggregate_summary.get("suite_types", [])) > 1:
         lines.append(

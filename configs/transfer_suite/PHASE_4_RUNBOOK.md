@@ -73,13 +73,13 @@ Skip the third command if you did not run the optional arm.
 Required two-arm comparison:
 
 ```powershell
-python analyze_causal_transfer.py --recipe-root runs\phase_4_transfer\rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_plus_nemesis_novelty_replay
+python analyze_causal_transfer.py --baseline-recipe rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_plus_nemesis_novelty_replay
 ```
 
 Optional three-arm comparison:
 
 ```powershell
-python analyze_causal_transfer.py --recipe-root runs\phase_4_transfer\rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_plus_nemesis_novelty_replay --recipe-root runs\phase_4_transfer\rotating_plus_replay_aware_selection
+python analyze_causal_transfer.py --baseline-recipe rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_plus_nemesis_novelty_replay --recipe-root runs\phase_4_transfer\rotating_plus_replay_aware_selection
 ```
 
 The script writes:

@@ -225,6 +225,44 @@ def _index_holdout_results(evaluation: dict[str, Any]) -> dict[str, dict[str, An
     return indexed
 
 
+def _has_run_dirs(path: Path) -> bool:
+    return any(candidate.is_dir() for candidate in path.glob("run_*"))
+
+
+def _discover_recipe_roots(root: Path) -> list[Path]:
+    if not root.exists():
+        raise FileNotFoundError(f"Runs root not found: {root}")
+    return sorted(
+        path.resolve()
+        for path in root.iterdir()
+        if path.is_dir() and path.name != "__pycache__" and _has_run_dirs(path)
+    )
+
+
+def _resolve_baseline_recipe(recipe_names: list[str], requested: str | None) -> str | None:
+    if requested:
+        if requested not in recipe_names:
+            available = ", ".join(sorted(recipe_names)) or "none"
+            raise ValueError(
+                f"Requested baseline recipe `{requested}` is not present in the loaded recipe roots. "
+                f"Available recipes: {available}."
+            )
+        return requested
+    if "rotating_opponents_holdout_endpoint" in recipe_names:
+        return "rotating_opponents_holdout_endpoint"
+    return None
+
+
+def _order_recipe_runs(recipe_runs: list[dict[str, Any]], baseline_recipe: str | None) -> list[dict[str, Any]]:
+    return sorted(
+        recipe_runs,
+        key=lambda item: (
+            0 if baseline_recipe and item["recipe_name"] == baseline_recipe else 1,
+            str(item["recipe_name"]),
+        ),
+    )
+
+
 def _load_recipe_runs(recipe_root: Path) -> dict[str, Any]:
     if not recipe_root.exists():
         raise FileNotFoundError(f"Recipe root not found: {recipe_root}")
@@ -517,7 +555,7 @@ def _failure_mode_findings(
             weakness_recipes = sorted(
                 recipe_name
                 for recipe_name, stats in by_recipe.items()
-                if float(stats["win_rate"]["mean"]) < 0.5 and float(stats["mean_score_margin"]["mean"]) <= 0.0
+                if float(stats["win_rate"]["mean"]) < 0.5
             )
             improvement_vs_baseline = None
             if baseline_recipe and baseline_recipe in by_recipe:
@@ -792,6 +830,11 @@ def _render_markdown(summary: dict[str, Any]) -> str:
         "## Scope",
         f"- Recipe roots analyzed: {', '.join(f'`{item}`' for item in summary['recipe_roots'])}.",
         f"- Recipes compared: {', '.join(_display_recipe(item) for item in recipe_names)}.",
+        (
+            f"- Baseline recipe for delta metrics: `{summary['baseline_recipe']}`."
+            if summary.get("baseline_recipe")
+            else "- Baseline recipe for delta metrics: none resolved; baseline-relative rows are omitted."
+        ),
         f"- Condition observations: {len(summary['observations'])}.",
         f"- Epoch-to-epoch transition rows: {len(summary['transitions'])}.",
         "",
@@ -835,12 +878,14 @@ def _render_markdown(summary: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def build_summary(recipe_roots: list[Path]) -> dict[str, Any]:
+def build_summary(recipe_roots: list[Path], *, baseline_recipe_name: str | None = None) -> dict[str, Any]:
     recipe_runs = [_load_recipe_runs(path.resolve()) for path in recipe_roots]
+    discovered_recipe_names = [item["recipe_name"] for item in recipe_runs]
+    baseline_recipe = _resolve_baseline_recipe(discovered_recipe_names, baseline_recipe_name)
+    recipe_runs = _order_recipe_runs(recipe_runs, baseline_recipe)
     recipe_names = [item["recipe_name"] for item in recipe_runs]
     observations = [row for item in recipe_runs for row in item["observations"]]
     transitions = [row for item in recipe_runs for row in item["transitions"]]
-    baseline_recipe = recipe_names[0] if recipe_names else None
     _attach_baseline_deltas(observations, baseline_recipe)
     return {
         "generated_at_local": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -871,7 +916,12 @@ def main() -> None:
     parser.add_argument(
         "--runs-root",
         default="runs/transfer_suite",
-        help="Fallback directory used when --recipe-root is omitted.",
+        help="Fallback directory used when --recipe-root is omitted. Only subdirectories that contain run_* children are treated as recipe roots.",
+    )
+    parser.add_argument(
+        "--baseline-recipe",
+        default=None,
+        help="Optional recipe name to treat as the baseline for delta metrics and baseline-relative findings. Defaults to rotating_opponents_holdout_endpoint when present.",
     )
     parser.add_argument(
         "--output-dir",
@@ -885,11 +935,11 @@ def main() -> None:
         recipe_roots = [(project_root / item).resolve() if not Path(item).is_absolute() else Path(item).resolve() for item in args.recipe_root]
     else:
         root = ((project_root / args.runs_root).resolve() if not Path(args.runs_root).is_absolute() else Path(args.runs_root).resolve())
-        recipe_roots = sorted(path.resolve() for path in root.iterdir() if path.is_dir() and path.name != "__pycache__")
+        recipe_roots = _discover_recipe_roots(root)
     if len(recipe_roots) < 2:
         raise ValueError("At least two recipe roots are required for causal transfer comparison.")
 
-    summary = build_summary(recipe_roots)
+    summary = build_summary(recipe_roots, baseline_recipe_name=str(args.baseline_recipe) if args.baseline_recipe else None)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_output = Path(args.output_dir).resolve() if args.output_dir else (recipe_roots[0].parent / f"causal_analysis_{timestamp}")
     base_output.mkdir(parents=True, exist_ok=True)

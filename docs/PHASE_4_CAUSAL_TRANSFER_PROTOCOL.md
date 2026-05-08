@@ -42,6 +42,7 @@ Optional third comparison:
 3. `rotating_plus_replay_aware_selection`
 
 Use identical seed offsets, identical transfer environments, and identical holdout panels for every compared recipe.
+When generating baseline-relative causal reports, make the baseline recipe explicit in the analysis command rather than relying on argument order.
 
 ## Endpoints
 
