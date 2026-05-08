@@ -5,6 +5,8 @@ This document defines the follow-on study after the first adversarial-curriculum
 1. `Phase 2b`: a holdout-first factorial ablation in the original resource-collection environment.
 2. `Phase 3`: cross-environment transfer of the best curriculum recipe.
 
+For the next step after the initial transfer result, use [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md).
+
 ## Why This Exists
 
 The earlier curriculum suite established that adversarial pressure can sustain adaptation, and that opponent diversity plus memory look more promising than simple mutation forcing. It did **not** yet settle three stronger questions:
@@ -112,3 +114,5 @@ The transfer-suite generator is [build_transfer_suite.py](C:/Users/kaaro/Documen
 If the factorial winner improves holdout win rate but does not transfer, the result is still valuable as an environment-specific curriculum finding.
 
 If the factorial winner also transfers across the added games, then the project can support a stronger methods claim about curriculum pressure for studying LLM-agent adaptation, rather than only a toy-grid result.
+
+If the transfer signal is promising but the mechanism remains unclear, the next phase is not another mechanism search. The next phase is paired replication, failure-mode profiling, and behavior-versus-novelty interpretation under [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md).

@@ -113,6 +113,7 @@ def build_transfer_suite(
     recipe_name: str,
     output_path: Path | None = None,
     output_root: str | None = None,
+    study_phase: str = "phase_3",
 ) -> Path:
     suite = SuiteConfig.load(factorial_config)
     source = next((condition for condition in suite.conditions if condition.name == recipe_name), None)
@@ -140,7 +141,7 @@ def build_transfer_suite(
         "metadata": {
             **_deep_copy(source_dict.get("metadata", {})),
             "suite_family": "transfer_suite",
-            "study_phase": "phase_3",
+            "study_phase": study_phase,
             "primary_endpoint": "holdout_win_rate",
             "recipe_source_condition": recipe_name,
             "environment_family": "multi_environment_transfer",
@@ -176,6 +177,7 @@ def main() -> None:
     parser.add_argument("--recipe", required=True, help="Condition name from the factorial suite to treat as the best curriculum recipe.")
     parser.add_argument("--output", help="Optional output config path. Defaults to configs/transfer_suite/<recipe>.json.")
     parser.add_argument("--output-root", help="Optional runs root. Defaults to runs/transfer_suite/<config-stem>.")
+    parser.add_argument("--study-phase", default="phase_3", help="Metadata label stored under study_phase. Use phase_4 for the causal-transfer replication phase.")
     args = parser.parse_args()
 
     output_path = build_transfer_suite(
@@ -183,6 +185,7 @@ def main() -> None:
         recipe_name=args.recipe,
         output_path=Path(args.output) if args.output else None,
         output_root=args.output_root,
+        study_phase=str(args.study_phase),
     )
     print(output_path)
 

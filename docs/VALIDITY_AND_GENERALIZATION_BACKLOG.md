@@ -46,6 +46,8 @@ Why this matters:
 
 Goal: reduce the chance that reported effects are artifacts of one seed, one run family, or one noisy comparison.
 
+The current operational path for this work is [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) plus [analyze_causal_transfer.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/analyze_causal_transfer.py).
+
 - [ ] Run at least three replicated live runs for every family used in claims.
 - [ ] Prefer five replicates for the strongest behavioral claims if cost allows.
 - [ ] Freeze the primary metrics before inspecting results.
@@ -91,6 +93,8 @@ Why this matters:
 ## 6. Improve Quality-Diversity Interpretation
 
 Goal: make diversity-aware selection claims more rigorous and less dependent on lexical novelty.
+
+The current operational path for this work is [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) plus [analyze_causal_transfer.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/analyze_causal_transfer.py).
 
 - [ ] Compare lexical novelty and behavioral novelty directly across accepted and rejected candidates.
 - [ ] Check whether behavior-cell coverage predicts held-out robustness better than code novelty.

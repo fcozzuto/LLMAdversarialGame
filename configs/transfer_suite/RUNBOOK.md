@@ -2,6 +2,8 @@
 
 This runbook covers supervisor request 3: test whether the best curriculum recipe transfers beyond the original resource-collection environment.
 
+If you already have an initial transfer signal and want the follow-on paired replication plus causal-interpretation phase, use [configs/transfer_suite/PHASE_4_RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/transfer_suite/PHASE_4_RUNBOOK.md) instead.
+
 ## Step 1: Choose the Best Factorial Recipe
 
 Use the factorial holdout aggregate to pick the winning recipe by the primary endpoint:

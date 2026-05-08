@@ -24,12 +24,14 @@ The design stays intentionally small:
 - `configs/factorial_holdout_suite/`: holdout-first factorial ablation bundle for recipe comparison.
 - `configs/transfer_suite/`: cross-environment transfer runbook plus the generated transfer suite.
 - `build_transfer_suite.py`: generate a transfer suite from the winning factorial recipe.
+- `analyze_causal_transfer.py`: paired-seed transfer comparison plus failure-mode and behavior-versus-novelty analysis for phase 4.
 - `review_novelty_spikes.py`: build a manual novelty-validation packet from completed runs.
 - `llm_grid_battle/`: game engine, sandbox, prompt builder, analysis, and SVG output.
 - `runs/`: generated artifacts.
 - `RESEARCH_CHECKLIST.md`: fixed research protocol and minimum publishable checklist.
 - `docs/CURRICULUM_V2_PROTOCOL.md`: phase-2 protocol for looping, plateauing, exploration, pressure response, curriculum, and holdout evaluation.
 - `docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md`: holdout-first factorial and cross-environment transfer protocol.
+- `docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md`: phase-4 protocol for paired transfer replication, opponent failure modes, and functional-adaptation analysis.
 - `docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md`: deferred checklist for metric validation, stronger evaluation, replication discipline, and broader generalization claims.
 
 ## Agent Interface
@@ -84,6 +86,7 @@ Expected keys:
 - Use [RESEARCH_CHECKLIST.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/RESEARCH_CHECKLIST.md) as the fixed protocol before making strong claims.
 - Use [docs/CURRICULUM_V2_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CURRICULUM_V2_PROTOCOL.md) when you are working on the adversarial-curriculum phase.
 - Use [docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md) when you are working on the holdout-first factorial study or the cross-environment transfer study.
+- Use [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) when you are working on the next causal-interpretation phase after the initial transfer result.
 - Use `configs/research_ablations_suite.json` when you want causal comparisons on feedback visibility or the generation scaffold.
 - Use `configs/research_controls_suite.json` when you want builtin baselines or frozen-agent controls.
 - Use `configs/research_cheating_opportunity_suite.json` when you want to test whether agents exploit undocumented observation fields that are present at runtime but omitted from the documented schema.
@@ -91,6 +94,7 @@ Expected keys:
 - Use [configs/curriculum_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/curriculum_suite/RUNBOOK.md) when you want the updated curriculum campaign with three replicated runs per family, replay-aware novelty gating, elite-archive selection, stronger holdout evaluation, and loss-triggered mutation as a controlled auxiliary ablation.
 - Use [configs/factorial_holdout_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/factorial_holdout_suite/RUNBOOK.md) when you want the six-condition holdout-first recipe comparison with five replicated seed offsets.
 - Use [configs/transfer_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/transfer_suite/RUNBOOK.md) after the factorial study, once you have selected the winning recipe and generated the transfer suite.
+- Use [configs/transfer_suite/PHASE_4_RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/transfer_suite/PHASE_4_RUNBOOK.md) when you want the paired phase-4 transfer replication and the causal-transfer analysis pass.
 - After collecting repeated runs, aggregate them with:
 
 ```powershell
@@ -126,3 +130,4 @@ For the full suite, it writes:
 - The default judge model is `gpt-4.1-mini`. It is a stable low-cost fallback for summary-style analysis that does not depend on GPT-5-family organization verification.
 - If you want offline smoke tests first, change providers in the config to `builtin` and use models like `nearest_resource`, `sweep_rows`, or `opponent_shadow`.
 - The transfer workflow assumes the factorial study identifies a winning recipe first; use `build_transfer_suite.py` to stamp that recipe into the cross-environment suite before running official transfer experiments.
+- `build_transfer_suite.py` now accepts `--study-phase`, which is useful when you want phase-specific metadata and separate run roots for follow-on replication campaigns such as phase 4.
