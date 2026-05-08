@@ -1,0 +1,152 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or [0, 0]
+    sx, sy = int(sx), int(sy)
+
+    def to_set(key):
+        s = set()
+        for p in (observation.get(key) or []):
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = int(p[0]), int(p[1])
+                if 0 <= x < w and 0 <= y < h:
+                    s.add((x, y))
+        return s
+
+    obstacles = to_set("obstacles")
+    self_t = to_set("self_territory")
+    opp_t = to_set("opponent_territory")
+    unclaimed = to_set("unclaimed_cells")
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def neighbors8(x, y):
+        for dx, dy in dirs:
+            if dx == 0 and dy == 0: 
+                continue
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny):
+                yield nx, ny
+
+    # Build strategic targets: unclaimed adjacent to us; else unclaimed adjacent to opponent (to counterclaim)
+    adj_to_us = set()
+    for x, y in self_t:
+        for nx, ny in neighbors8(x, y):
+            if (nx, ny) in unclaimed:
+                adj_to_us.add((nx, ny))
+    adj_to_opp = set()
+    for x, y in opp_t:
+        for nx, ny in neighbors8(x, y):
+            if (nx, ny) in unclaimed:
+                adj_to_opp.add((nx, ny))
+
+    candidates = adj_to_us if adj_to_us else (adj_to_opp if adj_to_opp else list(unclaimed) if unclaimed else [(w//2, h//2)])
+    # Deterministic target choice: minimize distance from our position; tie-breaker favors more "frontier-like" cells
+    def frontier_score(cell):
+        x, y = cell
+        # higher is better
+        s = 0
+        if cell in adj_to_us: s += 4
+        if cell in adj_to_opp: s += 2
+        # slight preference away from obstacles
+        for nx, ny in neighbors8(x, y):
+            if (nx, ny) in obstacles: s -= 1
+        return s
+
+    cx, cy = w // 2, h // 2
+    targets = sorted(candidates, key=lambda t: (abs(t[0]-sx)+abs(t[1]-sy), -frontier_score(t), (t[0]*31+t[1])%97, abs(t[0]-cx)+abs(t[1]-cy)))
+    target = targets[0]
+
+    # Pick move that best reduces distance to target, but also avoid stepping into obstacles if possible
+    best_move = [0, 0]
+    best_val = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny): 
+            continue
+        # engine will reject invalid by staying; we proactively penalize obstacle targets
+        penalty = 0
+        if (nx, ny) in obstacles: 
+            penalty += 100
+        # If we move into opponent territory, flipping is allowed: reward that
+        if (nx, ny) in opp_t:
+            penalty -= 5
+        # Small deterministic bias to move toward target
+        val = penalty + (abs(target[0]-nx) + abs(target[1]-ny]) * 10 + (1 if (nx, ny) == (sx, sy) else 0)
+        if best_val is None or val < best_val or (val == best_val and (dx, dy) < (best_move[0], best_move[1])):
+            best_val = val
+            best_move = [dx, dy]
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    def to_set(key):
+        s = set()
+        for p in (observation.get(key) or []):
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = int(p[0]), int(p[1])
+                if 0 <= x < w and 0 <= y < h:
+                    s.add((x, y))
+        return s
+
+    obstacles = to_set("obstacles")
+    self_t = to_set("self_territory")
+    opp_t = to_set("opponent_territory")
+    unclaimed = to_set("unclaimed_cells")
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+
+    def score_cell(x, y):
+        if not inb(x, y) or (x, y) in obstacles:
+            return -10**9
+        d_to_opp = abs(x - ox) + abs(y - oy)
+        d_to_self = abs(x - sx) + abs(y - sy)
+        if (x, y) in unclaimed:
+            adj_self = any((nx, ny) in self_t for nx in (x-1, x, x+1) for ny in (y-1, y, y+1) if (nx, ny) != (x, y) and inb(nx, ny))
+            adj_opp = any((nx, ny) in opp_t for nx in (x-1, x, x+1) for ny in (y-1, y, y+1) if (nx, ny) != (x, y) and inb(nx, ny))
+            return 2000 + (500 if adj_self else 0) + (300 if adj_opp else 0) - 2*d_to_self + d_to_opp
+        return -d_to_self + d_to_opp
+
+    target_adj = []
+    if unclaimed:
+        for x, y in self_t:
+            for dx, dy in dirs:
+                nx, ny = x + dx, y + dy
+                if (nx, ny) in unclaimed and (nx, ny) not in obstacles:
+                    target_adj.append((nx, ny))
+                    if len(target_adj) >= 8:
+                        break
+            if len(target_adj) >= 8:
+                break
+
+    if not target_adj and unclaimed:
+        for x, y in opp_t:
+            for dx, dy in dirs:
+                nx, ny = x + dx, y + dy
+                if (nx, ny) in unclaimed and (nx, ny) not in obstacles:
+                    target_adj.append((nx, ny))
+                    if len(target_adj) >= 8:
+                        break
+            if len(target_adj) >= 8:
+                break
+
+    best = (score_cell(sx, sy), 0, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            sc = score_cell(nx, ny)
+            if target_adj:
+                sc += 10000 - min(abs(nx - tx) + abs(ny - ty) for tx, ty in target_adj)
+            if sc > best[0]:
+                best = (sc, dx, dy)
+    return [int(best[1]), int(best[2])]

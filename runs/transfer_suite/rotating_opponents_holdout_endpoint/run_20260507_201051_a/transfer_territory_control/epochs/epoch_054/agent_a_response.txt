@@ -1,0 +1,127 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+    self_terr = set(map(tuple, observation.get("self_territory") or []))
+    opp_terr = set(map(tuple, observation.get("opponent_territory") or []))
+    unclaimed = observation.get("unclaimed_cells") or []
+    unclaimed_set = set(map(tuple, unclaimed))
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 0)]
+
+    # Pick a small deterministic candidate set of unclaimed cells: nearest to center and to us.
+    cand = []
+    if unclaimed:
+        scored = []
+        for x, y in unclaimed:
+            if (x, y) in self_terr:
+                continue
+            # Prefer center, but also reachable from our current location.
+            dc = abs(x - cx) + abs(y - cy)
+            du = abs(x - sx) + abs(y - sy)
+            scored.append((dc * 2.0 + du, x, y))
+        scored.sort()
+        cand = [(x, y) for _, x, y in scored[:25]]
+    if not cand:
+        # If nothing unclaimed, target either opponent territory or opponent position.
+        cand = [tuple(p) for p in (unclaimed[:1] or opp_terr)[:1]]
+        if not cand:
+            cand = [(ox, oy)]
+
+    def best_unclaimed_dist_from(cell):
+        x, y = cell
+        best = 10**9
+        for tx, ty in cand:
+            d = abs(tx - x) + abs(ty - y)
+            if d < best:
+                best = d
+        return best
+
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        cell = (nx, ny)
+        center_score = -(abs(nx - cx) + abs(ny - cy))
+        own_score = 4 if cell in self_terr else 0
+        unclaimed_score = 6 if cell in unclaimed_set else 0
+        opp_penalty = 0
+        if cell in opp_terr:
+            # Flipping is enabled; don't fully avoid, but prefer capturing paths toward center.
+            opp_penalty = 1
+
+        dist_to_goal = best_unclaimed_dist_from(cell)
+        goal_score = -dist_to_goal
+        # Slight bias: move that reduces distance to opponent encourages contesting their center claim.
+        opp_bias = -0.25 * (abs(nx - ox) + abs(ny - oy))
+
+        score = center_score + own_score + unclaimed_score + goal_score - opp_penalty + opp_bias
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width") or 8
+    h = observation.get("grid_height") or 8
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (0, 0)
+
+    raw_obs = observation.get("obstacles") or []
+    try:
+        obstacles = set(raw_obs)
+    except TypeError:
+        obstacles = set()
+
+    resources = observation.get("resources") or []
+    unclaimed = observation.get("unclaimed_cells") or []
+
+    cx, cy = (w - 1) // 2, (h - 1) // 2
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 0)]
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    targets = []
+    if resources:
+        try:
+            targets = list(resources)
+        except TypeError:
+            targets = []
+    if not targets and unclaimed:
+        try:
+            targets = list(unclaimed)
+        except TypeError:
+            targets = []
+
+    best = None
+    best_val = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        if (nx, ny) == (ox, oy):
+            continue
+        score = 0
+        if targets:
+            t = min(targets, key=lambda p: abs(p[0] - nx) + abs(p[1] - ny))
+            score -= 4 * dist((nx, ny), t)
+        score -= 1 * dist((nx, ny), (cx, cy))
+        score += 1 * dist((nx, ny), (ox, oy))
+        if best is None or score > best_val or (score == best_val and (dx, dy) < best):
+            best = (dx, dy)
+            best_val = score
+
+    return list(best) if best is not None else [0, 0]

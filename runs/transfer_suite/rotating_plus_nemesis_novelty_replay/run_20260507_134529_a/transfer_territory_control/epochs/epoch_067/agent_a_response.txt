@@ -1,0 +1,161 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    def to_set(key):
+        out = set()
+        for p in observation.get(key) or []:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = int(p[0]), int(p[1])
+                if 0 <= x < w and 0 <= y < h:
+                    out.add((x, y))
+        return out
+
+    obstacles = to_set("obstacles")
+    unclaimed = to_set("unclaimed_cells")
+    opp_terr = to_set("opponent_territory")
+    self_terr = to_set("self_territory")
+
+    # Center/pressure estimate from opponent territory
+    if opp_terr:
+        ax = sum(x for x, _ in opp_terr) / float(len(opp_terr))
+        ay = sum(y for _, y in opp_terr) / float(len(opp_terr))
+    else:
+        ax, ay = float(ox), float(oy)
+
+    def dist(x1, y1, x2, y2):
+        dx = x1 - x2
+        dy = y1 - y2
+        return (dx * dx + dy * dy)
+
+    # Candidate evaluation: 1-step greedy towards far-from-opponent unclaimed
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = None
+    best_score = -10**30
+
+    frontier = self_terr if self_terr else {(sx, sy)}
+    # pick a few target anchors deterministically to avoid full-grid search
+    un_list = sorted(unclaimed) if unclaimed else []
+    anchors = []
+    if un_list:
+        # choose up to 6 unclaimed far from opponent center
+        scored = [(dist(x, y, ax, ay), x, y) for x, y in un_list]
+        scored.sort(key=lambda t: (-t[0], t[1], t[2]))
+        for _, x, y in scored[:6]:
+            anchors.append((x, y))
+    else:
+        # no unclaimed: drift toward cells that extend away from opponent
+        anchors = sorted(list(frontier), key=lambda p: (-dist(p[0], p[1], ax, ay), p[0], p[1]))[:6]
+
+    # Precompute quick nearest-frontier distance for slight persistence
+    def min_frontier_d2(x, y):
+        md = 10**18
+        for fx, fy in frontier:
+            d = dist(x, y, fx, fy)
+            if d < md:
+                md = d
+        return md
+
+    opp_set = opp_terr
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        # Prefer moves that increase distance from opponent pressure and secure unclaimed.
+        d_away = dist(nx, ny, ax, ay)
+        d2_front = min_frontier_d2(nx, ny)
+
+        # If we can flip into opponent territory, allow it but only if it also moves away from their center.
+        on_opp = (nx, ny) in opp_set
+
+        # Unclaimed proximity incentive (direct hit highest)
+        hit_unclaimed = 1 if (nx, ny) in unclaimed else 0
+        near_un = 0
+        if anchors and unclaimed:
+            # small heuristic: closeness to best anchors
+            near_un = min(dist(nx, ny, ax2, ay2) for ax2, ay2 in anchors)
+
+        # Penalize staying close to opponent center unless it captures unclaimed
+        score = 0
+        score += d_away * 2.0
+        score += hit_unclaimed * 1000.0
+        if unclaimed:
+            score += -near_un * 0.02
+        if on_opp:
+            score += 150.0 * (d_away > dist(sx, sy, ax, ay))
+        # Encourage not jumping wildly far from current controlled area early
+       
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    try:
+        w, h = int(w), int(h)
+    except:
+        w, h = 8, 8
+
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    try:
+        sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    except:
+        sx, sy, ox, oy = 0, 0, w - 1, h - 1
+
+    def to_set(key):
+        s = set()
+        for p in observation.get(key) or []:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = p[0], p[1]
+                try:
+                    x, y = int(x), int(y)
+                except:
+                    continue
+                if 0 <= x < w and 0 <= y < h:
+                    s.add((x, y))
+        return s
+
+    obstacles = to_set("obstacles")
+    unclaimed = to_set("unclaimed_cells")
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best_move = (0, 0)
+    best_score = -10**30
+
+    def dsq(x1, y1, x2, y2):
+        dx, dy = x1 - x2, y1 - y2
+        return dx * dx + dy * dy
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        score = 0
+        if unclaimed:
+            if (nx, ny) in unclaimed:
+                score += 10**6
+            else:
+                score -= 10**3
+            # mild bias: prefer being farther from opponent while staying near unclaimed
+            nearest = None
+            for ux, uy in unclaimed:
+                d = dsq(nx, ny, ux, uy)
+                if nearest is None or d < nearest:
+                    nearest = d
+            if nearest is not None:
+                score += max(0, 200 - nearest)
+        score += dsq(nx, ny, ox, oy)  # avoid getting close
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]

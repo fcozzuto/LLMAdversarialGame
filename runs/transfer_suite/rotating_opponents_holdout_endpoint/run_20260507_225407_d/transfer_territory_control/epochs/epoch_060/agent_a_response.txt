@@ -1,0 +1,158 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    self_cells = set(map(tuple, observation.get("self_territory") or []))
+    opp_cells = set(map(tuple, observation.get("opponent_territory") or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells") or []))
+    self_count = int(observation.get("self_territory_count", 0) or 0)
+    opp_count = int(observation.get("opponent_territory_count", 0) or 0)
+    behind = self_count < opp_count
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs8 = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    neigh = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+
+    # Opponent edge cells (frontier)
+    opp_edges = []
+    if opp_cells:
+        for (x, y) in opp_cells:
+            for dx, dy in neigh:
+                nx, ny = x + dx, y + dy
+                if inb(nx, ny) and (nx, ny) not in opp_cells:
+                    opp_edges.append((x, y))
+                    break
+
+    # Choose target: attack if behind, else grab nearest unclaimed; fallback to opponent edge.
+    target_list = []
+    if behind and opp_edges:
+        target_list = opp_edges
+    if (not target_list) and unclaimed:
+        target_list = list(unclaimed)
+
+    def md(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    if not target_list:
+        target = (ox, oy)
+    else:
+        target = min(target_list, key=lambda c: md((sx, sy), c))
+        # If targeting unclaimed and opponent is closer, subtly prefer cutting their edge
+        if not behind and opp_edges:
+            cand = min(opp_edges, key=lambda c: md((sx, sy), c))
+            if md((sx, sy), cand) < md((sx, sy), target):
+                target = cand
+
+    best_move = [0, 0]
+    best_val = -10**18
+    for dx, dy in dirs8:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        pos = (nx, ny)
+        # Core heuristic: advance toward target; if moving into opponent, reward only when attacking.
+        dist_t = md(pos, target)
+        v = -10 * dist_t
+
+        if pos in unclaimed:
+            v += 6
+        if pos in self_cells:
+            v -= 1  # discourage wasting on already-owned
+        if pos in opp_cells:
+            v += 18 if behind else -6
+
+        # Add slight pressure toward opponent generally when behind, else toward safety (away from opponent)
+        d_opp = md(pos, (ox, oy))
+        v += (-0.5 * d_opp) if behind else (0.2 * d_opp)
+
+        # Tie-break deterministically: prefer moves that change position toward target,
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or [0, 0]
+    ox, oy = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def norm_pos(p):
+        if not p or len(p) < 2:
+            return None
+        x, y = int(p[0]), int(p[1])
+        return (x, y) if 0 <= x < w and 0 <= y < h else None
+
+    resources = [norm_pos(p) for p in (observation.get("resources") or [])]
+    resources = [p for p in resources if p is not None]
+
+    unclaimed = set()
+    for p in observation.get("unclaimed_cells") or []:
+        q = norm_pos(p)
+        if q is not None:
+            unclaimed.add(q)
+
+    neigh = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1), (0, 0)]
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist2(a, b):
+        dx = a[0] - b[0]
+        dy = a[1] - b[1]
+        return dx * dx + dy * dy
+
+    target = None
+    if resources:
+        target = min(resources, key=lambda p: dist2((sx, sy), p))
+    else:
+        if unclaimed:
+            best = None
+            bestd = 10**18
+            for dx, dy in neigh:
+                x, y = sx + dx, sy + dy
+                if ok(x, y) and (x, y) in unclaimed:
+                    d = dist2((x, y), (ox, oy))
+                    if d < bestd:
+                        bestd = d
+                        best = (x, y)
+            if best is not None:
+                target = best
+
+    best_move = [0, 0]
+    best_score = -10**18
+    for dx, dy in neigh:
+        x, y = sx + dx, sy + dy
+        if not ok(x, y):
+            continue
+        if target is not None:
+            score = -dist2((x, y), target)
+        else:
+            score = -dist2((x, y), (ox, oy))
+        if (x, y) in unclaimed:
+            score += 1000
+        if (x, y) == (ox, oy):
+            score += 5000
+        if score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+
+    return best_move

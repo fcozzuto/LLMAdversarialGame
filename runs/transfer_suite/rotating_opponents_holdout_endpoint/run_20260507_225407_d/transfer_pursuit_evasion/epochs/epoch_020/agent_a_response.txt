@@ -1,0 +1,167 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (0, 0)
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p is None:
+            continue
+        x, y = p
+        obstacles.add((int(x), int(y)))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def valid(x, y):
+        return inside(x, y) and (x, y) not in obstacles
+
+    def dist2(x1, y1, x2, y2):
+        dx = x1 - x2
+        dy = y1 - y2
+        return dx * dx + dy * dy
+
+    role = (observation.get("self_role") or "").lower()
+    we_are_pursuer = ("purs" in role) or ("hunter" in role) or ("chase" in role)
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    dirs = sorted(dirs)
+
+    # Opponent move model (deterministic): pursuer-like greedy toward us, otherwise evader-like greedy away.
+    opp_role = (observation.get("opponent_role") or "").lower()
+    opp_is_pursuer = ("purs" in opp_role) or ("hunter" in opp_role) or ("chase" in opp_role) or we_are_pursuer == False
+
+    def model_move(px, py, tx, ty, pursuer):
+        best = None
+        best_val = None
+        for dx, dy in dirs:
+            nx, ny = px + dx, py + dy
+            if not valid(nx, ny):
+                continue
+            d = dist2(nx, ny, tx, ty)
+            val = -d if pursuer else d
+            if best is None or val > best_val:
+                best_val = val
+                best = (nx, ny)
+        if best is None:
+            return (px, py)
+        return best
+
+    if we_are_pursuer:
+        # Chase directly; prefer moves that reduce distance and can reach opponent.
+        best = None
+        best_val = None
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            d = dist2(nx, ny, ox, oy)
+            val = -d  # larger is better
+            if best is None or val > best_val:
+                best_val = val
+                best = (nx, ny)
+        if best is None:
+            return [0, 0]
+        return [best[0] - sx, best[1] - sy]
+
+    # Evade: 1-step lookahead minmax vs modeled pursuer; otherwise fallback to farthest-corner.
+    best_move = (sx, sy)
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        # After our move, opponent moves (modeled) from its position toward/away from us.
+        resp_x, resp_y = model_move(ox, oy, nx, ny, opp_is_pursuer)
+        score = dist2(nx, ny, resp_x, resp_y)  # maximize distance after response
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = (nx, ny)
+
+    # If equal-ish, bias toward farthest corner from opponent.
+    corners = [(0, 0), (w - 1, 0), (w - 1, h - 1), (0, h - 1)]
+    far_corner = max(corners, key=lambda c: dist2(c[0], c[1], ox, oy))
+    bx, by = far_corner
+    if dist2(best_move[0], best_move[1],
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or (0, 0)
+    op = observation.get("opponent_position") or (0, 0)
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p is None:
+            continue
+        x, y = p
+        obstacles.add((int(x), int(y)))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    resources = observation.get("resources") or []
+    if resources and isinstance(resources[0], dict):
+        res_list = [(int(r.get("x", 0)), int(r.get("y", 0))) for r in resources if r is not None]
+    else:
+        res_list = []
+        for r in resources:
+            if r is None:
+                continue
+            if isinstance(r, dict):
+                res_list.append((int(r.get("x", 0)), int(r.get("y", 0))))
+            else:
+                res_list.append((int(r[0]), int(r[1])))
+
+    def ok(nx, ny):
+        return inside(nx, ny) and (nx, ny) not in obstacles
+
+    def dist2(x1, y1, x2, y2):
+        dx = x1 - x2
+        dy = y1 - y2
+        return dx * dx + dy * dy
+
+    if res_list:
+        best_rx, best_ry = None, None
+        best_adv = None
+        for rx, ry in res_list:
+            if not inside(rx, ry) or (rx, ry) in obstacles:
+                continue
+            ds = dist2(sx, sy, rx, ry)
+            do = dist2(ox, oy, rx, ry)
+            adv = ds - do  # smaller ds relative to do is better for us
+            if best_adv is None or adv < best_adv:
+                best_adv, best_rx, best_ry = adv, rx, ry
+    else:
+        best_rx, best_ry = ox, oy  # fallback: just manage distance
+
+    pursue = True
+    if best_rx is not None:
+        pursue = dist2(sx, sy, best_rx, best_ry) <= dist2(ox, oy, best_rx, best_ry)
+    else:
+        pursue = True
+
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        d_opp = dist2(nx, ny, ox, oy)
+        if pursue:
+            d_res = dist2(nx, ny, best_rx, best_ry) if best_rx is not None else 0
+            score = (-(d_res)) * 10 - d_opp
+        else:
+            score = d_opp - dist2(nx, ny, best_rx, best_ry) * 0.5 if best_rx is not None else d_opp
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

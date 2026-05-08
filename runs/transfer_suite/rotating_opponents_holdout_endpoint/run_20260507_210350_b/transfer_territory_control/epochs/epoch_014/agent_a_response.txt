@@ -1,0 +1,78 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    sx, sy = int(sx), int(sy)
+    obstacles_list = observation.get("obstacles") or []
+    resources_list = observation.get("resources") or []
+    unclaimed_list = observation.get("unclaimed_cells") or []
+    self_t_list = observation.get("self_territory") or []
+    opp_t_list = observation.get("opponent_territory") or []
+    ox, oy = observation.get("opponent_position", (sx, sy))
+    ox, oy = int(ox), int(oy)
+
+    def to_set(lst):
+        s = set()
+        for p in lst:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = p[0], p[1]
+                try:
+                    x, y = int(x), int(y)
+                except:
+                    continue
+                if 0 <= x < w and 0 <= y < h:
+                    s.add((x, y))
+        return s
+
+    obstacles = to_set(obstacles_list)
+    resources = to_set(resources_list)
+    unclaimed = to_set(unclaimed_list)
+    self_t = to_set(self_t_list)
+    opp_t = to_set(opp_t_list)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    moves = [(-1, 0), (0, -1), (0, 0), (0, 1), (1, 0), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    dirs4 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+    best_move = (0, 0)
+    best_sc = -10**18
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        sc = 0
+        cell = (nx, ny)
+        if cell in resources:
+            sc += 10
+        if cell in opp_t:
+            sc += 14
+        if cell in unclaimed:
+            sc += 6
+        if cell in self_t:
+            sc += 2
+
+        # Prefer moving toward the board center (opponent archetype tends to center-claim)
+        sc += - (abs(nx - cx) + abs(ny - cy))
+
+        # Expand from our frontier
+        adj_self = 0
+        for ax, ay in dirs4:
+            tx, ty = nx + ax, ny + ay
+            if 0 <= tx < w and 0 <= ty < h and (tx, ty) in self_t:
+                adj_self += 1
+        sc += adj_self * 2
+
+        # If contested, also prefer reducing distance to opponent position
+        dist_opp = abs(nx - ox) + abs(ny - oy)
+        sc += (6 - dist_opp) if cell in opp_t else (-dist_opp)
+
+        if sc > best_sc:
+            best_sc = sc
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

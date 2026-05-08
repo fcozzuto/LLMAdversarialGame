@@ -1,0 +1,147 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    sx, sy = int(sx), int(sy)
+
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells") or []))
+    opp_t = set(map(tuple, observation.get("opponent_territory") or []))
+    self_t = set(map(tuple, observation.get("self_territory") or []))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+
+    def adj_unclaimed(x, y):
+        c = 0
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)]:
+            if (x + dx, y + dy) in unclaimed:
+                c += 1
+        return c
+
+    # Targeting: prefer nearest unclaimed; if none, nearest opponent territory.
+    def centroid(cells):
+        if not cells: return None
+        xs = [p[0] for p in cells]; ys = [p[1] for p in cells]
+        return (sum(xs) / float(len(xs)), sum(ys) / float(len(ys)))
+    target = None
+    if unclaimed:
+        tx, ty = min(unclaimed, key=lambda p: (abs(p[0] - sx) + abs(p[1] - sy), abs(p[0] - (w - 1) / 2.0) + abs(p[1] - (h - 1) / 2.0)))
+        target = (tx, ty)
+    elif opp_t:
+        cc = centroid(opp_t)
+        target = cc
+
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    best = (0, 0)
+    best_sc = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny): 
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        sc = 0.0
+
+        if (nx, ny) in unclaimed:
+            sc += 5.0 + 0.7 * adj_unclaimed(nx, ny)
+        elif (nx, ny) in opp_t:
+            # Flipping on entry: good for reclaim/counterclaim.
+            sc += 3.5 + 0.3 * adj_unclaimed(nx, ny)
+        else:
+            sc += 1.0 * adj_unclaimed(nx, ny)
+
+        # Avoid getting trapped: penalize moves with many adjacent obstacles.
+        ao = 0
+        for ox, oy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)]:
+            tx, ty = nx + ox, ny + oy
+            if not inb(tx, ty) or (tx, ty) in obstacles:
+                ao += 1
+        sc -= 0.15 * ao
+
+        # Shape preference: stay closer to center early, but still chase target.
+        dist_center = abs(nx - cx) + abs(ny - cy)
+        sc += -0.05 * dist_center
+
+        if target is not None:
+            tx, ty = target
+            sc += -0.25 * (abs(nx - tx) + abs(ny - ty))
+        else:
+            sc += 0.02 * (1.0 if (nx, ny) in self_t else 0.0)
+
+        # Small deterministic tie-breaker to reduce oscillation: prefer straight over diagonal over stay.
+        tie = 0
+        if dx == 0 and dy == 0: tie = 2
+        elif dx != 0 and dy != 0: tie = 1
+        else: tie = 0
+        sc -= tie * 0.001
+
+        if sc > best_sc:
+            best_sc = sc
+            best = (dx, dy)
+
+   
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    try:
+        sx, sy = int(sx), int(sy)
+    except:
+        sx, sy = 0, 0
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    unclaimed = observation.get("unclaimed_cells") or []
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    opp = observation.get("opponent_position")
+    try:
+        ox, oy = (int(opp[0]), int(opp[1])) if opp is not None else (sx, sy)
+    except:
+        ox, oy = sx, sy
+
+    # Choose best target: nearest unclaimed, else nearest opponent.
+    target = None
+    bestd = None
+    for p in unclaimed:
+        px, py = p
+        try:
+            px, py = int(px), int(py)
+        except:
+            continue
+        d = abs(px - sx) + abs(py - sy)
+        if bestd is None or d < bestd or (d == bestd and (px, py) < target):
+            bestd = d
+            target = (px, py)
+    if target is None:
+        target = (ox, oy)
+
+    best = None
+    bestscore = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        # Prefer moving closer to target, break ties deterministically, avoid moving toward opponent when unclaimed exists.
+        dist_to_t = abs(nx - target[0]) + abs(ny - target[1])
+        dist_to_opp = abs(nx - ox) + abs(ny - oy)
+        toward_opp_pen = 0
+        if unclaimed:
+            toward_opp_pen = (-(dist_to_opp))  # larger dist_to_opp is better
+        score = dist_to_t + toward_opp_pen
+        key = (score, dist_to_opp, dx, dy)
+        if bestscore is None or key < bestscore:
+            bestscore = key
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

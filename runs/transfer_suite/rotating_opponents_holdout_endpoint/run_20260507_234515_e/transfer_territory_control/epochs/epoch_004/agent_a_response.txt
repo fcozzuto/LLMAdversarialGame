@@ -1,0 +1,151 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    obstacles = observation.get("obstacles", []) or []
+    obs = {(p[0], p[1]) for p in obstacles if isinstance(p, (list, tuple)) and len(p) == 2}
+    unclaimed = observation.get("unclaimed_cells", []) or []
+    un = {(p[0], p[1]) for p in unclaimed if isinstance(p, (list, tuple)) and len(p) == 2}
+    self_terr = observation.get("self_territory", []) or []
+    st = {(p[0], p[1]) for p in self_terr if isinstance(p, (list, tuple)) and len(p) == 2}
+    opp_terr = observation.get("opponent_territory", []) or []
+    ot = {(p[0], p[1]) for p in opp_terr if isinstance(p, (list, tuple)) and len(p) == 2}
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    adj8 = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def dist(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    def neigh_adjcount(cellset, x, y):
+        c = 0
+        for ddx, ddy in adj8:
+            nx, ny = x + ddx, y + ddy
+            if (nx, ny) in cellset:
+                c += 1
+        return c
+
+    # Prefer unclaimed cells that are on our expansion frontier
+    frontier = []
+    for x, y in un:
+        if not in_bounds(x, y):
+            continue
+        a = neigh_adjcount(st, x, y)
+        if a > 0:
+            frontier.append((x, y, a))
+
+    if frontier:
+        parity = observation.get("turn_index", 0) % 2
+        frontier.sort(key=lambda t: (dist(sx, sy, t[0], t[1]) - 3.5 * t[2], ((t[0] + 7 * t[1]) % 2) != parity))
+        tx, ty, _ = frontier[0]
+    else:
+        # If no safe expansion frontier, go steal: target nearest opponent territory cell
+        targets = list(ot) if ot else list(un)
+        if not targets:
+            return [0, 0]
+        parity = observation.get("turn_index", 0) % 2
+        tx, ty = min(targets, key=lambda t: (dist(sx, sy, t[0], t[1]), ((t[0] + 7 * t[1]) % 2) != parity))
+
+    # Choose best adjacent move towards target, avoid obstacles (stay allowed)
+    best = None  # (score, dx, dy)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not in_bounds(nx, ny) or (nx, ny) in obs:
+            continue
+        # Incentivize entering opponent-owned (flip-on-entry true) and unclaimed near our territory
+        gain = 0
+        if (nx, ny) in ot:
+            gain += 6
+        if (nx, ny) in un:
+            gain += 1 + 0.3 * neigh_adjcount(st, nx, ny)
+        # Keep moving deterministically towards target
+        score = dist(nx, ny, tx, ty) - gain * 10
+        if best is None or score < best[0]:
+            best = (score, dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[1], best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [sx, sy])
+    obstacles = observation.get("obstacles", []) or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            obs.add((p[0], p[1]))
+    unclaimed = observation.get("unclaimed_cells", []) or []
+    un = []
+    for p in unclaimed:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            x, y = p[0], p[1]
+            un.append((x, y))
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def dist(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    self_terr = observation.get("self_territory", []) or []
+    st = set()
+    for p in self_terr:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            st.add((p[0], p[1]))
+
+    opp_terr = observation.get("opponent_territory", []) or []
+    ot = set()
+    for p in opp_terr:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            ot.add((p[0], p[1]))
+
+    dirs = [(0, 0), (1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1)]
+    best = None
+    bestv = -10**9
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not in_bounds(nx, ny):
+            continue
+        d_un = 10**9
+        for x, y in un:
+            d = dist(nx, ny, x, y)
+            if d < d_un:
+                d_un = d
+        d_opp = dist(nx, ny, ox, oy)
+        adj_st = 0
+        adj_ot = 0
+        for ddx, ddy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            ax, ay = nx + ddx, ny + ddy
+            if (ax, ay) in st:
+                adj_st += 1
+            if (ax, ay) in ot:
+                adj_ot += 1
+        v = (-d_un if un else 0) + 0.8 * adj_st + 0.2 * d_opp - 0.6 * adj_ot
+        if v > bestv:
+            bestv = v
+            best = [dx, dy]
+
+    if best is None:
+        return [0, 0]
+    return best

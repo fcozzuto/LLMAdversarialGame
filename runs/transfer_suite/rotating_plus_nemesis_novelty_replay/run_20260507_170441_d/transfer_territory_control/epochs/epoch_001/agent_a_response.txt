@@ -1,0 +1,121 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = observation["obstacles"]
+    obs_set = set((x, y) for x, y in obstacles)
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    self_cells = set(map(tuple, observation["self_territory"]))
+    opp_cells = set(map(tuple, observation["opponent_territory"]))
+    unclaimed = set(map(tuple, observation["unclaimed_cells"]))
+
+    # Destination is what we would occupy after moving
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    opp_cells_copy = opp_cells  # local alias
+
+    # Precompute nearest unclaimed rough distance (small constant work)
+    # We'll compute min distance for up to 10 closest candidates to avoid scanning whole grid.
+    unc = list(unclaimed)
+    unc_sorted = sorted(unc, key=lambda p: abs(p[0] - sx) + abs(p[1] - sy))
+    unc_pick = unc_sorted[:10] if len(unc_sorted) > 0 else []
+
+    def nearest_unclaimed_dist(x, y):
+        if not unc_pick:
+            return 0
+        return min(abs(px - x) + abs(py - y) for px, py in unc_pick)
+
+    best = None
+    best_val = -10**9
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not in_bounds(nx, ny) or (nx, ny) in obs_set:
+            continue
+
+        cell = (nx, ny)
+        val = 0.0
+
+        # Territory gain
+        if cell in self_cells:
+            val += 0.15
+        elif cell in opp_cells_copy:
+            val += 2.25  # likely flip on entry
+        elif cell in unclaimed:
+            val += 1.25
+        else:
+            val += 0.75  # any other reachable (should be rare)
+
+        # Risk: if opponent can reach this cell immediately, discount
+        if max(abs(nx - ox), abs(ny - oy)) <= 1:
+            if cell in self_cells or cell in opp_cells_copy or cell in unclaimed:
+                val -= 0.9
+
+        # Strategic pressure: move toward unclaimed and away from opponent (slightly)
+        my_dist = nearest_unclaimed_dist(nx, ny)
+        opp_dist = min(abs(px - ox) + abs(py - oy) for px, py in unc_pick) if unc_pick else 0
+        # Encourage reducing my distance more than opponent's
+        val += (opp_dist - my_dist) * 0.05
+        val -= my_dist * 0.02
+
+        # Tie-break deterministically by fixed dir order
+        if val > best_val:
+            best_val = val
+            best = [dx, dy]
+
+    if best is None:
+        return [0, 0]
+    return best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = observation.get("obstacles", [])
+    obs_set = set((x, y) for x, y in obstacles)
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    unclaimed = observation.get("unclaimed_cells", [])
+    # Deterministically sample a few unclaimed targets closest to us
+    t = []
+    for p in unclaimed:
+        x, y = p
+        d = abs(x - sx) + abs(y - sy)
+        t.append((d, x, y))
+    t.sort()
+    targets = [(x, y) for _, x, y in t[:8]] if t else []
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    order = {d: i for i, d in enumerate(dirs)}
+    best_move = (0, 0)
+    best_val = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not in_bounds(nx, ny) or (nx, ny) in obs_set:
+            continue
+        # prefer moving away from opponent
+        dist_opp = abs(nx - ox) + abs(ny - oy)
+        # prefer moving toward unclaimed (small deterministic boost)
+        dist_unc = 0
+        if targets:
+            dist_unc = min(abs(nx - x) + abs(ny - y) for x, y in targets)
+        # also mildly prefer center
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        dist_center = abs(nx - cx) + abs(ny - cy)
+
+        val = dist_opp * 1000 + (-dist_unc) * 10 + (-dist_center)
+        if val > best_val or (val == best_val and order[(dx, dy)] < order[best_move]):
+            best_val = val
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    return [int(dx), int(dy)]

@@ -1,0 +1,149 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    turn = observation.get("turn_index", 0)
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    def best_free_step(tx, ty):
+        # choose lexicographically best among shortest steps to avoid invalids; deterministic
+        candidates = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = sx + dx, sy + dy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                    candidates.append((man(nx, ny, tx, ty), dx, dy))
+        if not candidates:
+            return (0, 0)
+        candidates.sort()
+        return (candidates[0][1], candidates[0][2])
+
+    moves = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    moves.sort()  # deterministic tie-breaking
+
+    if not resources:
+        # go to a corner that maximizes distance from opponent early, then drift to center
+        if (turn % 4) < 2:
+            corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+            # pick farthest from opponent; deterministic tie-break by coordinate order
+            best = None
+            bestd = -1
+            for cx, cy in corners:
+                d = man(cx, cy, ox, oy)
+                if d > bestd:
+                    bestd = d
+                    best = (cx, cy)
+            tx, ty = best
+        else:
+            tx, ty = (w // 2, h // 2)
+        dx, dy = best_free_step(tx, ty)
+        return [dx, dy]
+
+    # If multiple resources, select one with highest (opponent advantage relative to us)
+    # plus a strong incentive to reach immediately.
+    best_choice = None
+    best_val = -10**18
+    # deterministic iteration order
+    for rx, ry in sorted(resources):
+        ds = man(sx, sy, rx, ry)
+        do = man(ox, oy, rx, ry)
+        # score: immediate capture dominates, otherwise prefer states where we arrive earlier
+        if ds == 0:
+            val = 10**9
+        else:
+            # earlier is good; being tied/behind is bad; slight preference for closer resources overall
+            val = (do - ds) * 1000 - ds
+        # add tiny deterministic tie-break based on position and turn parity
+        val += ((rx * 31 + ry * 17 + turn) % 7) * 0.01
+        if val > best_val:
+            best_val = val
+            best_choice = (rx, ry)
+
+    target_x, target_y = best_choice
+    # Evaluate legal single-step moves by looking at resulting best resource advantage
+    best_move = (0, 0)
+    best_move_val = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obstacles:
+            continue
+        # compute advantage for the chosen target primarily; then check if another resource becomes strictly better
+        ds = man(nx, ny, target_x, target_y)
+        do = man(ox, oy, target_x, target_y)
+        if ds == 0:
+            v = 10**8
+        else:
+            v = (do - ds) * 1000 - ds
+
+        # opportunistic switch if it increases immediate or advantage
+        for rx, ry in resources:
+            if (rx, ry) == (target_x, target_y):
+                continue
+            ds2 = man(nx, ny, rx, ry)
+            if ds2 > ds + 2:
+                continue
+            do2 = man(ox, oy, rx, ry)
+            if ds2 == 0:
+                v = max(v, 10**8 + (rx - ox) * 0.001)
+            else:
+                v = max(v, (do2 - ds2) * 1000 - ds2)
+        # deterministic tie-break: smaller (dx,dy) in sorted moves already handled by iteration order
+        if v > best_move_val:
+            best_move_val = v
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles_list = observation.get("obstacles", []) or []
+    obstacles = set(tuple(p) for p in obstacles_list)
+    resources = observation.get("resources", []) or []
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    def legal_neighbors():
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = sx + dx, sy + dy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                    yield dx, dy, nx, ny
+
+    nbrs = list(legal_neighbors())
+    if not nbrs:
+        return [0, 0]
+
+    center = (w - 1) / 2.0, (h - 1) / 2.0
+
+    if resources:
+        tx, ty = min((tuple(r) for r in resources), key=lambda p: man(sx, sy, p[0], p[1]))
+        scored = []
+        for dx, dy, nx, ny in nbrs:
+            d = man(nx, ny, tx, ty)
+            scored.append((d, man(nx, ny, ox, oy), dx, dy))
+        scored.sort()
+        return [scored[0][2], scored[0][3]]
+
+    # No visible resources: keep distance from opponent; drift to center as tie-breaker.
+    scored = []
+    for dx, dy, nx, ny in nbrs:
+        dist_op = man(nx, ny, ox, oy)
+        dc = abs(nx - center[0]) + abs(ny - center[1])
+        scored.append((-dist_op, dc, dx, dy))
+    scored.sort()
+    return [scored[0][2], scored[0][3]]

@@ -1,0 +1,68 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set()
+    for o in observation.get("obstacles", []) or []:
+        if isinstance(o, (list, tuple)) and len(o) >= 2:
+            x, y = int(o[0]), int(o[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for r in observation.get("resources", []) or []:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    if not resources:
+        return [0, 0]
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    # Pick best resource by "capture advantage" (opp closer => worse for us)
+    # but with a bonus for closeness to prevent stalling.
+    best = None
+    for rx, ry in resources:
+        ds = man(sx, sy, rx, ry)
+        do = man(ox, oy, rx, ry)
+        adv = do - ds  # positive means we are closer
+        # tie-break: prefer smaller ds, then lower coords for determinism
+        key = (adv, -ds, -rx, -ry)
+        if best is None or key > best[0]:
+            best = (key, rx, ry)
+    _, tx, ty = best
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best_move = None
+    best_val = None
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        # Evaluate move: minimize distance to target, and avoid giving opponent an edge
+        ns = man(nx, ny, tx, ty)
+        nt = man(ox, oy, tx, ty)
+        # Also slightly prefer moves that reduce distance to the second-best resource deterministically
+        # by using minimal possible distance to any resource from (nx,ny).
+        min_any = 10**9
+        for rx, ry in resources[:min(6, len(resources))]:
+            d = man(nx, ny, rx, ry)
+            if d < min_any:
+                min_any = d
+        val = ( -ns, ns - nt, min_any, -nx, -ny)  # all higher is better due to tuple ordering above
+        if best_val is None or val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    if best_move is None:
+        return [0, 0]
+    return [int(best_move[0]), int(best_move[1])]

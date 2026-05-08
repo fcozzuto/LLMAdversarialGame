@@ -1,0 +1,167 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    rolestr = (observation.get("self_role", "") or "").lower()
+    is_evader = any(k in rolestr for k in ("evader", "escape", "flee", "runner"))
+    t = int(observation.get("turn_index", 0) or 0)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+
+    def cheb(x1, y1, x2, y2):
+        dx = x2 - x1
+        if dx < 0: dx = -dx
+        dy = y2 - y1
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def obs_penalty(x, y):
+        if not obstacles:
+            return 0
+        bestd = 999
+        for ax, ay in obstacles:
+            d = cheb(x, y, ax, ay)
+            if d < bestd:
+                bestd = d
+            if bestd <= 0:
+                return 10000
+        # discourage moving onto/adjacent to obstacles
+        if bestd <= 1:
+            return 500
+        if bestd == 2:
+            return 50
+        if bestd == 3:
+            return 10
+        return 0
+
+    # deterministic tie-break: rotate move ordering by parity
+    shift = t % len(moves)
+    ordered = moves[shift:] + moves[:shift]
+
+    best = None
+    best_score = None
+
+    # for evader, bias toward opposite corner from pursuer
+    corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+    if is_evader:
+        # choose corner farthest from pursuer as an attractor
+        far_corner = None
+        far_d = -1
+        for cx, cy in corners:
+            d = cheb(cx, cy, ox, oy)
+            if d > far_d:
+                far_d = d
+                far_corner = (cx, cy)
+
+    for dx, dy in ordered:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        d_to_opp = cheb(nx, ny, ox, oy)
+        d_opp_to_me = d_to_opp  # capture radius 0 implies immediate capture only if same cell; this is enough
+
+        score = 0
+        if is_evader:
+            # maximize distance from pursuer, also keep moving toward chosen far corner
+            score = d_to_opp * 100 - cheb(nx, ny, far_corner[0], far_corner[1]) * 3 if far_corner else d_to_opp * 100
+            # small penalty for "stalling"
+            if dx == 0 and dy == 0:
+                score -= 2
+            score -= obs_penalty(nx, ny)
+        else:
+            # pursuer: minimize distance to evader
+            score = -d_to_opp * 100 - cheb(nx, ny, ox, oy) * 0 + 0
+            # small penalty for stalling
+            if dx == 0 and dy == 0:
+                score -= 1
+            score -= obs_penalty(nx, ny)
+
+        if best_score is None or (score > best_score if is_evader else score > best_score):
+            best_score = score
+            best = (dx, dy)
+
+    if best is None:
+        # last resort: any valid move or stay
+        for dx, dy in ordered:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                return [dx, dy]
+        return [0, 0]
+    return [best[0], best[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    resources = observation.get("resources", None)
+    if resources is None:
+        resources = observation.get("resource_positions", None)
+    if resources is None:
+        resources = []
+    resources = [tuple(p) for p in (resources or [])]
+    sc = observation.get("scores", None)
+    s_self = sc[0] if isinstance(sc, (list, tuple)) and len(sc) > 0 else 0
+    s_opp = sc[1] if isinstance(sc, (list, tuple)) and len(sc) > 1 else 0
+    attack = s_self <= s_opp
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def cheb(x1, y1, x2, y2):
+        dx = x2 - x1
+        if dx < 0: dx = -dx
+        dy = y2 - y1
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+    def best_res_dist(x, y):
+        if not resources: return 999
+        bd = 999
+        for rx, ry in resources:
+            d = cheb(x, y, rx, ry)
+            if d < bd: bd = d
+            if bd == 0: return 0
+        return bd
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = None
+    bestv = -10**18
+    parity = (observation.get("turn_index", 0) or 0) & 1
+    if parity:
+        moves = [moves[4]] + moves[:4] + moves[5:]
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny): 
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        rd = best_res_dist(nx, ny)
+        od = cheb(nx, ny, ox, oy)
+        obs_pen = 0
+        for ax, ay in obstacles:
+            d = cheb(nx, ny, ax, ay)
+            if d == 0:
+                obs_pen = 10000
+                break
+            if d == 1: obs_pen += 180
+            elif d == 2: obs_pen += 50
+            elif d == 3: obs_pen += 10
+        v = 0
+        v += (200 - 60 * rd) if rd < 999 else -300
+        if attack:
+            v += 120 - 30 * od
+        else:
+            v += od
+        v -= obs_pen
+        if v > bestv or (v == bestv and (best is None or (dx, dy) < best)):
+            bestv = v
+            best = (dx, dy)
+    if best is None:
+        best = (0, 0)
+    return [int(best[0]), int(best[1])]

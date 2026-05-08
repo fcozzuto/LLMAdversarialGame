@@ -1,0 +1,136 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def free(x, y):
+        return inb(x, y) and (x, y) not in obs
+
+    dirs = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+    def cheb(a, b, c, d):
+        dx = a - c
+        if dx < 0: dx = -dx
+        dy = b - d
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    # No resources: step to maximize distance from opponent's corner direction while avoiding obstacles
+    if not resources:
+        best = None
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not free(nx, ny):
+                nx, ny = sx, sy
+            v = cheb(nx, ny, ox, oy)
+            key = (-v, nx, ny)
+            if best is None or key < best[0]:
+                best = (key, nx, ny)
+        return [best[1] - sx, best[2] - sy]
+
+    # Choose target by combined race pressure (not direct difference):
+    # prioritize: low self distance, but also reduce opponent access (via opponent distance term)
+    # and softly prefer nearer-to-center to keep flexibility.
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    rem = observation.get("remaining_resource_count", len(resources))
+    opp_weight = 0.8 if rem > 6 else 1.1  # shift toward denial when resources thin
+
+    def center_pen(x, y):
+        dx = x - cx
+        dy = y - cy
+        return (dx*dx + dy*dy)
+
+    targets = []
+    for rx, ry in resources:
+        sd = cheb(sx, sy, rx, ry)
+        od = cheb(ox, oy, rx, ry)
+        # lower is better
+        val = sd + opp_weight * (1 if od <= sd else 0) + 0.05 * center_pen(rx, ry)
+        # tie-break deterministically by position then by smaller sd
+        targets.append((val, sd, rx, ry, od))
+    targets.sort()
+    _, _, tx, ty, _ = targets[0]
+
+    # One-step lookahead: pick move that minimizes our distance to target,
+    # while also avoiding stepping into cells that are "too close" for opponent.
+    best_key = None
+    best_move = (0, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny):
+            nx, ny = sx, sy
+        self_d = cheb(nx, ny, tx, ty)
+        opp_to_target = cheb(ox, oy, tx, ty)
+        # If opponent is very close to the target, slightly prefer moves that increase their advantage.
+        # This steers differently than pure "interceptor" difference scoring.
+        threat = 0
+        if opp_to_target <= 2:
+            # penalty if we don't reduce our distance enough (we'd be late)
+            threat = (self_d - cheb(sx, sy, tx, ty))
+       
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = observation.get("obstacles") or []
+    resources = observation.get("resources") or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            obs.add((p[0], p[1]))
+
+    res = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) == 2:
+            res.append((r[0], r[1]))
+
+    dirs = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def free(x, y): return inb(x, y) and (x, y) not in obs
+    def dist(a, b, c, d):  # Chebyshev
+        dx = a - c
+        if dx < 0: dx = -dx
+        dy = b - d
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    if res:
+        res_set = set(res)
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if free(nx, ny) and (nx, ny) in res_set:
+                return [dx, dy]
+
+    best = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny):
+            continue
+        if res:
+            sd = min(dist(nx, ny, rx, ry) for rx, ry in res)
+            od = min(dist(ox, oy, rx, ry) for rx, ry in res)
+            # prefer smaller self distance and larger opponent distance
+            score = (od - sd) * 100 - sd
+        else:
+            # no resources: drift away from opponent
+            score = dist(nx, ny, ox, oy)
+        key = (-score, nx - sx, ny - sy)
+        if best is None or key < best[0]:
+            best = (key, dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[1], best[2]]

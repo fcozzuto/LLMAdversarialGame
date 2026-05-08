@@ -1,0 +1,138 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    obstacles = observation.get("obstacles", []) or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            obs.add((p[0], p[1]))
+
+    role = (observation.get("self_role") or "").lower()
+    pursuer = "pursuer" in role
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def legal(nx, ny):
+        return inb(nx, ny) and (nx, ny) not in obs
+
+    def cheb(x, y):
+        d1 = abs(x - ox)
+        d2 = abs(y - oy)
+        return d1 if d1 > d2 else d2
+
+    # As evader, pick targets that maximize escape from pursuer.
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    if pursuer:
+        # Drive toward the corner that makes us "compress" the evader (closer to walls).
+        tx, ty = max(corners, key=lambda c: (-(cheb(c[0], c[1])), -abs(c[0] - ox) - abs(c[1] - oy)))
+        # tie-safe: also prefer farther-from-us corner to reduce zigzags against wall-bounce
+        tx, ty = max(corners, key=lambda c: (cheb(c[0], c[1]), (c[0] == 0 or c[0] == w - 1) + (c[1] == 0 or c[1] == h - 1)))
+    else:
+        tx, ty = max(corners, key=lambda c: cheb(c[0], c[1]))
+
+    best = None
+    best_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+
+        dist_now = cheb(sx, sy)
+        dist_after = cheb(nx, ny)
+
+        on_capture = (nx == ox and ny == oy)
+        # If we're pursuer, capture is huge; if evader, avoid being captured.
+        if pursuer:
+            score = -10.0 * (0 if on_capture else 1)  # capture makes this 0; non-capture penalized less later
+            # Primary: minimize distance; Secondary: move toward target corner; Tertiary: avoid obstacles by preferring open mobility.
+            step_to_target = max(abs(nx - tx), abs(ny - ty))
+            # Prefer making both axes closer when possible (break diagonal oscillations).
+            axis_delta = (abs(nx - ox) - abs(sx - ox)) + (abs(ny - oy) - abs(sy - oy))
+            mobility = 0
+            for adx, ady in moves:
+                axx, ayy = nx + adx, ny + ady
+                if legal(axx, ayy):
+                    mobility += 1
+            score = (1e6 if on_capture else 0.0) + (dist_after * -3.0) + (step_to_target * -0.3) + (-axis_delta * 0.5) + (mobility * 0.05)
+        else:
+            # Evader: maximize distance and head to escape target; avoid moves that land on opponent.
+            score = (-1e6 if on_capture else 0.0) + (dist_after * 3.0) + (max(abs(nx - tx), abs(ny - ty)) * -0.2)
+            # Also avoid letting pursuer get strictly closer too quickly.
+            score += ((dist_now - dist_after) * -0.8)  # if we reduce dist to opponent, that's bad
+
+            mobility = 0
+            for adx, ady in moves:
+                axx, ayy = nx + adx, ny + ady
+                if legal(axx, ayy):
+                    mobility += 1
+            score += mobility * 0.03
+
+        key = (round(score, 6), dx, dy)
+        if best is None:
+            best =
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+
+    obs = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            obs.add((p[0], p[1]))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def legal(x, y):
+        return inb(x, y) and (x, y) not in obs
+
+    def dist(x, y):
+        dx = abs(x - ox)
+        dy = abs(y - oy)
+        return dx if dx > dy else dy
+
+    best = None
+    best_val = -10**9
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        d = dist(nx, ny)
+        corner_bonus = (nx == 0 or nx == w - 1) + (ny == 0 or ny == h - 1)
+        val = (d, corner_bonus, abs(nx - (w - 1) // 2) + abs(ny - (h - 1) // 2), -(abs(dx) + abs(dy)))
+        if val > best_val if isinstance(best_val, tuple) else False:
+            pass
+    # validator-safe deterministic selection with scalar comparisons
+    best_val = (-1, -1, -1, -1)
+    best_move = (0, 0)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        d = dist(nx, ny)
+        corner_bonus = (nx == 0 or nx == w - 1) + (ny == 0 or ny == h - 1)
+        mid_dist = abs(nx - (w - 1) // 2) + abs(ny - (h - 1) // 2)
+        val = (d, corner_bonus, mid_dist, -(abs(dx) + abs(dy)))
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    if legal(sx, sy):
+        return list(best_move) if best_move != (0, 0) else [0, 0]
+    # if stuck, return the first legal move (or stay if none)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if legal(nx, ny):
+            return [dx, dy]
+    return [0, 0]

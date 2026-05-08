@@ -1,0 +1,155 @@
+def choose_move(observation):
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    obst = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obst.add((x, y))
+
+    dirs = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obst:
+                dirs.append([dx, dy])
+    if not dirs:
+        return [0, 0]
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx >= dy else dy
+
+    res = []
+    for p in resources:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obst:
+                res.append((x, y))
+    if not res:
+        # No resources visible: move away from opponent if possible, else stay
+        best = [0, 0]
+        bestv = -10**9
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            v = cheb(nx, ny, ox, oy)
+            if v > bestv:
+                bestv = v
+                best = [dx, dy]
+        return best
+
+    # Pick target by relative reach advantage (my closer is better, opponent closer is worse).
+    # Add slight preference to closer resources to keep momentum deterministic.
+    best_t = res[0]
+    best_s = -10**18
+    for rx, ry in res:
+        dme = cheb(sx, sy, rx, ry)
+        doe = cheb(ox, oy, rx, ry)
+        s = (doe - dme) * 1000 - dme  # prioritize winning the race; tie-break by nearer
+        if s > best_s:
+            best_s = s
+            best_t = (rx, ry)
+
+    tx, ty = best_t
+
+    # If opponent is already much closer to chosen target, switch to best alternative.
+    dme = cheb(sx, sy, tx, ty)
+    doe = cheb(ox, oy, tx, ty)
+    if doe + 1 < dme:
+        best_t = res[0]
+        best_s = -10**18
+        for rx, ry in res:
+            dme2 = cheb(sx, sy, rx, ry)
+            doe2 = cheb(ox, oy, rx, ry)
+            s = (doe2 - dme2) * 1000 - dme2
+            if s > best_s:
+                best_s = s
+                best_t = (rx, ry)
+        tx, ty = best_t
+
+    # Move one step toward target, but discourage stepping closer to opponent when my advantage is small.
+    best = [0, 0]
+    bestv = -10**18
+    my_d = cheb(sx, sy, tx, ty)
+    adv = cheb(ox, oy, tx, ty) - my_d  # positive means I'm closer
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        nd = cheb(nx, ny, tx, ty)
+        opp_d = cheb(nx, ny, ox, oy)
+        v = (my_d - nd) * 1000 - nd
+        if adv < 1:
+            v += opp_d * 2  # keep distance if not clearly winning
+        if (nx, ny) == (tx, ty):
+            v += 10**7
+        if v > bestv:
+            bestv = v
+            best = [dx, dy]
+    return best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obst = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obst.add((x, y))
+
+    dirs = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obst:
+                dirs.append((dx, dy))
+    dirs = dirs if dirs else [(0, 0)]
+
+    def dist_cheb(ax, ay, bx, by):
+        ax -= bx
+        ay -= by
+        if ax < 0: ax = -ax
+        if ay < 0: ay = -ay
+        return ax if ax >= ay else ay
+
+    resources = []
+    for p in observation.get("resources", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obst:
+                resources.append((x, y))
+
+    best = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        d_opp = dist_cheb(nx, ny, ox, oy)
+        if resources:
+            d_res = min(dist_cheb(nx, ny, rx, ry) for rx, ry in resources)
+            d_best = d_res
+        else:
+            d_best = dist_cheb(nx, ny, ox, oy)  # if no resources, move away from opponent
+        score = (-d_best) + (0.15 * d_opp)
+        if score > best_score:
+            best_score = score
+            best = (dx, dy)
+        elif score == best_score:
+            if (dx, dy) < best:
+                best = (dx, dy)
+
+    return [int(best[0]), int(best[1])]

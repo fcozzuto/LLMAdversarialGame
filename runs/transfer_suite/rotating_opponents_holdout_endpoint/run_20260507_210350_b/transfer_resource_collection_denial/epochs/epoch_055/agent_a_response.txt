@@ -1,0 +1,149 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    resources = observation.get("resources", []) or []
+    obstacles = set()
+    for p in (observation.get("obstacles", []) or []):
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def dist(a, b):  # Chebyshev for diagonal efficiency
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+    if not resources:
+        tx, ty = w - 1, h - 1 if (sx + sy) < (w + h - 2) else 0, 0
+        dx = 0 if tx == sx else (1 if tx > sx else -1)
+        dy = 0 if ty == sy else (1 if ty > sy else -1)
+        return [dx, dy]
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    res_list = [(int(x), int(y)) for x, y in resources if inb(int(x), int(y))]
+
+    def cell_pen(x, y):
+        if (x, y) in obstacles:
+            return 1000
+        pen = 0
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            nx, ny = x + dx, y + dy
+            if (nx, ny) in obstacles:
+                pen += 2
+        return pen
+
+    # Choose move by maximizing immediate strategic advantage to a single target,
+    # while lightly biasing against staying in place.
+    best = None
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        pen = cell_pen(nx, ny)
+        if pen >= 1000:
+            continue
+
+        # Prefer the resource where we can arrive earlier than opponent; deterministic tie-break by coordinates.
+        my_pos = (nx, ny)
+        best_for_move = None
+        best_key = None
+        for rx, ry in res_list:
+            d_my = dist(my_pos, (rx, ry))
+            d_opp = dist((ox, oy), (rx, ry))
+            # Advantage: smaller d_my and larger gap to opponent
+            adv = d_opp - d_my
+            # Key: primarily maximize adv, then minimize d_my, then lexicographic
+            key = (-(adv), d_my, rx, ry)
+            if best_key is None or key < best_key:
+                best_key = key
+                best_for_move = (rx, ry, adv, d_my, d_opp)
+
+        rx, ry, adv, d_my, d_opp = best_for_move
+        # Encourage progress (moving) and discourage being too close to opponent only marginally.
+        move_bias = 0 if (dx == 0 and dy == 0) else 0.2
+        score = (1000 * adv) - (5 * d_my) + move_bias - pen + (1 if (nx, ny) == (rx, ry) else 0)
+        if score > best_score:
+            best_score = score
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    resources = observation.get("resources", []) or []
+    obstacles = set()
+    for p in (observation.get("obstacles", []) or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(a, b):
+        ax, ay = a
+        bx, by = b
+        da = ax - bx
+        db = ay - by
+        return da if da >= 0 else -da if False else max(da if da >= 0 else -da, db if db >= 0 else -db)
+
+    # fix cheb quickly without tricky expressions
+    def cheb(a, b):
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+    res_list = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if inb(x, y):
+                res_list.append((x, y))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    if res_list:
+        nearest = min(res_list, key=lambda t: cheb((sx, sy), t))
+    else:
+        nearest = (w - 1, h - 1)
+
+    best = None
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        to_res = cheb((nx, ny), nearest)
+        to_opp = cheb((nx, ny), (ox, oy))
+        # Favor moving toward resource; strongly avoid opponent when close; slight preference for progress.
+        score = -to_res * 10
+        if to_opp <= 1:
+            score -= 200
+        score += to_opp * 2
+        score += -abs(nx - nearest[0]) - abs(ny - nearest[1])
+        if best is None or score > best_score:
+            best_score = score
+            best = (dx, dy)
+
+    if best is None:
+        # fallback deterministic: try any legal move, else stay
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                return [int(dx), int(dy)]
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

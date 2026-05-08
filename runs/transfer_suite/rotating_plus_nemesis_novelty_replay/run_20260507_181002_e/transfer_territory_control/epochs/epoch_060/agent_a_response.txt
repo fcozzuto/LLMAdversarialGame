@@ -1,0 +1,183 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    def toset(v):
+        s = set()
+        for p in (v or []):
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                s.add((int(p[0]), int(p[1])))
+        return s
+
+    obstacles = toset(observation.get("obstacles"))
+    unclaimed = toset(observation.get("unclaimed_cells"))
+    selfT = toset(observation.get("self_territory"))
+    oppT = toset(observation.get("opponent_territory"))
+
+    if not unclaimed:
+        targets = sorted(list(oppT) + [tuple(observation.get("unclaimed_cells") or [])], key=lambda z: (0, z[0], z[1]))
+        if targets:
+            tx, ty = targets[-1] if targets[-1] else (sx, sy)
+        else:
+            return [0, 0]
+    else:
+        targets = list(unclaimed)
+
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+    neigh = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def dist(a, b, c, d):  # Chebyshev-ish for speed in diagonal grid
+        dx = abs(a - c)
+        dy = abs(b - d)
+        return dx if dx > dy else dy
+
+    # choose cell maximizing "net pressure": prefer close to self, far from opponent, and adjacent to self territory
+    best = None
+    best_score = -10**18
+    # deterministic iteration order
+    targets.sort(key=lambda z: (z[0], z[1]))
+    for tx, ty in targets:
+        if (tx, ty) in obstacles or not inside(tx, ty):
+            continue
+        ds = dist(sx, sy, tx, ty)
+        do = dist(ox, oy, tx, ty)
+        adj = 0
+        for dx, dy in neigh:
+            nx, ny = tx + dx, ty + dy
+            if (nx, ny) in selfT:
+                adj = 1
+                break
+        on_edge = (tx == 0 or ty == 0 or tx == w - 1 or ty == h - 1)
+        # encourage taking territory from the middle outward; also deny opponent by distance
+        score = (-2.2 * ds) + (1.8 * do) + (3.0 * adj) + (0.6 * on_edge) - 0.15 * (ds == 0)
+        # if opponent already owns most nearby, slightly reduce
+        if (tx, ty) in oppT:
+            score -= 5.0
+        if score > best_score:
+            best_score = score
+            best = (tx, ty)
+
+    if best is None:
+        return [0, 0]
+
+    tx, ty = best
+    # move one step (including stay) that best reduces distance to target while avoiding obstacles
+    candidates = []
+    for dx, dy in neigh:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        # prefer stepping onto/near opponent territory to flip (if allowed), else just approach target
+        step_to_target = dist(nx, ny, tx, ty)
+        step_from_op = dist(nx, ny, ox, oy)
+        flip_bonus = 0.0
+        if (nx, ny) in oppT:
+            flip_bonus = 6.0
+        candidates.append((step_to_target, -step_from_op, -flip_bonus, dx, dy))
+    if not candidates:
+        return [0, 0]
+    candidates.sort(key=lambda t: (t[0], t[1], t[2], t[3], t[4]))
+    return [int(candidates[0][3]), int(candidates[0][4])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    try:
+        w = int(w)
+        h = int(h)
+    except:
+        w, h = 8, 8
+
+    def get_xy(key, fallback):
+        v = observation.get(key)
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            try:
+                return int(v[0]), int(v[1])
+            except:
+                pass
+        if isinstance(fallback, (list, tuple)) and len(fallback) >= 2:
+            return int(fallback[0]), int(fallback[1])
+        return 0, 0
+
+    sx, sy = get_xy("self_position", [0, 0])
+    ox, oy = get_xy("opponent_position", [w - 1, h - 1])
+
+    obstacles_raw = observation.get("obstacles", None)
+    obs = set()
+    if obstacles_raw:
+        for p in obstacles_raw:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                try:
+                    obs.add((int(p[0]), int(p[1])))
+                except:
+                    pass
+
+    oppT = set()
+    oppT_raw = observation.get("opponent_territory", None)
+    if oppT_raw:
+        for p in oppT_raw:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                try:
+                    oppT.add((int(p[0]), int(p[1])))
+                except:
+                    pass
+
+    res_raw = observation.get("resources", None)
+    resources = []
+    if res_raw:
+        for p in res_raw:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                try:
+                    resources.append((int(p[0]), int(p[1])))
+                except:
+                    pass
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    best = None
+    bestv = None
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+        if (nx, ny) in obs:
+            continue
+
+        d_op = dist(nx, ny, ox, oy)
+        d_res = 0
+        if resources:
+            dmin = None
+            for rx, ry in resources:
+                d = dist(nx, ny, rx, ry)
+                if dmin is None or d < dmin:
+                    dmin = d
+            d_res = dmin if dmin is not None else 0
+        penalty = 0
+        if (nx, ny) in oppT:
+            penalty = 50
+
+        v = d_op + (0.35 * d_res) + penalty
+
+        if bestv is None or v < bestv or (v == bestv and (dx, dy) < best):
+            bestv = v
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[0], best[1]]

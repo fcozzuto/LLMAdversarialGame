@@ -1,0 +1,150 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources") or []
+    obs = set(tuple(p) for p in (observation.get("obstacles") or []))
+    dirs = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def free(x, y): return inb(x, y) and (x, y) not in obs
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2; dx = -dx if dx < 0 else dx
+        dy = y1 - y2; dy = -dy if dy < 0 else dy
+        return dx if dx > dy else dy
+
+    def eval_move(nx, ny):
+        if not free(nx, ny): nx, ny = sx, sy
+        best_adv = -10**18
+        best_selfd = 10**18
+        best_oppd = 10**18
+        target_is = None
+        for rx, ry in resources:
+            sd = cheb(nx, ny, rx, ry)
+            od = cheb(ox, oy, rx, ry)
+            adv = od - sd  # positive if we are closer than opponent
+            # Prefer positive advantage, then higher margin, then nearer.
+            key = (adv, -sd, -od, -sd)
+            if adv > 0:
+                cand = (adv * 1000 - sd * 10 - od, sd, od)
+                if cand[0] > best_adv or (cand[0] == best_adv and (sd < best_selfd or (sd == best_selfd and od < best_oppd))):
+                    best_adv = cand[0]; best_selfd = sd; best_oppd = od; target_is = (rx, ry)
+            else:
+                # Track nearest resource if no positive advantage exists
+                cand2 = (-sd, -od)
+                if target_is is None:
+                    best_adv = -10**18
+                    best_selfd = sd; best_oppd = od; target_is = (rx, ry)
+
+        if target_is is None:
+            return -10**18, 0, 0, nx, ny
+
+        rx, ry = target_is
+        sd = cheb(nx, ny, rx, ry)
+        od = cheb(ox, oy, rx, ry)
+        adv = od - sd
+
+        # If no positive advantage found, follow nearest resource; otherwise keep securing.
+        if adv > 0:
+            # Slightly prefer moves that also reduce our distance to that same target.
+            return best_adv + (10 - sd) - (sd != 0), adv, sd, nx, ny
+        else:
+            # Intercept: also consider opponent-nearest resource by maximizing how much we reduce distance to it.
+            best_opp_target = None
+            best_margin = -10**18
+            for tx, ty in resources:
+                od2 = cheb(ox, oy, tx, ty)
+                sd2 = cheb(nx, ny, tx, ty)
+                margin2 = od2 - sd2
+                if margin2 > best_margin:
+                    best_margin = margin2; best_opp_target = (tx, ty)
+            tx, ty = best_opp_target
+            sd2 = cheb(nx, ny, tx, ty)
+            return (-sd2 * 5 + best_margin), best_margin, sd2, nx, ny
+
+    if not resources:
+        # Fallback: move toward opponent-opposite corner-ish deterministically by reducing cheb to (ox, oy)
+        best = (0, 10**18, 0, 0)
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not free(nx, ny): nx, ny = sx, sy
+            v = cheb(nx, ny, ox, oy)
+            if v < best[1]:
+                best = (dx, v, dy, nx)
+        return [best[0], best[2]]
+
+    # Evaluate all moves and pick deterministic best
+    best_score = -10**18
+    best_move = [0, 0]
+    best_aux = (10**18, 10**18, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        score, adv, sd, _, _
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+    obs = set((p[0], p[1]) for p in obstacles)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def free(x, y):
+        return inb(x, y) and (x, y) not in obs
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    dirs = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    # Deterministically pick candidate resources (closest to either player), then score moves.
+    cand_res = []
+    for r in resources:
+        rx, ry = r[0], r[1]
+        sd = cheb(sx, sy, rx, ry)
+        od = cheb(ox, oy, rx, ry)
+        cand_res.append((min(sd, od), sd, od, rx, ry))
+    cand_res.sort()
+    cand_res = cand_res[:6] if len(cand_res) > 6 else cand_res
+    if not cand_res:
+        for d in dirs:
+            nx, ny = sx + d[0], sy + d[1]
+            if free(nx, ny):
+                return [d[0], d[1]]
+        return [0, 0]
+
+    best = None
+    for d in dirs:
+        nx, ny = sx + d[0], sy + d[1]
+        if not free(nx, ny):
+            continue
+        score = 0
+        # Maximize (opponent_distance - self_distance) to the best target; break ties deterministically.
+        local_best = None
+        for _, sd, od, rx, ry in cand_res:
+            sdn = cheb(nx, ny, rx, ry)
+            odn = od - sd + od  # stable-ish but avoid dependence; will be overwritten by exact below
+            odn = cheb(ox, oy, rx, ry)
+            adv = odn - sdn
+            key = (adv, -sdn, -odn, rx, ry)
+            if local_best is None or key > local_best:
+                local_best = key
+        score = local_best
+        if best is None or score > best:
+            best = score
+            best_move = d
+
+    if best is None:
+        return [0, 0]
+    return [best_move[0], best_move[1]]

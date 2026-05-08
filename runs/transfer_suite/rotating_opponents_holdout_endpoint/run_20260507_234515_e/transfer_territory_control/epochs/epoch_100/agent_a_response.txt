@@ -1,0 +1,170 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    sx, sy = int(sx), int(sy)
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p is None or len(p) < 2:
+            continue
+        obstacles.add((int(p[0]), int(p[1])))
+    self_terr = set()
+    for p in observation.get("self_territory") or []:
+        if p is None or len(p) < 2:
+            continue
+        self_terr.add((int(p[0]), int(p[1])))
+    opp_terr = set()
+    for p in observation.get("opponent_territory") or []:
+        if p is None or len(p) < 2:
+            continue
+        opp_terr.add((int(p[0]), int(p[1])))
+    unclaimed = set()
+    for p in observation.get("unclaimed_cells") or []:
+        if p is None or len(p) < 2:
+            continue
+        unclaimed.add((int(p[0]), int(p[1])))
+
+    ox = sy
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    # pick a small deterministic target set to keep fast
+    targets = []
+    for p in unclaimed:
+        x, y = p
+        # avoid corners far away; bias towards nearest frontier-ish cells
+        if len(targets) >= 12:
+            break
+        targets.append((x, y))
+    if not targets:
+        targets = list(unclaimed)[:12]
+
+    def nearest_dist(x, y, pts):
+        best = 10**9
+        for px, py in pts:
+            d = abs(px - x) + abs(py - y)
+            if d < best:
+                best = d
+        return best if pts else 0
+
+    # nearest obstacle distance for a soft penalty
+    obs_list = list(obstacles)
+
+    def nearest_obs_dist(x, y):
+        best = 10**9
+        for px, py in obs_list:
+            d = abs(px - x) + abs(py - y)
+            if d < best:
+                best = d
+        return best if obs_list else 10**9
+
+    best_score = -10**18
+    best_move = (0, 0)
+
+    # deterministic tie-breaker order via move list
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        score = 0
+        if (nx, ny) in opp_terr:
+            score += 8.0
+        elif (nx, ny) in unclaimed:
+            score += 4.0
+        elif (nx, ny) in self_terr:
+            score += 1.0
+
+        score += max(0, 6 - nearest_dist(nx, ny, targets)) * 0.6
+        # discourage hugging obstacles (prevents getting stuck)
+        dobs = nearest_obs_dist(nx, ny)
+        if dobs <= 1:
+            score -= 2.5
+        elif dobs <= 2:
+            score -= 1.0
+
+        # small bias to keep moving outward (avoid endless staying once choices exist)
+        if (dx, dy) != (0, 0):
+            score += 0.2
+
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or (0, 0)
+    op = observation.get("opponent_position") or (0, 0)
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    targets = []
+    for k in ("resources", "resource_positions", "remaining_resources"):
+        lst = observation.get(k)
+        if lst:
+            for p in lst:
+                if p and len(p) >= 2:
+                    t = (int(p[0]), int(p[1]))
+                    if inb(t[0], t[1]) and t not in obstacles:
+                        targets.append(t)
+            if targets:
+                break
+
+    if not targets:
+        for p in observation.get("unclaimed_cells") or []:
+            if p and len(p) >= 2:
+                t = (int(p[0]), int(p[1]))
+                if inb(t[0], t[1]) and t not in obstacles:
+                    targets.append(t)
+            if len(targets) >= 20:
+                break
+
+    if not targets:
+        targets = [(w // 2, h // 2)]
+
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    best_move = (0, 0)
+    best_score = -10**18
+    moves = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        nt = None
+        d_self = 10**9
+        d_opp = 10**9
+        for t in targets:
+            ds = abs(nx - t[0]) + abs(ny - t[1])
+            if ds < d_self:
+                d_self = ds
+                nt = t
+        if nt is not None:
+            d_opp = abs(ox - nt[0]) + abs(oy - nt[1])
+        score = 0
+        if nt is not None:
+            score += 1000 * (d_opp - d_self)  # prefer targets opponent is worse at
+        score += -d_self
+        score += 5 * (abs(nx - ox) + abs(ny - oy) < abs(sx - ox) + abs(sy - oy))  # slight avoidance
+        if score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+    return best_move

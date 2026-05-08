@@ -1,0 +1,172 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    resources = [tuple(p) for p in (observation.get("resources", []) or [])]
+
+    role = (str(observation.get("self_role", "")) + " " + str(observation.get("opponent_role", ""))).lower()
+    want_escape = ("evader" in role) or ("evade" in role) or ("runner" in role) or ("flee" in role) or ("evasion" in role)
+
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def valid(x, y):
+        return in_bounds(x, y) and (x, y) not in obstacles
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def obstacle_push(x, y):
+        # penalize moves that are adjacent to obstacles
+        cnt = 0
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if in_bounds(nx, ny) and (nx, ny) in obstacles:
+                cnt += 1
+        return cnt
+
+    def resource_term(x, y):
+        if not resources:
+            return 0.0
+        dmin = 10**9
+        for rx, ry in resources:
+            d = cheb(x, y, rx, ry)
+            if d < dmin:
+                dmin = d
+        # Keep small; pursuit/evasion dominates
+        return 1.0 / (1.0 + dmin)
+
+    # Deterministic tie-break: fixed move order as listed
+    best_move = [0, 0]
+    best_score = None
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+
+        d_now = cheb(nx, ny, ox, oy)
+        # simple opponent tendency: assume they try to reduce/raise distance depending on our role
+        # if we are evader -> opponent likely pursues -> coming closer hurts, so use d_now
+        # if we are pursuer -> opponent likely evades -> also use d_now, but invert sign
+        dist_score = d_now if want_escape else -d_now
+
+        # avoid crowding obstacles
+        crowd_pen = obstacle_push(nx, ny)
+
+        # if escaping, prefer moving to farther corner-like targets; if pursuing, prefer nearer to opponent
+        # using fixed corners targets deterministically
+        corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+        # For evader: maximize distance to the closest corner opposite of opponent's quadrant
+        # For pursuer: minimize distance to the opponent but also consider blocking with corner approach
+        if want_escape:
+            tx, ty = corners[0]
+            if ox >= w // 2 and oy < h // 2:
+                tx, ty = corners[2]  # (0,h-1)
+            elif ox < w // 2 and oy >= h // 2:
+                tx, ty = corners[1]  # (w-1,0)
+            elif ox >= w // 2 and oy >= h // 2:
+                tx, ty = corners[0]  # (0,0)
+            corner_score = cheb(nx, ny, tx, ty)
+        else:
+            # pursuer: bias toward the corner that is farthest from us? encourage trapping by approaching opponent and edges
+            # deterministic: use corner that minimizes distance from next to opponent corner-aligned
+            bestc = -10**9
+            for cx, cy in corners:
+                s = -cheb(nx, ny, cx, cy) + 0.1 * (-cheb(ox, oy, cx, cy))
+                if s > bestc:
+                    bestc = s
+            corner_score = bestc
+
+        score = dist_score + corner_score * (0.05 if not want_escape else 0.02) - crowd_pen * (0.25 if want_escape else
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obs_list = observation.get("obstacles", []) or []
+    obstacles = set(tuple(p) for p in obs_list)
+    res_list = observation.get("resources", []) or []
+    resources = [tuple(p) for p in res_list]
+
+    moves = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def valid(x, y):
+        return in_bounds(x, y) and (x, y) not in obstacles
+
+    def dist_cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    want_escape = False
+    role = (str(observation.get("self_role", "")) + " " + str(observation.get("opponent_role", ""))).lower()
+    if any(k in role for k in ("evade", "runner", "flee", "evasion", "evader")):
+        want_escape = True
+
+    best = None
+    best_score = -10**18
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        score = 0
+
+        if resources:
+            best_r = 10**9
+            for rx, ry in resources:
+                d = dist_cheb(nx, ny, rx, ry)
+                if d < best_r:
+                    best_r = d
+            score += 50 - 5 * best_r
+
+        dob = dist_cheb(nx, ny, ox, oy)
+        if want_escape:
+            score += 8 * dob - 2
+            if dob <= 1:
+                score -= 30
+        else:
+            score += -2 * dob
+            if dob <= 1:
+                score += 20
+
+        for adx, ady in moves:
+            ax, ay = nx + adx, ny + ady
+            if in_bounds(ax, ay) and (ax, ay) in obstacles:
+                score -= 2
+
+        score += (0 if dx == 0 and dy == 0 else 0)
+
+        if score > best_score:
+            best_score = score
+            best = [dx, dy]
+
+    if best is not None:
+        return best
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if valid(nx, ny):
+            return [dx, dy]
+    return [0, 0]

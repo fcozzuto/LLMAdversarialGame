@@ -1,0 +1,159 @@
+def choose_move(observation):
+    w = int(observation["grid_width"])
+    h = int(observation["grid_height"])
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    self_territory = set(tuple(p) for p in observation.get("self_territory", []) or [])
+    opp_territory = set(tuple(p) for p in observation.get("opponent_territory", []) or [])
+    unclaimed = [tuple(p) for p in (observation.get("unclaimed_cells", []) or [])]
+
+    dirs = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+
+    def md(a, b, c, d):
+        dx = a - c
+        if dx < 0: dx = -dx
+        dy = b - d
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    def centroid(pts):
+        if not pts:
+            return (ox, oy)
+        sx2 = 0
+        sy2 = 0
+        n = 0
+        for x, y in pts:
+            sx2 += x
+            sy2 += y
+            n += 1
+        return (sx2 // n, sy2 // n)
+
+    cox, coy = centroid(opp_territory)
+
+    myc = observation.get("self_territory_count", 0)
+    opc = observation.get("opponent_territory_count", 0)
+    we_need_pressure = myc <= opc
+
+    if unclaimed:
+        best = None
+        for tx, ty in unclaimed:
+            if (tx, ty) in obstacles:
+                continue
+            d_to_opp = md(tx, ty, cox, coy)
+            d_to_me = md(tx, ty, sx, sy)
+            boundary_w = 6 if we_need_pressure else 4
+            center_w = 1 if we_need_pressure else 2
+            score = boundary_w * d_to_opp + center_w * d_to_me
+            if best is None or score < best[0]:
+                best = (score, tx, ty)
+        tx, ty = best[1], best[2]
+    else:
+        tx, ty = cox, coy
+
+    best_move = (0, 0)
+    best_val = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        val = 0
+        d = md(nx, ny, tx, ty)
+        val += -3 * d
+
+        if (nx, ny) in opp_territory:
+            val += 3000 - 2 * md(nx, ny, ox, oy)
+        elif (nx, ny) in self_territory:
+            val += 25
+        else:
+            # unclaimed or empty: still valuable for territory expansion
+            if (nx, ny) in set(unclaimed):
+                val += 120
+            else:
+                val += 60
+
+        # keep a mild bias toward the opponent if behind
+        if we_need_pressure:
+            val += -md(nx, ny, cox, coy) // 2
+
+        # discourage oscillations around own position slightly
+        val += -md(nx, ny, sx, sy) // 4
+
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 0))
+    h = int(observation.get("grid_height", 0))
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    myc = int(observation.get("self_territory_count", 0) or 0)
+    opc = int(observation.get("opponent_territory_count", 0) or 0)
+    prefer_press = myc <= opc
+
+    unclaimed = observation.get("unclaimed_cells", []) or []
+    has_unclaimed = bool(unclaimed)
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    bestv = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+        if prefer_press:
+            t = dist(nx, ny, ox, oy)
+            v = -t
+        else:
+            if has_unclaimed:
+                # nearest unclaimed target
+                tmin = None
+                for p in unclaimed:
+                    if isinstance(p, (list, tuple)) and len(p) >= 2:
+                        tx, ty = int(p[0]), int(p[1])
+                        if 0 <= tx < w and 0 <= ty < h and (tx, ty) not in obstacles:
+                            t = dist(nx, ny, tx, ty)
+                            if tmin is None or t < tmin:
+                                tmin = t
+                v = -(tmin if tmin is not None else 10**9)
+            else:
+                # fallback: expand toward opponent's vicinity
+                v = -dist(nx, ny, ox, oy)
+        if bestv is None or v > bestv:
+            bestv = v
+            best = (dx, dy)
+    return [0, 0] if best is None else [int(best[0]), int(best[1])]

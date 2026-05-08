@@ -1,0 +1,162 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+    turns_remaining = observation.get("turns_remaining", 0)
+
+    obst = set()
+    for p in obstacles:
+        if p is not None and len(p) >= 2:
+            obst.add((p[0], p[1]))
+
+    def cheb(x1, y1, x2, y2):
+        ax = x1 - x2
+        if ax < 0:
+            ax = -ax
+        ay = y1 - y2
+        if ay < 0:
+            ay = -ay
+        return ax if ax > ay else ay
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obst
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    if not resources:
+        return [0, 0]
+
+    best_move = (0, 0)
+    best_val = -10**18
+
+    # Prefer moves that win a resource by reducing relative arrival time,
+    # and also avoid moving into "near-opponent zones" unless it secures a win.
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            nx, ny = sx, sy
+
+        my_sep = abs(nx - ox) + abs(ny - oy)
+        my_sep_pen = my_sep * 0.05
+
+        # If we can directly step on a resource, take it immediately.
+        direct_take = 0
+        for (rx, ry) in resources:
+            if nx == rx and ny == ry:
+                direct_take = 1
+                break
+
+        best_resource_gain = -10**18
+        for (rx, ry) in resources:
+            my_t = cheb(nx, ny, rx, ry)
+            op_t = cheb(ox, oy, rx, ry)
+
+            # Approximate "contested win" by comparing arrival times.
+            # If we arrive earlier, gain heavily; if later, penalize heavily.
+            delta = op_t - my_t  # positive => we arrive first (or equal with diagonal advantage)
+            # Prefer closer resources if delta is similar.
+            closeness = -my_t * 1.2
+
+            # Mild horizon awareness: if turns are short, prioritize nearer contested wins.
+            horizon = 1.0
+            if turns_remaining is not None:
+                tr = turns_remaining
+                if tr < 6:
+                    horizon = 1.6
+                elif tr < 12:
+                    horizon = 1.2
+
+            # Penalize if opponent is also very close to the same resource (hard contest).
+            op_pressure = 0
+            if op_t <= 2:
+                op_pressure = (2 - op_t) * 6.0
+
+            cand = delta * 120.0 * horizon + closeness - op_pressure - my_sep_pen
+
+            # Small deterministic tie-breaker toward resources more "central" to our side
+            # (keeps behavior stable).
+            center_bias = 0
+            if sx + ox != 0:
+                center_bias = -abs((rx - (w - 1) / 2.0)) * 0.01
+
+            if cand + center_bias > best_resource_gain:
+                best_resource_gain = cand + center_bias
+
+        val = best_resource_gain
+        if direct_take:
+            val += 10**7
+
+        # If values tie, deterministic preference order already via iteration order.
+        if val > best_val:
+            best_val = val
+            best_move = (dx if ok(sx + dx, sy + dy) else 0, dy if ok(sx + dx, sy + dy) else 0)
+
+    dx, dy = best_move
+    if not (-1 <= dx <= 1 and -1 <= dy <= 1):
+        dx, dy = 0, 0
+    return [int(dx), int(dy)]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obst = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            obst.add((p[0], p[1]))
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obst
+
+    def md(x1, y1, x2, y2):
+        d = x1 - x2
+        if d < 0:
+            d = -d
+        e = y1 - y2
+        if e < 0:
+            e = -e
+        return d + e
+
+    if not resources:
+        return [0, 0]
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            nx, ny = sx, sy
+        my_best = 10**18
+        opp_best = 10**18
+        for r in resources:
+            rx, ry = r[0], r[1]
+            myd = md(nx, ny, rx, ry)
+            oppd = md(ox, oy, rx, ry)
+            if myd < my_best:
+                my_best = myd
+            if oppd < opp_best:
+                opp_best = oppd
+        # Prefer moves that get closer, especially to resources where we are ahead.
+        score = (opp_best - my_best) * 1000 - my_best
+        if score > best_score:
+            best_score = score
+            best = (dx, dy)
+        elif score == best_score:
+            # deterministic tie-break: prefer not moving, then lexicographic dx,dy
+            if (dx, dy) == (0, 0) and best != (0, 0):
+                best = (dx, dy)
+            elif best is not None and (dx, dy) < best:
+                best = (dx, dy)
+
+    dx, dy = best
+    return [dx, dy]

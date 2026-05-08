@@ -1,0 +1,136 @@
+def choose_move(observation):
+    w = observation["grid_width"]; h = observation["grid_height"]
+    obstacles = set(tuple(p) for p in observation["obstacles"])
+    self_pos = observation["self_position"]; opp_pos = observation["opponent_position"]
+    self_t = set(map(tuple, observation["self_territory"]))
+    opp_t = set(map(tuple, observation["opponent_territory"]))
+    unclaimed = set(map(tuple, observation["unclaimed_cells"]))
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def dist(a, b): 
+        dx = a[0]-b[0]; dy = a[1]-b[1]
+        if dx < 0: dx = -dx
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    dirs = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+    # Find nearest unclaimed / opponent cell
+    target_unclaimed = None; best_du = 10**9
+    for c in unclaimed:
+        d = dist(self_pos, c)
+        if d < best_du: best_du = d; target_unclaimed = c
+    best_do = 10**9
+    for c in opp_t:
+        d = dist(self_pos, c)
+        if d < best_do: best_do = d
+
+    # Bias based on territory deficit
+    deficit = observation["opponent_territory_count"] - observation["self_territory_count"]
+
+    # Evaluate next moves
+    best_move = (0,0); best_score = -10**18
+    for dx, dy in dirs:
+        nx = self_pos[0] + dx; ny = self_pos[1] + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        cell = (nx, ny)
+        score = 0
+        if cell in self_t: score += 2
+        elif cell in unclaimed: score += 4
+        elif cell in opp_t: score += 7 + (3 if deficit >= 0 else 1)
+        else: score += 1  # other (should be rare)
+
+        # Prefer moving closer to expansion targets
+        if target_unclaimed is not None:
+            score += max(0, 6 - dist((nx,ny), target_unclaimed))
+        else:
+            score += max(0, 2 - dist((nx,ny), opp_pos))
+
+        # Avoid marching into opponent territory when behind badly (but still allow capture)
+        if cell in opp_t and deficit < 0:
+            score -= 1
+
+        # Keep distance from opponent to reduce being trapped; but tighter when deficit >=0
+        dpo = dist((nx,ny), opp_pos)
+        if deficit >= 0:
+            score += (dpo * 0.1) * 1
+        else:
+            score += (3 - dpo) * 0.2
+
+        # Slight preference for not staying still
+        if dx == 0 and dy == 0:
+            score -= 0.3
+
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    return [int(dx), int(dy)]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles_raw = observation.get("obstacles", [])
+    obstacles = set(tuple(p) for p in obstacles_raw)
+    resources = observation.get("resources", [])
+    # resources may be list of positions or dict-like; normalize to positions
+    rpos = []
+    if isinstance(resources, dict):
+        for p in resources.keys():
+            if isinstance(p, (list, tuple)) and len(p) == 2:
+                rpos.append((p[0], p[1]))
+    else:
+        for p in resources:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                rpos.append((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(a, b):
+        dx = a[0] - b[0]
+        if dx < 0: dx = -dx
+        dy = a[1] - b[1]
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+    opp_d = man((sx, sy), (ox, oy))
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    center = (cx, cy)
+
+    best = None
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        nd = man((nx, ny), (ox, oy))
+        # If adjacent to opponent, strongly prefer moving away
+        if opp_d <= 1:
+            score = nd * 1000
+        else:
+            if rpos:
+                nearest_r = 10**9
+                for rp in rpos:
+                    d = abs(nx - rp[0]) + abs(ny - rp[1])
+                    if d < nearest_r:
+                        nearest_r = d
+                score = -nearest_r * 10
+            else:
+                score = -(abs(nx - center[0]) + abs(ny - center[1])) * 2
+            # Mild opponent avoidance
+            score += nd * 2
+        # Deterministic tie-break: prefer staying if equal, else lower dx then lower dy
+        if best is None or score > best_score or (score == best_score and (dx, dy) > best[0]):
+            best_score = score
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

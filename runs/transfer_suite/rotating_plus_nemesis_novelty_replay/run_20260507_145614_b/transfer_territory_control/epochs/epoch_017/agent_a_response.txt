@@ -1,0 +1,118 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        if p and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    self_t = set(tuple(p) for p in (observation.get("self_territory") or []) if p and len(p) >= 2)
+    opp_t = set(tuple(p) for p in (observation.get("opponent_territory") or []) if p and len(p) >= 2)
+    unclaimed = [tuple(p) for p in (observation.get("unclaimed_cells") or []) if p and len(p) >= 2]
+
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def adj8(a, b):
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1])) == 1
+
+    # Targeting: steal from opponent if reachable; otherwise claim frontier unclaimed near opponent.
+    best = None
+    best_v = -10**30
+
+    cand_opp = list(opp_t)
+    if cand_opp:
+        for tx, ty in cand_opp:
+            if not inb(tx, ty) or (tx, ty) in obstacles:
+                continue
+            d = abs(tx - sx) + abs(ty - sy)
+            near_opp = 1 if adj8((tx, ty), (sx, sy)) else 0
+            # Prefer closest opponent cells, but also keep towards center to maintain control.
+            v = 2200.0 - 7.0 * d - 1.2 * (abs(tx - cx) + abs(ty - cy)) + (30.0 if (tx, ty) in self_t else 0)
+            # If already adjacent to their territory, boost.
+            v += 40.0 if any(adj8((tx, ty), o) for o in opp_t if o != (tx, ty)) else 0
+            if v > best_v:
+                best_v = v
+                best = (tx, ty)
+
+    if best is None:
+        # Take a deterministic subset of unclaimed; prefer those near opponent.
+        # Limit scan to keep fast and deterministic.
+        subset = unclaimed[:]
+        subset.sort(key=lambda p: (abs(p[0] - cx) + abs(p[1] - cy), (p[0], p[1])))
+        for tx, ty in subset[:40]:
+            if not inb(tx, ty) or (tx, ty) in obstacles:
+                continue
+            d = abs(tx - sx) + abs(ty - sy)
+            near_opp = 1 if any(adj8((tx, ty), o) for o in opp_t) else 0
+            # Cutoff/contesting: strong reward if adjacent to opponent territory.
+            v = 1200.0 - 6.0 * d - 1.0 * (abs(tx - cx) + abs(ty - cy)) + (260.0 if near_opp else 0)
+            if tx == sx or ty == sy:
+                v += 5.0
+            if v > best_v:
+                best_v = v
+                best = (tx, ty)
+
+    if best is None:
+        return [0, 0]
+
+    tx, ty = best
+    # Choose next step deterministically, preferring moves that reduce distance to target while not hitting obstacles.
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    pref = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        dist = max(abs(tx - nx), abs(ty - ny))
+        gain = (abs(tx - sx) + abs(ty - sy)) - (abs(tx - nx) + abs(ty - ny))
+        # Boost if stepping into opponent territory to flip quickly.
+        flip_bonus = 120.0 if (nx, ny) in opp_t else 0.0
+        # Slightly avoid staying still unless necessary.
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sp = observation.get("self_position", (0, 0))
+    op = observation.get("opponent_position", None) or sp
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obs = set()
+    for p in (observation.get("obstacles") or []):
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    bestd = 10**9
+
+    # Heuristic: chase opponent; if moving would hit obstacle, avoid it.
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obs:
+            continue
+        d = abs(nx - ox) + abs(ny - oy)
+        if d < bestd:
+            bestd = d
+            best = (dx, dy)
+
+    if best is not None:
+        return [best[0], best[1]]
+
+    # Fallback: move to any non-obstacle in-bounds, else stay.
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:
+            return [dx, dy]
+    return [0, 0]

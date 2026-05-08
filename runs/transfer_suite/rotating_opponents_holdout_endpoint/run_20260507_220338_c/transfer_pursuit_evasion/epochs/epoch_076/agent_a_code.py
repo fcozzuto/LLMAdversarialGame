@@ -1,0 +1,63 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    role_s = str(observation.get("self_role", "")).lower()
+    evader = not any(k in role_s for k in ("pursuer", "chaser", "catch", "pursuit"))
+
+    blocked = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            bx, by = int(p[0]), int(p[1])
+            if 0 <= bx < w and 0 <= by < h:
+                blocked.add((bx, by))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if r and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in blocked:
+                resources.append((rx, ry))
+
+    if resources:
+        tx, ty = min(resources, key=lambda t: abs(t[0] - sx) + abs(t[1] - sy))
+    else:
+        tx, ty = ox, oy
+
+    def step_towards(a, b):
+        if a < b:
+            return 1
+        if a > b:
+            return -1
+        return 0
+
+    candidates = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    best_score = -10**18
+
+    for dx, dy in candidates:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in blocked:
+            continue
+        res_score = 0
+        if resources:
+            d = abs(nx - tx) + abs(ny - ty)
+            res_score = -d * 10
+        opp_d = abs(nx - ox) + abs(ny - oy)
+        safety = opp_d * (12 if evader else -12)
+        center = -(abs(nx - (w // 2)) + abs(ny - (h // 2)))
+        score = res_score + safety + center
+        if score > best_score or best is None:
+            best_score = score
+            best = [dx, dy]
+
+    if best is not None:
+        return [int(best[0]), int(best[1])]
+
+    return [step_towards(sx, max(0, min(w - 1, tx))), step_towards(sy, max(0, min(h - 1, ty)))]

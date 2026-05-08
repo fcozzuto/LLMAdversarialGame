@@ -1,0 +1,151 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    unclaimed = []
+    for p in observation.get("unclaimed_cells") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                unclaimed.append((x, y))
+
+    opp_terr = set()
+    for p in observation.get("opponent_territory") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            opp_terr.add((int(p[0]), int(p[1])))
+
+    dirs = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    if (sx, sy) in obstacles:
+        return [0, 0]
+
+    def neighbors8(x, y):
+        out = []
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                out.append((nx, ny))
+        return out
+
+    # Prefer closest unclaimed; if empty, try to move into opponent frontier to flip.
+    targets = unclaimed
+    if not targets:
+        frontier = []
+        for (x, y) in opp_terr:
+            for nx, ny in neighbors8(x, y):
+                if (nx, ny) not in opp_terr and (nx, ny) not in obstacles:
+                    frontier.append((nx, ny))
+        targets = frontier
+
+    # If still empty, just head toward the far corner opposite opponent.
+    if not targets:
+        tx, ty = (0, h - 1) if (ox > (w - 1) // 2) else (w - 1, 0)
+        candidates = [(tx, ty)]
+    else:
+        # Down-select deterministically to keep simple scoring.
+        # Bias toward edge cells to control more area.
+        def edge_bias(x, y):
+            return (0 if (x not in (0, w - 1) and y not in (0, h - 1)) else -2)
+        targets2 = sorted(targets, key=lambda t: (edge_bias(t[0], t[1]), abs(t[0] - sx) + abs(t[1] - sy), t[0], t[1]))
+        candidates = targets2[:25]
+
+    best_move = (0, 0)
+    best_val = 10**9
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obstacles:
+            continue
+        # Choose a move that brings us closer to some target, but also avoid walking into opponent-owned cells too early.
+        val = 0
+        for i in range(len(candidates)):
+            tx, ty = candidates[i]
+            d_self = abs(nx - tx) + abs(ny - ty)
+            d_opp = abs(ox - tx) + abs(oy - ty)
+            # If opponent is already closer to that target, deprioritize.
+            val_i = d_self + 0.35 * (d_opp - (abs(sx - tx) + abs(sy - ty)))
+            # Small bonus for moving into unclaimed (immediate control).
+            if (nx, ny) in unclaimed:
+                val_i -= 1.5
+            # Small penalty for moving into opponent territory (can be good for flipping, but also risks being cut off).
+            if (nx, ny) in opp_terr:
+                val_i += 0.4
+            # Keep deterministic by taking min over a few best targets.
+            if i < 8:
+                val = min(val, val_i) if val else val_i
+        # Edge preference to grow lines.
+        if nx in (0, w - 1) or ny in (0, h - 1):
+            val -= 0.3
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    if (sx, sy) in obstacles:
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                return [dx, dy]
+        return [0, 0]
+
+    def manhattan(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    if resources:
+        tgt = min(resources, key=lambda r: (manhattan((sx, sy), r), r[1], r[0]))
+        best = None
+        best_val = None
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obstacles:
+                continue
+            d_t = manhattan((nx, ny), tgt)
+            d_o = manhattan((nx, ny), (ox, oy))
+            val = (d_t, -d_o, dy, dx)
+            if best_val is None or val < best_val:
+                best_val, best = val, (dx, dy)
+        return list(best) if best is not None else [0, 0]
+
+    best = None
+    best_val = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obstacles:
+            continue
+        d_o = manhattan((nx, ny), (ox, oy))
+        val = (-d_o, dy, dx)
+        if best_val is None or val < best_val:
+            best_val, best = val, (dx, dy)
+    return list(best) if best is not None else [0, 0]

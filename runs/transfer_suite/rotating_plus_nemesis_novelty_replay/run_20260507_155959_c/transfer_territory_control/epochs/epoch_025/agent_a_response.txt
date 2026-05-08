@@ -1,0 +1,162 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    sx, sy = (observation.get("self_position", [0, 0]) + [0, 0])[:2]
+    ox, oy = (observation.get("opponent_position", [w - 1, h - 1]) + [w - 1, h - 1])[:2]
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    self_cells = set(tuple(xy) for xy in (observation.get("self_territory", []) or []))
+    opp_cells = set(tuple(xy) for xy in (observation.get("opponent_territory", []) or []))
+    unclaimed = [tuple(xy) for xy in (observation.get("unclaimed_cells", []) or [])]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    neigh8 = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def step_to(p, q):
+        dx = 0 if q[0] == p[0] else (1 if q[0] > p[0] else -1)
+        dy = 0 if q[1] == p[1] else (1 if q[1] > p[1] else -1)
+        return (dx, dy)
+
+    # Build quick frontier set: cells adjacent to our territory, among unclaimed
+    adj_self = set()
+    for x, y in self_cells:
+        for dx, dy in neigh8:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny):
+                adj_self.add((nx, ny))
+    unclaimed_set = set(unclaimed)
+
+    best_move = (0, 0)
+    best_score = -10**9
+
+    # Candidate targets: prioritize unclaimed adjacent to us; then other unclaimed; then opponent cells
+    candidates = []
+    for t in unclaimed:
+        if t in obstacles or not inb(t[0], t[1]):
+            continue
+        prio = 3 if t in adj_self else 1
+        candidates.append((prio, t))
+    if not candidates:
+        for t in opp_cells:
+            if t in obstacles or not inb(t[0], t[1]):
+                continue
+            candidates.append((2, t))
+
+    # Deterministic selection among top candidates: evaluate only next-step from current to reduce cost
+    # If opponent is currently closer in expansion, bias toward their boundary cells via opponent adjacency targets
+    opp_adj = set()
+    for x, y in opp_cells:
+        for dx, dy in neigh8:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny):
+                opp_adj.add((nx, ny))
+
+    # Limit candidates deterministically by sorting keys
+    candidates.sort(key=lambda it: (-it[0], abs(it[1][0] - sx) + abs(it[1][1] - sy), it[1][0], it[1][1]))
+    candidates = candidates[:18]
+
+    for prio, (tx, ty) in candidates:
+        mv = step_to((sx, sy), (tx, ty))
+        dx, dy = mv
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        cell = (nx, ny)
+        # Heuristic: unclaimed > our cells (neutral) > opponent (flip) but avoid suicidal oscillation into enemy center
+        base = 0
+        if cell in unclaimed_set:
+            base = 40
+            if cell in adj_self:
+                base += 25
+        elif cell in opp_cells:
+            base = 28
+            # if move heads away from opponent center, reduce
+            base -= (abs(nx - ox) + abs(ny - oy)) * 0.2
+        elif cell in self_cells:
+            base = 10
+
+        # Proximity shaping toward target and toward opponent adjacency
+        base += prio * 8
+        base -= (abs(nx - tx) + abs(ny - ty)) * 1.5
+
+        # If target is near opponent boundary, add slight push
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    sx, sy = observation.get("self_position", [0, 0])[:2]
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])[:2]
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 0)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(a, b, c, d):
+        dx = a - c
+        dy = b - d
+        return dx * dx + dy * dy
+
+    resources = observation.get("resources", []) or []
+    target = None
+    bestd = 10**18
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = r[0], r[1]
+            if inb(x, y):
+                d = dist(sx, sy, x, y)
+                if d < bestd:
+                    bestd = d
+                    target = (x, y)
+
+    if target is None:
+        unclaimed = observation.get("unclaimed_cells", []) or []
+        bestd = 10**18
+        for u in unclaimed:
+            if isinstance(u, (list, tuple)) and len(u) >= 2:
+                x, y = u[0], u[1]
+                if inb(x, y):
+                    d = dist(sx, sy, x, y)
+                    if d < bestd:
+                        bestd = d
+                        target = (x, y)
+
+    if target is None:
+        target = (ox, oy)
+
+    tx, ty = target
+    cur_to_target = dist(sx, sy, tx, ty)
+
+    candidates = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        d = dist(nx, ny, tx, ty)
+        oppd = dist(nx, ny, ox, oy)
+        score = (cur_to_target - d) * 10 + oppd * 0.001
+        if (nx, ny) == target:
+            score += 1000
+        candidates.append((score, -oppd, dx, dy))
+    if not candidates:
+        return [0, 0]
+    candidates.sort(reverse=True)
+    return [int(candidates[0][2]), int(candidates[0][3])]

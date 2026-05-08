@@ -1,0 +1,140 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    self_role = (observation.get("self_role", "") or "").lower()
+    obstacles = observation.get("obstacles", []) or []
+    obs = set()
+    for o in obstacles:
+        if isinstance(o, (list, tuple)) and len(o) >= 2:
+            obs.add((int(o[0]), int(o[1])))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def valid(x, y): return inb(x, y) and (x, y) not in obs
+    def d2(x1, y1, x2, y2):
+        dx = x1 - x2
+        dy = y1 - y2
+        return dx * dx + dy * dy
+
+    pursuer = ("pursuer" in self_role) or ("tag" in self_role) or ("chaser" in self_role) or ("hunter" in self_role)
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    # Heuristic target for pursuer to cut off wall-running
+    if pursuer:
+        tx, ty = ox, oy
+        if ox == 0 or ox == w - 1:
+            tx = ox
+            ty = 0 if oy <= (h - 1) // 2 else h - 1
+        if oy == 0 or oy == h - 1:
+            ty = oy
+            tx = 0 if ox <= (w - 1) // 2 else w - 1
+        if (tx, ty) == (ox, oy):
+            # If opponent not on wall, bias toward its position
+            tx, ty = ox, oy
+        # Score: prefer smaller distance to opponent/target, then restrict opponent options indirectly
+        best = None
+        best_m = [0, 0]
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            # base: chase
+            s = d2(nx, ny, ox, oy)
+            # cutting/offense: distance to target point
+            s += 0.15 * d2(nx, ny, tx, ty)
+            # trap shaping: after our move, prefer reducing available neighbors for opponent position
+            opp_block = 0
+            for mdx, mdy in moves:
+                ax, ay = ox + mdx, oy + mdy
+                if not valid(ax, ay):
+                    opp_block += 1
+            # also mildly prefer moves that move toward tighter lines (lower "spread" with opponent)
+            spread = abs((nx - ox)) + abs((ny - oy))
+            s -= 0.05 * opp_block
+            s += 0.02 * spread
+            if best is None or s < best:
+                best = s
+                best_m = [dx, dy]
+        return best_m
+    else:
+        # Evader: flee pursuer position while trying to approach far corner; avoid obstacles deterministically
+        far_corner = max(corners, key=lambda c: d2(c[0], c[1], ox, oy))
+        # Prefer increasing distance to opponent, and also increasing distance to the best corner relative to opponent
+        best = None
+        best_m = [0, 0]
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            s = -d2(nx, ny, ox, oy)  # lower is better for evader; negate
+            s += 0.08 * d2(nx, ny, far_corner[0], far_corner[1])
+            # wall-running preference: stay on walls if it increases survival distance
+            wall_bonus = 0
+            if nx == 0 or nx == w - 1 or ny == 0 or ny == h - 1:
+                wall_bonus = -
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx = int(sx); sy = int(sy); ox = int(ox); oy = int(oy)
+    obstacles = observation.get("obstacles", []) or []
+    obs = set()
+    for o in obstacles:
+        if isinstance(o, (list, tuple)) and len(o) >= 2:
+            obs.add((int(o[0]), int(o[1])))
+
+    resources = observation.get("resources", []) or []
+    rpos = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rpos.append((int(r[0]), int(r[1])))
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    cx = (w - 1) / 2.0
+    cy = (h - 1) / 2.0
+
+    best = (float("-inf"), 0, 0)
+    has_res = len(rpos) > 0
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        score = 0
+        if has_res:
+            curd = 10**9
+            nd = 10**9
+            for rx, ry in rpos:
+                d0 = (sx - rx) * (sx - rx) + (sy - ry) * (sy - ry)
+                d1 = (nx - rx) * (nx - rx) + (ny - ry) * (ny - ry)
+                if d0 < curd: curd = d0
+                if d1 < nd: nd = d1
+            score += (curd - nd) * 3
+            score += -nd * 0.01
+        else:
+            score += -((nx - cx) * (nx - cx) + (ny - cy) * (ny - cy)) * 0.01
+
+        od = (nx - ox) * (nx - ox) + (ny - oy) * (ny - oy)
+        score += od * 0.002  # stay away from opponent
+
+        if (dx, dy) == (0, 0):
+            score -= 0.001  # slight bias to move when tied
+
+        if score > best[0]:
+            best = (score, dx, dy)
+
+    if best[1] == 0 and best[2] == 0:
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if ok(nx, ny):
+                return [int(dx), int(dy)]
+    return [int(best[1]), int(best[2])]

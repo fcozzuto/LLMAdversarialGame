@@ -1,0 +1,37 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (0, 0)
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    obst = set()
+    for p in (observation.get("obstacles") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obst.add((x, y))
+    srole = (observation.get("self_role") or "").lower()
+    evader = ("evad" in srole) or ("runner" in srole) or ("escape" in srole)
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    free = [c for c in corners if c not in obst] or corners
+    if evader:
+        tx, ty = max(free, key=lambda c: (c[0] - ox) * (c[0] - ox) + (c[1] - oy) * (c[1] - oy))
+        aim = 1
+    else:
+        tx, ty = max(free, key=lambda c: (c[0] - sx) * (c[0] - sx) + (c[1] - sy) * (c[1] - sy))
+        aim = -1
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    best_d = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obst:
+            continue
+        dtx = (nx - tx) * (nx - tx) + (ny - ty) * (ny - ty)
+        val = aim * dtx + (nx - ox) * (nx - ox) + (ny - oy) * (ny - oy) * (-aim)
+        if best is None or val > best_d:
+            best_d = val
+            best = (dx, dy)
+    return list(best) if best is not None else [0, 0]

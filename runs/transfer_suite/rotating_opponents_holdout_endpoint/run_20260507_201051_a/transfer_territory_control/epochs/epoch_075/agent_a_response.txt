@@ -1,0 +1,123 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    self_set = set((x, y) for x, y in (observation.get("self_territory") or []))
+    opp_set = set((x, y) for x, y in (observation.get("opponent_territory") or []))
+    unclaimed = set((x, y) for x, y in (observation.get("unclaimed_cells") or []))
+    resources = set()
+    for p in (observation.get("resources") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.add((x, y))
+
+    moves = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+
+    def clamp_valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def d2(ax, ay, bx, by):
+        dx, dy = ax - bx, ay - by
+        return dx * dx + dy * dy
+
+    # Prefer attacking: cells adjacent to opponent territory.
+    adj_targets = set()
+    for (x, y) in opp_set:
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                nx, ny = x + dx, y + dy
+                if clamp_valid(nx, ny) and (nx, ny) != (ox, oy):
+                    if (nx, ny) not in opp_set:
+                        adj_targets.add((nx, ny))
+
+    # Fallback: unclaimed near opponent, else center.
+    if not adj_targets:
+        if unclaimed:
+            adj_targets = set(sorted(unclaimed, key=lambda t: d2(t[0], t[1], ox, oy))[:8])
+        else:
+            cx, cy = w // 2, h // 2
+            adj_targets = set([(cx, cy), (w - 1, h - 1), (0, 0)])
+
+    best = (0, 0)
+    best_val = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not clamp_valid(nx, ny):
+            continue
+
+        # Heavy reward for direct counterclaim step.
+        if (nx, ny) in opp_set:
+            val = 10**6 - d2(nx, ny, ox, oy)
+        else:
+            # Otherwise, seek frontier/near-opponent, while avoiding getting stuck.
+            val = 0
+            if (nx, ny) in self_set:
+                val -= 50  # less useful than taking new ground
+            if (nx, ny) in unclaimed:
+                val += 200
+            if (nx, ny) in resources:
+                val += 80
+
+            # Target pressure: maximize closeness to best target, and prefer increasing opponent pressure.
+            t = min(adj_targets, key=lambda p: d2(nx, ny, p[0], p[1]))
+            val += 3 * (200 - d2(nx, ny, t[0], t[1]))  # smaller d2 => bigger
+            val += 2 * (200 - d2(nx, ny, ox, oy))       # closer to opponent => more likely flips later
+
+        # Slight tie-breaker: reduce distance to some reachable target and keep moving away
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    moves = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def best_step(tx, ty):
+        best = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            d = (nx - tx) * (nx - tx) + (ny - ty) * (ny - ty)
+            if best is None or d < best[0] or (d == best[0] and (dx, dy) < best[1]):
+                best = (d, (dx, dy))
+        return best[1] if best is not None else (0, 0)
+
+    resources = []
+    for p in (observation.get("resources") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+
+    if resources:
+        tx, ty = min(resources, key=lambda q: (q[0] - sx) * (q[0] - sx) + (q[1] - sy) * (q[1] - sy))
+        return best_step(tx, ty)
+    return best_step(ox, oy)

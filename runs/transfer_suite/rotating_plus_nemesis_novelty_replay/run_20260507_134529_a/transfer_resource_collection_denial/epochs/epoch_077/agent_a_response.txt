@@ -1,0 +1,153 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    obs = set()
+    for p in obstacles:
+        obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def free(x, y):
+        return inb(x, y) and (x, y) not in obs
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    if not resources:
+        best = None
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not free(nx, ny):
+                nx, ny = sx, sy
+            # move toward opponent to reduce their safety (interception bias)
+            v = -max(abs(nx - ox), abs(ny - oy))
+            cand = (v, abs(nx - ox) + abs(ny - oy), nx, ny)
+            if best is None or cand < best:
+                best = cand
+        return [best[2] - sx, best[3] - sy]
+
+    def manh(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    def cheb(a, b, c, d):
+        dx = abs(a - c)
+        dy = abs(b - d)
+        return dx if dx > dy else dy
+
+    def one_step_best(posx, posy, agent_is_self):
+        # Agent chooses move maximizing (their advantage) towards the best contested resource.
+        best_adv = None
+        best_move = (0, 0)
+        for dx, dy in dirs:
+            nx, ny = posx + dx, posy + dy
+            if not free(nx, ny):
+                nx, ny = posx, posy
+            adv = 0
+            for r in resources:
+                rx, ry = r[0], r[1]
+                d_self = manh(nx, ny, ox, oy) if agent_is_self else manh(nx, ny, sx, sy)
+                d_me = manh(nx, ny, rx, ry)
+                # For evaluation: we prefer moving closer to a resource, penalize giving opponent reach.
+                if agent_is_self:
+                    myd = d_me
+                    opd = manh(ox, oy, rx, ry)
+                    adv += (opd - myd) * 3 - cheb(nx, ny, rx, ry)
+                else:
+                    myd = d_me
+                    opd = manh(sx, sy, rx, ry)
+                    adv += (opd - myd) * 3 - cheb(nx, ny, rx, ry)
+            cand = (-adv, nx, ny, dx, dy)  # deterministic
+            if best_adv is None or cand < best_adv:
+                best_adv = cand
+                best_move = (nx - posx, ny - posy)
+        return best_move
+
+    # Opponent predicted next move (greedy one-step).
+    odx, ody = one_step_best(ox, oy, agent_is_self=False)
+    nox, noy = ox + odx, oy + ody
+    if not free(nox, noy):
+        nox, noy = ox, oy
+
+    best = None
+    best_move = (0, 0)
+
+    # Our move: maximize expected advantage vs predicted opponent position.
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny):
+            nx, ny = sx, sy
+
+        score = 0
+        # Prefer resources where we become strictly closer than predicted opponent.
+        for r in resources:
+            rx, ry = r[0], r[1]
+            myd = manh(nx, ny, rx, ry)
+            opd = manh(nox, noy, rx, ry)
+            slack = opd - myd
+            score += slack * 10
+            # Slight additional push for reachability (diagonal/cheb closeness).
+            score += (cheb(nx, ny, rx, ry) * -1)
+            # If we can land on a resource, prioritize heavily.
+            if (nx, ny) == (rx, ry):
+                score += 1000
+
+        # Tie-break: choose move that also reduces our distance to any resource most.
+        my_best_d = None
+        for r in resources:
+            rx, ry = r[0], r[1]
+            d = manh(nx, ny, rx, ry)
+            if my_best_d is None or d < my_best_d:
+                my_best_d = d
+        cand = (-score, my_best_d, nx, ny)  #
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obs = observation.get("obstacles") or []
+    blocked = {(p[0], p[1]) for p in obs}
+    resources = observation.get("resources") or []
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def free(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in blocked
+
+    def score_cell(x, y):
+        if resources:
+            bestd = 10**9
+            bestr = 0
+            for r in resources:
+                rx, ry = r[0], r[1]
+                d = abs(x - rx) + abs(y - ry)
+                if d < bestd:
+                    bestd = d
+                    bestr = r[2] if len(r) > 2 else 1
+            # Prefer being closer; break ties by preferring cells closer to opponent (denying)
+            return bestd - 0.1 * bestr - 0.01 * (abs(x - ox) + abs(y - oy))
+        # No resources: chase/intercept by minimizing distance to opponent
+        return abs(x - ox) + abs(y - oy)
+
+    best = None
+    best_pos = (sx, sy)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny):
+            continue
+        s = score_cell(nx, ny)
+        if best is None or s < best:
+            best = s
+            best_pos = (nx, ny)
+
+    dx, dy = best_pos[0] - sx, best_pos[1] - sy
+    if dx < -1: dx = -1
+    if dx > 1: dx = 1
+    if dy < -1: dy = -1
+    if dy > 1: dy = 1
+    return [int(dx), int(dy)]

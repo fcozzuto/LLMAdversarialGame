@@ -1,0 +1,164 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+
+    def to_xy(v, default=(0, 0)):
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            return (int(v[0]), int(v[1]))
+        if isinstance(v, dict):
+            p = v.get("position", v.get("pos", None))
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                return (int(p[0]), int(p[1]))
+        return default
+
+    sx, sy = to_xy(observation.get("self_position", None), (0, 0))
+    ox, oy = to_xy(observation.get("opponent_position", None), (sx, sy))
+
+    obs = set()
+    for o in observation.get("obstacles", []) or []:
+        if o is None:
+            continue
+        x, y = to_xy(o, None)
+        if x is None:
+            continue
+        if 0 <= x < w and 0 <= y < h:
+            obs.add((x, y))
+
+    resources = []
+    for r in observation.get("resources", []) or []:
+        if r is None:
+            continue
+        x, y = to_xy(r, None)
+        if x is None:
+            continue
+        if 0 <= x < w and 0 <= y < h and (x, y) not in obs:
+            resources.append((x, y))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    if not resources:
+        # deterministic fallback: drift toward center away from opponent
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        best = (-10**18, 0, 0)
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+            # prefer increasing distance to opponent and toward center
+            sc = (abs(nx - ox) + abs(ny - oy)) * 2 - (abs(nx - cx) + abs(ny - cy))
+            if sc > best[0]:
+                best = (sc, dx, dy)
+        return [best[1], best[2]]
+
+    # choose target using opponent-vs-self distance advantage
+    best_target = resources[0]
+    best_key = (-10**18, 10**18)
+    for tx, ty in resources:
+        sd = abs(tx - sx) + abs(ty - sy)
+        od = abs(tx - ox) + abs(ty - oy)
+        key = (od - sd, sd)
+        if key > best_key:
+            best_key = key
+            best_target = (tx, ty)
+
+    tx, ty = best_target
+
+    # evaluate next-step moves
+    best = (-10**18, 0, 0)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        self_d = abs(tx - nx) + abs(ty - ny)
+        opp_d = abs(tx - ox) + abs(ty - oy)
+
+        # reward immediate pickup / proximity; also prevent paths opening behind obstacles
+        pickup = 1 if (nx, ny) == (tx, ty) else 0
+        # if another resource is closer, account for it
+        best_adv = -10**18
+        for rx, ry in resources:
+            d1 = abs(rx - nx) + abs(ry - ny)
+            d0 = abs(rx - ox) + abs(ry - oy)
+            best_adv = max(best_adv, (d0 - d1, -d1))
+        # small deterministic preference: reduce manhattan to target, break ties by move order
+        sc = (pickup * 1000) + (best_adv[0] * 10) + (opp_d - self_d) - (self_d * 1.5) + (dx * 0 + dy * 0)
+        if sc > best[0]:
+            best = (sc, dx, dy)
+
+    return [best[1], best[2]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+
+    def pos_of(v):
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            return int(v[0]), int(v[1])
+        if isinstance(v, dict):
+            p = v.get("position", v.get("pos", v.get("xy", None)))
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                return int(p[0]), int(p[1])
+        return None
+
+    sp = pos_of(observation.get("self_position", None))
+    if sp is None:
+        sp = (0, 0)
+    op = pos_of(observation.get("opponent_position", None))
+    if op is None:
+        op = sp
+    sx, sy = sp
+    ox, oy = op
+
+    obs = set()
+    for o in observation.get("obstacles", []) or []:
+        p = pos_of(o)
+        if p is None:
+            continue
+        x, y = p
+        if 0 <= x < w and 0 <= y < h:
+            obs.add((x, y))
+
+    resources = []
+    for r in observation.get("resources", []) or []:
+        p = pos_of(r)
+        if p is None:
+            continue
+        x, y = p
+        if 0 <= x < w and 0 <= y < h and (x, y) not in obs:
+            resources.append((x, y))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    best = None
+    best_key = None
+
+    # Heuristic: prefer moves that reduce our distance to the closest resource;
+    # break ties by increasing distance to opponent; deterministic tie-breaking.
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        if resources:
+            md = None
+            for (rx, ry) in resources:
+                d = abs(nx - rx) + abs(ny - ry)
+                if md is None or d < md:
+                    md = d
+        else:
+            md = 0
+        od = abs(nx - ox) + abs(ny - oy)
+        key = (md, -od, dx, dy)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[0], best[1]]

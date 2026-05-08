@@ -1,0 +1,140 @@
+def choose_move(observation):
+    w = observation["grid_width"]; h = observation["grid_height"]
+    ox, oy = observation["self_position"]; ax, ay = observation["opponent_position"]
+    obstacles = set((p[0], p[1]) for p in observation["obstacles"])
+    self_cells = set((p[0], p[1]) for p in observation["self_territory"])
+    opp_cells = set((p[0], p[1]) for p in observation["opponent_territory"])
+    unclaimed = set((p[0], p[1]) for p in observation["unclaimed_cells"])
+
+    dxs = [-1, 0, 1]
+    dys = [-1, 0, 1]
+    moves = []
+    for dx in dxs:
+        for dy in dys:
+            moves.append((dx, dy))
+    # deterministic preference order: diagonals, then orthogonal, then stay
+    def move_rank(m):
+        dx, dy = m
+        diag = 1 if dx != 0 and dy != 0 else 0
+        orth = 1 if (dx == 0) ^ (dy == 0) else 0
+        return (-diag, -orth, abs(dx) + abs(dy), dx, dy)
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist2(x1, y1, x2, y2):
+        dx = x1 - x2; dy = y1 - y2
+        return dx * dx + dy * dy
+
+    invade = observation["opponent_territory_count"] > observation["self_territory_count"]
+    # pick target deterministically: nearest to current position among preferred cells
+    target_set = opp_cells if invade else unclaimed
+    if not target_set:
+        target_set = opp_cells if not unclaimed else unclaimed
+    if not target_set:
+        tx, ty = ax, ay
+    else:
+        tx, ty = None, None
+        best = None
+        for (x, y) in target_set:
+            if (x, y) in obstacles:
+                continue
+            d = dist2(ox, oy, x, y)
+            key = (d, x, y)
+            if best is None or key < best:
+                best = key
+                tx, ty = x, y
+
+    candidates = []
+    for dx, dy in moves:
+        nx, ny = ox + dx, oy + dy
+        if not in_bounds(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        cell = (nx, ny)
+        if invade:
+            # allow stepping into opponent territory; avoid unclaimed only if blocked by closer opponent
+            if cell in unclaimed:
+                bias = 20
+            else:
+                bias = 0
+        else:
+            # avoid entering opponent territory unless it is exactly the chosen target
+            if cell in opp_cells and cell != (tx, ty):
+                bias = 30
+            else:
+                bias = 0
+        d = dist2(nx, ny, tx, ty)
+        # extra preference: move into unclaimed / own territory adjacency to avoid flipping
+        if cell in unclaimed:
+            gain = -8
+        elif cell in self_cells:
+            gain = 2
+        elif cell in opp_cells:
+            gain = 0
+        else:
+            gain = 0
+        candidates.append((d + bias + gain, move_rank((dx, dy)), dx, dy))
+    if not candidates:
+        return [0, 0]
+    candidates.sort(key=lambda t: (t[0], t[1][0], t[1][1], t[1][2], t[1][3], t[1][4]))
+    return [candidates[0][2], candidates[0][3]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = observation.get("obstacles", [])
+    blocked = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            blocked.add((p[0], p[1]))
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    unclaimed = observation.get("unclaimed_cells", None)
+    if not unclaimed:
+        unclaimed = []
+    candidates = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            nx, ny = sx + dx, sy + dy
+            if in_bounds(nx, ny) and (nx, ny) not in blocked:
+                candidates.append((dx, dy, nx, ny))
+    if not candidates:
+        return [0, 0]
+
+    targets = []
+    if unclaimed:
+        targets = unclaimed
+    else:
+        targets = [(ox, oy)]
+
+    best = None
+    best_key = None
+    for dx, dy, nx, ny in candidates:
+        # Prefer reducing distance to nearest target; tie-break deterministically.
+        md = None
+        for tx, ty in targets:
+            d = (nx - tx) * (nx - tx) + (ny - ty) * (ny - ty)
+            if md is None or d < md:
+                md = d
+        if md is None:
+            md = 0
+        # Small deterministic preference to keep moves stable: diagonals first, then straight.
+        diag = 1 if dx != 0 and dy != 0 else 0
+        straight = 1 if (dx == 0) ^ (dy == 0) else 0
+        key = (md, -diag, -straight, dx, dy)
+        if best_key is None or key < best_key:
+            best_key = key
+            best = [dx, dy]
+    if best is None:
+        return [0, 0]
+    return best

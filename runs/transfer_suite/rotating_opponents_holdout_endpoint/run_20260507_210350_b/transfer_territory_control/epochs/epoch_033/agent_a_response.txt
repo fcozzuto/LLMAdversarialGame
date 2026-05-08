@@ -1,0 +1,160 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+
+    def to_set(v):
+        s = set()
+        if not v:
+            return s
+        for p in v:
+            if p is None:
+                continue
+            try:
+                s.add((int(p[0]), int(p[1])))
+            except Exception:
+                pass
+        return s
+
+    obstacles = to_set(observation.get("obstacles"))
+    unclaimed = to_set(observation.get("unclaimed_cells"))
+    self_terr = to_set(observation.get("self_territory"))
+    opp_terr = to_set(observation.get("opponent_territory"))
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    candidates_frontier = set()
+    if self_terr:
+        for (x, y) in self_terr:
+            for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) in unclaimed and (nx, ny) not in obstacles:
+                    candidates_frontier.add((nx, ny))
+
+    if not candidates_frontier:
+        # Prefer unclaimed near the center if no frontier
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        best = None
+        bestd = 10**9
+        for tx, ty in unclaimed:
+            d = abs(tx - cx) + abs(ty - cy)
+            if d < bestd:
+                bestd = d
+                best = (tx, ty)
+        target = best
+    else:
+        # Prefer frontier far from opponent to avoid immediate flips
+        best = None
+        bestd = -1
+        for tx, ty in candidates_frontier:
+            d = abs(tx - ox) + abs(ty - oy)
+            if d > bestd:
+                bestd = d
+                best = (tx, ty)
+        target = best
+
+    def clamp_move(dx, dy):
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obstacles:
+            return sx, sy
+        return nx, ny
+
+    if target is None:
+        target = (sx, sy)
+
+    tx, ty = target
+
+    # Deterministic tie-breaker: fixed order dirs, score comparison only
+    best_move = (0, 0)
+    best_score = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = clamp_move(dx, dy)
+        if (nx, ny) in obstacles:
+            nx, ny = sx, sy
+
+        # Heuristic score:
+        # - Move toward target
+        # - If step enters opponent territory, still allow but penalize proximity to avoid being swept
+        # - Prefer increasing distance from opponent if no clear target
+        dist_to_target = abs(nx - tx) + abs(ny - ty)
+        dist_to_opp = abs(nx - ox) + abs(ny - oy)
+        score = -3.0 * dist_to_target + 1.5 * dist_to_opp
+
+        if (nx, ny) in opp_terr:
+            score -= 6.0  # getting swept; we only do it if it aligns with the target strongly
+
+        # Small nudge to avoid being stuck adjacent to obstacles
+        adj_obs = 0
+        for ax, ay in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            px, py = nx + ax, ny + ay
+            if (px, py) in obstacles:
+                adj_obs += 1
+        score -= 0.5 * adj_obs
+
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    def to_set(v):
+        s = set()
+        if not v:
+            return s
+        for p in v:
+            if p is None:
+                continue
+            try:
+                x, y = int(p[0]), int(p[1])
+                s.add((x, y))
+            except Exception:
+                pass
+        return s
+
+    obstacles = to_set(observation.get("obstacles"))
+    unclaimed = to_set(observation.get("unclaimed_cells"))
+    opp_terr = to_set(observation.get("opponent_territory"))
+    self_terr = to_set(observation.get("self_territory"))
+
+    best = (0, 0)
+    best_score = -10**9
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        # Higher is better
+        score = 0
+        score += 60 if (nx, ny) in unclaimed else 0
+        score -= 40 if (nx, ny) in opp_terr else 0
+        score += 20 if (nx, ny) in self_terr else 0
+
+        dist_opp = abs(nx - ox) + abs(ny - oy)
+        score += 6 * dist_opp  # keep away
+
+        # Prefer moving toward board center slightly
+        dist_center = abs(nx - cx) + abs(ny - cy)
+        score -= 0.5 * dist_center
+
+        # Deterministic tie-break: prefer non-diagonal and then lexicographic dx,dy
+        if score > best_score or (score == best_score and (dx, dy) < best):
+            best_score = score
+            best = (dx, dy)
+
+    return [int(best[0]), int(best[1])]

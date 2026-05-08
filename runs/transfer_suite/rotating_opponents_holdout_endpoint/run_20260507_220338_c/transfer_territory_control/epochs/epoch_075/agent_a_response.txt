@@ -1,0 +1,172 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    sx, sy = int(sx), int(sy)
+
+    blocks = set()
+    for p in observation.get("obstacles") or []:
+        if p is None or len(p) < 2:
+            continue
+        x, y = int(p[0]), int(p[1])
+        if 0 <= x < w and 0 <= y < h:
+            blocks.add((x, y))
+
+    self_terr = set((int(x), int(y)) for x, y in (observation.get("self_territory") or []))
+    opp_terr = set((int(x), int(y)) for x, y in (observation.get("opponent_territory") or []))
+    unclaimed = set((int(x), int(y)) for x, y in (observation.get("unclaimed_cells") or []))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def ok(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in blocks
+
+    def near_score(nx, ny):
+        # Prefer grabbing unclaimed; otherwise prefer flipping opponent; otherwise hold/expand.
+        if unclaimed:
+            # Use coarse two-best approximation for speed: check a few nearest by sampling order.
+            best_ud = 10**9
+            cnt = 0
+            for ux, uy in unclaimed:
+                dx, dy = nx - ux, ny - uy
+                d = dx * dx + dy * dy
+                if d < best_ud:
+                    best_ud = d
+                cnt += 1
+                if cnt >= 12 and best_ud == 0:
+                    break
+            un = -best_ud
+        else:
+            un = 0
+
+        if opp_terr:
+            best_od = 10**9
+            cnt = 0
+            for ox, oy in opp_terr:
+                dx, dy = nx - ox, ny - oy
+                d = dx * dx + dy * dy
+                if d < best_od:
+                    best_od = d
+                cnt += 1
+                if cnt >= 12 and best_od == 0:
+                    break
+            op = -best_od
+        else:
+            op = 0
+
+        # Small bias toward advancing toward opponent corner-ish (deterministic).
+        # Start at opposite corners; infer opponent corner from their territory centroid when available.
+        if opp_terr:
+            cx = sum(x for x, _ in list(opp_terr)[: min(10, len(opp_terr))]) / float(min(10, len(opp_terr)))
+            cy = sum(y for _, y in list(opp_terr)[: min(10, len(opp_terr))]) / float(min(10, len(opp_terr)))
+            bias = -((nx - cx) * (nx - cx) + (ny - cy) * (ny - cy))
+        else:
+            bias = -(nx * nx + ny * ny)
+
+        return un * 0.75 + op * 1.0 + bias * 0.05
+
+    def immediate(nx, ny):
+        val = 0
+        if (nx, ny) in unclaimed:
+            val += 6
+        if (nx, ny) in opp_terr:
+            val += 10
+        if (nx, ny) in self_terr:
+            val += 1
+        # Avoid stepping away from territory too much by penalizing empty cells slightly.
+        if (nx, ny) not in self_terr and (nx, ny) not in unclaimed and (nx, ny) not in opp_terr:
+            val -= 1
+        return val
+
+    # Deterministically break ties by preferring (0,0), then lexicographic dirs order.
+    best = None
+    best_val = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        val = immediate(nx, ny) + near_score(nx, ny)
+        if best is None or val > best_val + 1e-9 or (abs(val - best_val) <= 1e-9 and (dx, dy) < best):
+            best_val = val
+            best = (dx, dy)
+
+    return [int(best[0]), int(best[1])] if best is not None else [0, 0]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (0, 0)
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    blocks = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                blocks.add((x, y))
+
+    unclaimed = observation.get("unclaimed_cells") or []
+    unclaimed_pts = []
+    for p in unclaimed:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                unclaimed_pts.append((x, y))
+
+    scores = observation.get("scores") or {}
+    s0 = scores.get("self", 0)
+    s1 = scores.get("opponent", 0)
+    try:
+        s0 = float(s0)
+    except:
+        s0 = 0
+    try:
+        s1 = float(s1)
+    except:
+        s1 = 0
+
+    attack = s0 >= s1
+
+    dirs = [(-1, 0), (0, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)]
+    best = None
+    bestv = -10**18
+
+    def cell_ok(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in blocks
+
+    def nearest_dist2(px, py, pts):
+        bd = 10**18
+        for ax, ay in pts:
+            dx, dy = px - ax, py - ay
+            d = dx * dx + dy * dy
+            if d < bd:
+                bd = d
+        return bd if bd != 10**18 else 10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not cell_ok(nx, ny):
+            continue
+        v = 0
+        if unclaimed_pts:
+            v += 2000 - nearest_dist2(nx, ny, unclaimed_pts)
+        dop = (nx - ox) * (nx - ox) + (ny - oy) * (ny - oy)
+        if attack:
+            v += 800 - dop // 2
+        else:
+            v += dop // 2
+        v += (nx + ny) * 0.001  # deterministic tie-break
+        if v > bestv:
+            bestv = v
+            best = (dx, dy)
+
+    if best is None:
+        for dx, dy in [(-1, 0), (0, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)]:
+            nx, ny = sx + dx, sy + dy
+            if cell_ok(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+    return [best[0], best[1]]

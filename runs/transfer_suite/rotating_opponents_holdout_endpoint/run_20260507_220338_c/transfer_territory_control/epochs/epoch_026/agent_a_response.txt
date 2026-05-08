@@ -1,0 +1,142 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    sx, sy = int(sx), int(sy)
+
+    my = set((int(x), int(y)) for x, y in (observation.get("self_territory") or []))
+    opp = set((int(x), int(y)) for x, y in (observation.get("opponent_territory") or []))
+    un = set((int(x), int(y)) for x, y in (observation.get("unclaimed_cells") or []))
+    obstacles = set((int(x), int(y)) for x, y in (observation.get("obstacles") or []))
+
+    my_count = int(observation.get("self_territory_count") or 0)
+    opp_count = int(observation.get("opponent_territory_count") or 0)
+    my_ahead = my_count >= opp_count
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    # Precompute a few closest unclaimed distances (deterministic, capped)
+    un_list = list(un)
+    un_list.sort(key=lambda p: (abs(p[0] - sx) + abs(p[1] - sy), p[0], p[1]))
+
+    best = (-10**9, 0, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        v = 0
+        if (nx, ny) in un:
+            v += 4
+            # slight preference for approaching nearest unclaimed
+            if un_list:
+                d0 = abs(nx - un_list[0][0]) + abs(ny - un_list[0][1])
+                v += max(0, 3 - d0 * 0.05)
+        elif (nx, ny) in my:
+            v += 1
+        elif (nx, ny) in opp:
+            # entering opponent flips control: if we are behind, contest; if ahead, strike less unless it opens unclaimed
+            if my_ahead:
+                v -= 1.5
+            else:
+                v += 2.5
+            # prefer opponent edge squares adjacent to unclaimed to create expansion
+            edge_un = 0
+            for adx in (-1, 0, 1):
+                for ady in (-1, 0, 1):
+                    if adx == 0 and ady == 0:
+                        continue
+                    tx, ty = nx + adx, ny + ady
+                    if inb(tx, ty) and (tx, ty) in un:
+                        edge_un += 1
+            v += edge_un * (0.6 if not my_ahead else 0.2)
+
+        # Soft bias: move toward opponent territory center to prevent being trapped near start
+        if opp:
+            # deterministic proxy for opponent center: average of min/max corners of opp
+            minx = min(x for x, _ in opp)
+            maxx = max(x for x, _ in opp)
+            miny = min(y for _, y in opp)
+            maxy = max(y for _, y in opp)
+            cx = (minx + maxx) // 2
+            cy = (miny + maxy) // 2
+            v += (0.35 if not my_ahead else 0.15) * (-(abs(nx - cx) + abs(ny - cy)) / 10.0)
+
+        # Leader-tick heuristic: on turns where bonus likely applies, favor moves that keep us forward
+        if observation.get("turn_index") is not None and int(observation["turn_index"]) % 10 == 0:
+            # optimistic
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    sx, sy = int(sx), int(sy)
+
+    obstacles = set((int(x), int(y)) for x, y in (observation.get("obstacles") or []))
+    un = set((int(x), int(y)) for x, y in (observation.get("unclaimed_cells") or []))
+    my = set((int(x), int(y)) for x, y in (observation.get("self_territory") or []))
+    opp = set((int(x), int(y)) for x, y in (observation.get("opponent_territory") or []))
+
+    ox, oy = observation.get("opponent_position") or (sx, sy)
+    ox, oy = int(ox), int(oy)
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    un_best = None
+    if un:
+        min_d = 10**9
+        for ux, uy in un:
+            d = abs(ux - sx) + abs(uy - sy)
+            if d < min_d or (d == min_d and (ux, uy) < un_best):
+                min_d = d
+                un_best = (ux, uy)
+
+    opp_best = None
+    if opp:
+        min_d = 10**9
+        for px, py in opp:
+            d = abs(px - sx) + abs(py - sy)
+            if d < min_d or (d == min_d and (px, py) < opp_best):
+                min_d = d
+                opp_best = (px, py)
+
+    best = None
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        score = 0
+        if (nx, ny) in un:
+            score += 1000
+        if (nx, ny) in my:
+            score += 20
+        if (nx, ny) in opp:
+            score += 200
+
+        if un_best is not None:
+            score += 30 - (abs(un_best[0] - nx) + abs(un_best[1] - ny))
+        else:
+            score += - (abs(ox - nx) + abs(oy - ny))
+
+        if opp_best is not None:
+            score += 5 - (abs(opp_best[0] - nx) + abs(opp_best[1] - ny))
+
+        score -= 2 * (abs(dx) + abs(dy) == 0)
+        if best is None or score > best_score or (score == best_score and (dx, dy) < best):
+            best_score = score
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

@@ -1,0 +1,133 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8)) or 8
+    h = int(observation.get("grid_height", 8)) or 8
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    oset = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                oset.add((x, y))
+
+    role = (observation.get("self_role") or "").lower()
+    is_pursuer = ("pursuer" in role) or ("catch" in role) or ("hunter" in role) or ("evader" not in role)
+
+    moves = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in oset:
+                moves.append((dx, dy))
+
+    def dist2(x1, y1, x2, y2):
+        dx, dy = x1 - x2, y1 - y2
+        return dx * dx + dy * dy
+
+    corner_targets = [(w - 1, 0), (w - 1, h - 1), (0, h - 1), (0, 0)]
+    ti = int(observation.get("turn_index", 0)) % 4
+    tgt = corner_targets[ti]
+
+    best = None
+    best_score = -10**18
+    want_sign = -1 if is_pursuer else 1  # pursuer minimize dist2 => negative, evader maximize
+
+    # deterministic tie-break: prefer moves in a fixed order
+    order = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            order.append((dx, dy))
+
+    def score_at(nx, ny, dx, dy):
+        d2 = dist2(nx, ny, ox, oy)
+        s = want_sign * d2 * 10.0
+
+        # obstacle penalty (repel staying near obstacles)
+        if oset:
+            near = 10**9
+            for (ex, ey) in oset:
+                dd = abs(nx - ex) + abs(ny - ey)
+                if dd < near:
+                    near = dd
+            if near <= 1:
+                s -= 1e6
+            elif near <= 2:
+                s -= 200.0 / near
+            else:
+                s -= 10.0 / near
+
+        # prefer steering towards/away from corners when distance ties
+        tc = dist2(nx, ny, tgt[0], tgt[1])
+        s += (1 if not is_pursuer else -1) * tc * 0.5
+
+        # small anti-stagnation for pursuer, small encouragement to "break" for evader
+        man = abs(dx) + abs(dy)
+        s += (1.0 if is_pursuer else 0.5) * man
+
+        return s
+
+    # evaluate with light lookahead (one ply): assume opponent moves to improve capture line
+    # For deterministic, approximate opponent with best-response towards/away based on our role.
+    for dx0, dy0 in order:
+        nx, ny = sx + dx0, sy + dy0
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in oset:
+            continue
+
+        # possible opponent moves
+        opp_moves = []
+        for adx in (-1, 0, 1):
+            for ady in (-1, 0, 1):
+                ax, ay = ox + adx, oy + ady
+                if 0 <= ax < w and 0 <= ay < h and (ax, ay) not in oset:
+                    opp_moves.append((adx, ady))
+        if not opp_moves:
+            opp_moves = [(0, 0)]
+
+        # choose opponent move that (for us as pursuer) reduces our distance; else increases
+        best_opp = None
+        best_opp_val = None
+        for adx, ady in opp_moves:
+            ax, ay = ox + adx, oy + ady
+            v = dist2(nx, ny, ax, ay)
+            # pursuer: opponent is evader => maximize our distance; evader: opponent pursuer => minimize
+            key = v if is_pursuer else -v
+            if best_opp_val is None or key > best_opp_val:
+                best_opp_val = key
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8)) or 8
+    h = int(observation.get("grid_height", 8)) or 8
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = observation.get("obstacles", []) or []
+    oset = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                oset.add((x, y))
+
+    role = (observation.get("self_role") or "").lower()
+    pursue = ("pursuer" in role) or ("catch" in role) or ("hunter" in role)
+
+    order = [(0, 0), (1, 0), (0, 1), (-1, 0), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+    best = None
+    best_val = None
+
+    for dx, dy in order:
+        nx, ny = sx + dx, sy + dy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in oset:
+            d2 = (nx - ox) * (nx - ox) + (ny - oy) * (ny - oy)
+            val = -d2 if pursue else d2
+            if best is None or val > best_val:
+                best = [dx, dy]
+                best_val = val
+
+    return best if best is not None else [0, 0]

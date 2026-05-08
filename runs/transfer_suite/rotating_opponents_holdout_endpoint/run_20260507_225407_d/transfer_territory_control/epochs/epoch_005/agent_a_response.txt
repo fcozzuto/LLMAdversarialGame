@@ -1,0 +1,155 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    self_cells = observation.get("self_territory") or []
+    opp_cells = observation.get("opponent_territory") or []
+    unclaimed = observation.get("unclaimed_cells") or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+
+    self_set = set((x, y) for x, y in self_cells)
+    opp_set = set((x, y) for x, y in opp_cells)
+    unclaimed_set = set((x, y) for x, y in unclaimed)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def neigh8(x, y):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if inb(nx, ny):
+                    yield nx, ny
+
+    # Pick a meaningful target deterministically: prefer unclaimed cells bordering opponent more than ours.
+    best = None
+    best_score = -10**9
+    for ux, uy in unclaimed_set:
+        adj_self = 0
+        adj_opp = 0
+        adj_un = 0
+        for nx, ny in neigh8(ux, uy):
+            if (nx, ny) in self_set:
+                adj_self += 1
+            elif (nx, ny) in opp_set:
+                adj_opp += 1
+            elif (nx, ny) in unclaimed_set:
+                adj_un += 1
+        # Frontier pressure: attack opponent first; if none, expand our area.
+        pressure = adj_opp - adj_self
+        dist = abs(ux - sx) + abs(uy - sy)
+        score = pressure * 6 + adj_un * 1 - dist * 0.25
+        if score > best_score:
+            best_score = score
+            best = (ux, uy)
+
+    if best is None:
+        # fallback: move toward any unclaimed cell, or stay.
+        if not unclaimed_set:
+            return [0, 0]
+        tx, ty = min(unclaimed_set, key=lambda p: abs(p[0] - sx) + abs(p[1] - sy))
+    else:
+        tx, ty = best
+
+    # Evaluate immediate moves with a local heuristic.
+    moves = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            cell = (nx, ny)
+            if cell in self_set:
+                h0 = 1
+            elif cell in opp_set:
+                h0 = 7
+            elif cell in unclaimed_set:
+                h0 = 4
+            else:
+                h0 = 0
+            adj_self = 0
+            adj_opp = 0
+            adj_un = 0
+            for ax, ay in neigh8(nx, ny):
+                if (ax, ay) in self_set:
+                    adj_self += 1
+                elif (ax, ay) in opp_set:
+                    adj_opp += 1
+                elif (ax, ay) in unclaimed_set:
+                    adj_un += 1
+            # Nudge toward target while rewarding pressure/expansion.
+            dist_t = abs(nx - tx) + abs(ny - ty)
+            score = h0 * 10 + (adj_self - adj_opp) * 2 + adj_un * 0.5 - dist_t
+            moves.append((score, dx, dy))
+
+    if not moves:
+        return [0, 0]
+    moves.sort(key=lambda t: (-t[0], t[1], t[2]))
+    return [int(moves[0][1]), int(moves[0][2])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    ox, oy = observation.get("opponent_position", (sx, sy))
+
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_cells = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_cells = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = list(observation.get("unclaimed_cells") or [])
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def neigh4(x, y):
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny):
+                yield nx, ny
+
+    def md(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    frontier = []
+    if unclaimed:
+        for ux, uy in unclaimed:
+            for nx, ny in neigh4(ux, uy):
+                if (nx, ny) in opp_cells:
+                    frontier.append((ux, uy))
+                    break
+
+    target = None
+    bestd = None
+    target_list = frontier if frontier else (unclaimed if unclaimed else [(ox, oy)])
+    for tx, ty in target_list:
+        d = md(tx, ty, ox, oy)
+        if bestd is None or d < bestd or (d == bestd and (tx, ty) < target):
+            bestd = d
+            target = (tx, ty)
+
+    candidates = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+    best = None
+    bestscore = None
+    tx, ty = target if target else (ox, oy)
+    for dx, dy in candidates:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        dist = md(nx, ny, tx, ty)
+        score = -dist
+        if (nx, ny) in opp_cells:
+            score += 50
+        if (nx, ny) in self_cells:
+            score += 5
+        if bestscore is None or score > bestscore or (score == bestscore and (dx, dy) < best):
+            bestscore = score
+            best = (dx, dy)
+
+    dx, dy = best if best is not None else (0, 0)
+    if dx not in (-1, 0, 1) or dy not in (-1, 0, 1):
+        return [0, 0]
+    return [dx, dy]

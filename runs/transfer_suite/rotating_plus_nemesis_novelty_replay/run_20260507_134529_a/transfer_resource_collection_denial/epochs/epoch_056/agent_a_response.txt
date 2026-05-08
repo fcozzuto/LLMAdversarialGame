@@ -1,0 +1,135 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources") or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def free(x, y): return inb(x, y) and (x, y) not in obstacles
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    dirs = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    if not resources:
+        best = (0, 0, -10**9)
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not free(nx, ny): nx, ny = sx, sy
+            v = -cheb(nx, ny, ox, oy)
+            if v > best[2]: best = (dx, dy, v)
+        return [best[0], best[1]]
+
+    # Predict opponent's most likely resource (nearest by Chebyshev).
+    opp_target = resources[0]
+    best_do = cheb(ox, oy, opp_target[0], opp_target[1])
+    for rx, ry in resources[1:]:
+        d = cheb(ox, oy, rx, ry)
+        if d < best_do:
+            best_do, opp_target = d, [rx, ry]
+
+    tx, ty = opp_target[0], opp_target[1]
+    my_best = resources[0]
+    best_dm = cheb(sx, sy, my_best[0], my_best[1])
+    for rx, ry in resources[1:]:
+        d = cheb(sx, sy, rx, ry)
+        if d < best_dm:
+            best_dm, my_best = d, [rx, ry]
+    mx, my = my_best[0], my_best[1]
+
+    # Choose move: either contest opponent target if we can arrive no slower after this move,
+    # otherwise go for our nearest resource.
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny): nx, ny = sx, sy
+        dm = cheb(nx, ny, tx, ty)  # our distance to opponent target if we contest
+        do_next = best_do - 1 if best_do > 0 else 0  # rough: opponent likely reduces distance by 1
+        can_contest = (dm <= do_next)
+
+        target_x, target_y = (tx, ty) if can_contest else (mx, my)
+        d_to_target = cheb(nx, ny, target_x, target_y)
+
+        # Additional shaping: prefer moves that also keep us away from obstacles and not too close to opponent
+        # while contesting, but allow closeness when contesting.
+        d_opp = cheb(nx, ny, ox, oy)
+        score = -d_to_target
+        if can_contest:
+            score += 0.35 * (cheb(sx, sy, tx, ty) - dm) + 0.2 * d_opp
+        else:
+            score += 0.25 * d_opp - 0.1 * cheb(nx, ny, tx, ty)
+
+        if score > best[2]:
+            best = (dx, dy, score)
+
+    return [best[0], best[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        try:
+            obs.add((p[0], p[1]))
+        except:
+            pass
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def free(x, y):
+        return inb(x, y) and (x, y) not in obs
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    dirs = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    if not resources:
+        # Stay unless moving closer to opponent is possible without hitting obstacles.
+        bestv = -10**9
+        bestm = (0, 0)
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not free(nx, ny):
+                nx, ny = sx, sy
+            v = -cheb(nx, ny, ox, oy)
+            if v > bestv:
+                bestv, bestm = v, (dx, dy)
+        return [bestm[0], bestm[1]]
+
+    # Choose move that maximizes deterministic advantage toward resources.
+    # Advantage = (opp_dist - my_dist), prefer larger. Tie-break by my_dist then lexicographic move order.
+    best = (-10**9, 10**9, 0, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny):
+            nx, ny = sx, sy
+        # Evaluate best resource for this hypothetical next position.
+        best_adv = -10**9
+        best_md = 10**9
+        for rx, ry in resources:
+            md = cheb(nx, ny, rx, ry)
+            od = cheb(ox, oy, rx, ry)
+            adv = od - md
+            if adv > best_adv or (adv == best_adv and md < best_md):
+                best_adv, best_md = adv, md
+        cand = (best_adv, -best_md, dx, dy)
+        # Prefer higher adv, then lower md (encoded via -best_md), then earlier move (dx,dy order).
+        if cand[0] > best[0] or (cand[0] == best[0] and cand[1] > best[1]):
+            best = cand
+
+    return [best[2], best[3]]

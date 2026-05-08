@@ -1,0 +1,141 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    sx, sy = int(sx), int(sy)
+
+    def to_set(key):
+        out = set()
+        for p in observation.get(key) or []:
+            if p is None:
+                continue
+            if isinstance(p, dict):
+                x, y = p.get("x", p.get(0)), p.get("y", p.get(1))
+            elif isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = p[0], p[1]
+            else:
+                continue
+            x, y = int(x), int(y)
+            if 0 <= x < w and 0 <= y < h:
+                out.add((x, y))
+        return out
+
+    obstacles = to_set("obstacles") | to_set("resource_obstacles")
+    unclaimed = to_set("unclaimed_cells") | to_set("unclaimed") | to_set("neutral_cells")
+    self_terr = to_set("self_territory")
+    opp_terr = to_set("opponent_territory")
+    resources = to_set("resources") | to_set("resource_cells") | to_set("resource_locations")
+
+    opp_pos = observation.get("opponent_position") or (w - 1, h - 1)
+    opp_pos = (int(opp_pos[0]), int(opp_pos[1]))
+
+    # Targeting: first contest unclaimed near opponent; else capture remaining/unclaimed/resources.
+    candidates = []
+    if unclaimed:
+        # Prefer unclaimed cells that are closer to opponent or adjacent to opponent territory.
+        for (x, y) in unclaimed:
+            adj_opp = (abs(x - opp_pos[0]) <= 1 and abs(y - opp_pos[1]) <= 1) or ((x, y) in opp_terr)
+            # cheap adjacency check to opponent territory
+            is_adj = adj_opp
+            if not is_adj:
+                is_adj = any((x + dx, y + dy) in opp_terr for dx in (-1, 0, 1) for dy in (-1, 0, 1) if not (dx == 0 and dy == 0))
+            d = abs(x - opp_pos[0]) + abs(y - opp_pos[1])
+            candidates.append(((0 if is_adj else 1), d, x, y))
+        candidates.sort()
+        targets = [(x, y) for _, _, x, y in candidates[:12]]
+    else:
+        targets = list(opp_terr)[:6] + list(resources)[:6]
+        if not targets:
+            targets = list(self_terr)[:1] if self_terr else [(w - 1, h - 1)]
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    best_move = [0, 0]
+    best_score = -10**9
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if not (0 <= nx < w and 0 <= ny < h):
+                continue
+            if (nx, ny) in obstacles:
+                continue
+
+            # Immediate flip incentives
+            cell_bonus = 0
+            if (nx, ny) in opp_terr:
+                cell_bonus += 8
+            elif (nx, ny) in unclaimed:
+                cell_bonus += 5
+            elif (nx, ny) in resources:
+                cell_bonus += 2
+
+            # Strategic: move toward the best target from next position
+            nd = 10**9
+            for tx, ty in targets:
+                dd = max(abs(tx - nx), abs(ty - ny))  # Chebyshev: territory control is not strict
+                if dd < nd:
+                    nd = dd
+            # Also slightly prefer keeping distance from opponent position to avoid counterclaim trap
+            away = dist((nx, ny), opp_pos)
+
+            score = cell_bonus
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or (0, 0)
+    op = observation.get("opponent_position") or (w - 1, h - 1)
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    def collect(key):
+        out = []
+        for p in observation.get(key) or []:
+            if p is None:
+                continue
+            if isinstance(p, dict):
+                if "x" in p and "y" in p:
+                    x, y = p["x"], p["y"]
+                else:
+                    x, y = p.get(0), p.get(1)
+            else:
+                x, y = (p[0], p[1]) if isinstance(p, (list, tuple)) and len(p) >= 2 else (None, None)
+            if x is None or y is None:
+                continue
+            x, y = int(x), int(y)
+            if 0 <= x < w and 0 <= y < h:
+                out.append((x, y))
+        return out
+
+    obstacles = set(collect("obstacles")) | set(collect("resource_obstacles"))
+    resources = collect("resources") + collect("resource_cells") + collect("resource_locations")
+
+    def md(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    tx, ty = ox, oy
+    if resources:
+        best = None
+        for x, y in resources:
+            d = md(sx, sy, x, y)
+            if best is None or d < best[0] or (d == best[0] and (x, y) < best[1]):
+                best = (d, (x, y))
+        tx, ty = best[1]
+
+    moves = [(0, -1), (0, 0), (1, 0), (0, 1), (-1, 0)]
+    best_score = None
+    best_move = [0, 0]
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        score = md(nx, ny, tx, ty)
+        if best_score is None or score < best_score or (score == best_score and (dx, dy) < tuple(best_move)):
+            best_score = score
+            best_move = [dx, dy]
+    return best_move

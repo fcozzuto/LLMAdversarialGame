@@ -1,0 +1,157 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    sx, sy = int(sx), int(sy)
+
+    blocks = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                blocks.add((x, y))
+
+    self_terr = set()
+    for p in observation.get("self_territory") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                self_terr.add((x, y))
+
+    opp_terr = set()
+    for p in observation.get("opponent_territory") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                opp_terr.add((x, y))
+
+    unclaimed = set()
+    for p in observation.get("unclaimed_cells") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                unclaimed.add((x, y))
+
+    cx, cy = w // 2, h // 2
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    ox, oy = int(ox), int(oy)
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    dirs.sort(key=lambda d: (d[0], d[1]))  # deterministic tie-break
+
+    # Aim: counterclaim by stepping into opponent territory when possible,
+    # otherwise expand toward nearest unclaimed cell adjacent to opponent territory.
+    best_score = -10**18
+    best = (0, 0)
+
+    # Precompute opponent frontier (unclaimed cells adjacent to opponent territory)
+    frontier = set()
+    for (x, y) in opp_terr:
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) in unclaimed:
+                frontier.add((nx, ny))
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in blocks:
+            continue
+
+        # Base: prefer moving away from center if we're behind leader? Keep it simple: favor forward toward opponent/counterclaim.
+        man_to_opp = abs(nx - ox) + abs(ny - oy)
+        man_from_center = abs(nx - cx) + abs(ny - cy)
+
+        cell = (nx, ny)
+        if cell in opp_terr:
+            s = 10000 - 2 * man_to_opp  # strong immediate counterclaim on entry (flipping enabled)
+        elif cell in frontier:
+            s = 2500 - 2 * man_to_opp
+        elif cell in unclaimed:
+            s = 800 - 2 * man_to_opp - 1 * man_from_center
+        elif cell in self_terr:
+            s = 50 - 1 * man_from_center  # staying on our territory, low incentive
+        else:
+            s = -5 - man_to_opp
+
+        # Nudge: if opponent territory is near, reduce distance
+        if opp_terr:
+            # small local approximation: check min distance within a cutoff (deterministic, bounded)
+            cutoff = 5
+            min_d = 10**9
+            for (x, y) in opp_terr:
+                d = abs(x - nx) + abs(y - ny)
+                if d < min_d:
+                    min_d = d
+                if min_d == 0:
+                    break
+                if d == 1:
+                    min_d = 1
+                    break
+                if d > cutoff and min_d <= 2:
+                    break
+            s += 80 // (1 + min_d)
+
+        # Safety: discourage oscillation by slightly penalizing revisiting our
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    w, h = int(w), int(h)
+    sx, sy = observation.get("self_position", [0, 0]) or [0, 0]
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    blocks = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                blocks.add((x, y))
+
+    targets = []
+    for p in observation.get("resources") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                targets.append((x, y))
+
+    if not targets:
+        cx, cy = w // 2, h // 2
+        targets = [(cx, cy)]
+
+    dirs = [(0, -1), (-1, 0), (1, 0), (0, 1), (0, 0), (-1, -1), (1, -1), (-1, 1), (1, 1)]
+    best = None
+    bx = by = 0
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in blocks:
+            continue
+        # Prefer closer to nearest resource; also slightly avoid opponent
+        md = 10**9
+        for tx, ty in targets:
+            d = abs(nx - tx) + abs(ny - ty)
+            if d < md:
+                md = d
+        od = abs(nx - ox) + abs(ny - oy)
+        score = -md - 0.01 * od
+        if best is None or score > best:
+            best = score
+            bx, by = dx, dy
+
+    if best is None:
+        # No legal move: try staying if not blocked, else any in-bounds non-blocked
+        if (sx, sy) not in blocks:
+            return [0, 0]
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in blocks:
+                return [dx, dy]
+        return [0, 0]
+
+    return [bx, by]
