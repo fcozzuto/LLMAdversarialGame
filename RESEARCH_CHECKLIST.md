@@ -98,14 +98,14 @@ This checklist is the fixed research protocol for the project. It separates infr
 ## Evidence Still Required
 
 - [ ] Run repeated long-horizon experiments, not only single long runs.
-- [x] Produce aggregate cross-run statistics with confidence intervals or equivalent uncertainty summaries.
-- [x] Confirm whether the same conclusions hold across multiple seeds and repeated runs.
-- [x] Perform qualitative inspection of notable epochs referenced by the reports.
+- [ ] Produce aggregate cross-run statistics with confidence intervals or equivalent uncertainty summaries.
+- [ ] Confirm whether the same conclusions hold across multiple seeds and repeated runs.
+- [ ] Perform qualitative inspection of notable epochs referenced by the reports.
 - [ ] Decide which claims are primary, which are exploratory, and which are unsupported.
-- [x] Compare curriculum training results against holdout panels before making claims about generalization.
+- [ ] Compare curriculum training results against holdout panels before making claims about generalization.
 - [ ] Complete the five-replicate factorial holdout campaign and rank recipes by held-out win rate.
-- [x] Run the novelty-review packet on the top novelty spikes before treating novelty as innovation.
-- [x] Generate the transfer suite from the winning factorial recipe and run the transfer campaign.
+- [ ] Run the novelty-review packet on the top novelty spikes before treating novelty as innovation.
+- [ ] Generate the transfer suite from the winning factorial recipe and run the transfer campaign.
 
 ## Recommended Minimum Evidence Target
 
@@ -113,15 +113,14 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [ ] At least 3 repeated runs for the main ablation suite or a justified subset of its conditions.
 - [ ] At least 3 repeated runs for the main curriculum suite family or a justified subset of its conditions.
 - [ ] Curriculum-family claims should be based on learner-centric summaries, not on averaged learner-plus-opponent curriculum metrics.
-- [x] At least 1 aggregate report generated with [aggregate_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_runs.py) for each main suite family.
-- [x] Final claims checked against deterministic summaries, aggregate reports, and qualitative epoch review, not judge prose alone.
+- [ ] At least 1 aggregate report generated with [aggregate_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_runs.py) for each main suite family.
+- [ ] Final claims checked against deterministic summaries, aggregate reports, and qualitative epoch review, not judge prose alone.
 - [ ] At least 5 replicated suite runs for the factorial holdout comparison.
-- [x] At least 5 replicated suite runs for the cross-environment transfer comparison.
+- [ ] At least 5 replicated suite runs for the cross-environment transfer comparison.
 
 ## Current Status
 
 - The project is engineering-complete and research-infrastructure-complete for both the phase-1 and phase-2 protocols.
 - The project is engineering-complete and research-infrastructure-complete for the phase-2b factorial and phase-3 transfer protocols.
-- The project now has a 10-replicate phase-4 causal-transfer archive, per-recipe aggregates, paired causal-transfer analysis, and manual novelty-review packets for the three transfer recipes.
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
 - Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).

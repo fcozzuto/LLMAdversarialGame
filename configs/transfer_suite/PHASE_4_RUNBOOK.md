@@ -17,13 +17,12 @@ Optional third arm:
 
 ## Step 2: Generate Phase-4-Labeled Transfer Configs
 
-These commands keep the transfer setup the same while stamping the configs with `study_phase=phase_4`.
-The archived config and run-root names stay aligned with the existing `runs/transfer_suite` convention rather than introducing a separate `phase_4_` path prefix.
+These commands keep the transfer setup the same while stamping the configs with `study_phase=phase_4` and writing to a separate phase-4 run root.
 
 ```powershell
-python build_transfer_suite.py --recipe rotating_opponents_holdout_endpoint --study-phase phase_4 --output configs/transfer_suite/rotating_opponents_holdout_endpoint.json --output-root runs/transfer_suite/rotating_opponents_holdout_endpoint
-python build_transfer_suite.py --recipe rotating_plus_nemesis_novelty_replay --study-phase phase_4 --output configs/transfer_suite/rotating_plus_nemesis_novelty_replay.json --output-root runs/transfer_suite/rotating_plus_nemesis_novelty_replay
-python build_transfer_suite.py --recipe rotating_plus_replay_aware_selection --study-phase phase_4 --output configs/transfer_suite/rotating_plus_replay_aware_selection.json --output-root runs/transfer_suite/rotating_plus_replay_aware_selection
+python build_transfer_suite.py --recipe rotating_opponents_holdout_endpoint --study-phase phase_4 --output configs/transfer_suite/phase_4_rotating_opponents_holdout_endpoint.json --output-root runs/phase_4_transfer/rotating_opponents_holdout_endpoint
+python build_transfer_suite.py --recipe rotating_plus_nemesis_novelty_replay --study-phase phase_4 --output configs/transfer_suite/phase_4_rotating_plus_nemesis_novelty_replay.json --output-root runs/phase_4_transfer/rotating_plus_nemesis_novelty_replay
+python build_transfer_suite.py --recipe rotating_plus_replay_aware_selection --study-phase phase_4 --output configs/transfer_suite/phase_4_rotating_plus_replay_aware_selection.json --output-root runs/phase_4_transfer/rotating_plus_replay_aware_selection
 ```
 
 Skip the third command if you are not running the optional replay-aware arm.
@@ -51,22 +50,20 @@ If you want the stronger phase-4 target, add:
 Example commands for the required two-arm comparison:
 
 ```powershell
-python run_suite.py --config configs\transfer_suite\rotating_opponents_holdout_endpoint.json --seed-offset 0 --replicate-label a
-python run_suite.py --config configs\transfer_suite\rotating_plus_nemesis_novelty_replay.json --seed-offset 0 --replicate-label a
-python run_suite.py --config configs\transfer_suite\rotating_opponents_holdout_endpoint.json --seed-offset 1000 --replicate-label b
-python run_suite.py --config configs\transfer_suite\rotating_plus_nemesis_novelty_replay.json --seed-offset 1000 --replicate-label b
+python run_suite.py --config configs\transfer_suite\phase_4_rotating_opponents_holdout_endpoint.json --seed-offset 0 --replicate-label a
+python run_suite.py --config configs\transfer_suite\phase_4_rotating_plus_nemesis_novelty_replay.json --seed-offset 0 --replicate-label a
+python run_suite.py --config configs\transfer_suite\phase_4_rotating_opponents_holdout_endpoint.json --seed-offset 1000 --replicate-label b
+python run_suite.py --config configs\transfer_suite\phase_4_rotating_plus_nemesis_novelty_replay.json --seed-offset 1000 --replicate-label b
 ```
 
 Continue the same pattern for the remaining offsets. If you include the optional third arm, run it on the same offsets too.
 
-If a replicate label is rerun because of an execution-quality outlier, keep the cleaner rerun in the active recipe root and move the superseded original under `runs/transfer_suite/_superseded/<recipe>/` while preserving its original `run_*` directory name. Record the mapping in a manifest so the audit trail stays explicit.
-
 ## Step 4: Aggregate Each Recipe Separately
 
 ```powershell
-python aggregate_runs.py --runs-root runs\transfer_suite\rotating_opponents_holdout_endpoint
-python aggregate_runs.py --runs-root runs\transfer_suite\rotating_plus_nemesis_novelty_replay
-python aggregate_runs.py --runs-root runs\transfer_suite\rotating_plus_replay_aware_selection
+python aggregate_runs.py --runs-root runs\phase_4_transfer\rotating_opponents_holdout_endpoint
+python aggregate_runs.py --runs-root runs\phase_4_transfer\rotating_plus_nemesis_novelty_replay
+python aggregate_runs.py --runs-root runs\phase_4_transfer\rotating_plus_replay_aware_selection
 ```
 
 Skip the third command if you did not run the optional arm.
@@ -76,13 +73,13 @@ Skip the third command if you did not run the optional arm.
 Required two-arm comparison:
 
 ```powershell
-python analyze_causal_transfer.py --baseline-recipe rotating_opponents_holdout_endpoint --recipe-root runs\transfer_suite\rotating_opponents_holdout_endpoint --recipe-root runs\transfer_suite\rotating_plus_nemesis_novelty_replay
+python analyze_causal_transfer.py --baseline-recipe rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_plus_nemesis_novelty_replay
 ```
 
 Optional three-arm comparison:
 
 ```powershell
-python analyze_causal_transfer.py --baseline-recipe rotating_opponents_holdout_endpoint --recipe-root runs\transfer_suite\rotating_opponents_holdout_endpoint --recipe-root runs\transfer_suite\rotating_plus_nemesis_novelty_replay --recipe-root runs\transfer_suite\rotating_plus_replay_aware_selection
+python analyze_causal_transfer.py --baseline-recipe rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_opponents_holdout_endpoint --recipe-root runs\phase_4_transfer\rotating_plus_nemesis_novelty_replay --recipe-root runs\phase_4_transfer\rotating_plus_replay_aware_selection
 ```
 
 The script writes:
@@ -93,12 +90,11 @@ The script writes:
 
 ## Step 6: Refresh The Novelty Review
 
-After the new paired dataset is in place, rebuild the novelty packet on the relevant transfer roots:
+After the new paired dataset is in place, rebuild the novelty packet on the relevant phase-4 roots:
 
 ```powershell
-python review_novelty_spikes.py --runs-root runs\transfer_suite\rotating_plus_nemesis_novelty_replay --output-dir runs\transfer_suite\novelty_review_heavy_<timestamp>
-python review_novelty_spikes.py --runs-root runs\transfer_suite\rotating_opponents_holdout_endpoint --output-dir runs\transfer_suite\novelty_review_baseline_<timestamp>
-python review_novelty_spikes.py --runs-root runs\transfer_suite\rotating_plus_replay_aware_selection --output-dir runs\transfer_suite\novelty_review_replay_aware_<timestamp>
+python review_novelty_spikes.py --runs-root runs\phase_4_transfer\rotating_plus_nemesis_novelty_replay --output-dir runs\phase_4_transfer\novelty_review_heavy
+python review_novelty_spikes.py --runs-root runs\phase_4_transfer\rotating_opponents_holdout_endpoint --output-dir runs\phase_4_transfer\novelty_review_baseline
 ```
 
 ## Interpretation Order
