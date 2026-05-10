@@ -1,0 +1,155 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_t = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_t = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def neigh8(x, y):
+        for dx, dy in dirs:
+            if dx == 0 and dy == 0:
+                continue
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < w and 0 <= ny < h:
+                yield nx, ny
+
+    # Build strategic targets: unclaimed cells adjacent to opponent territory first; else nearest unclaimed.
+    opp_adj = set()
+    for (tx, ty) in opp_t:
+        for nx, ny in neigh8(tx, ty):
+            if (nx, ny) in unclaimed:
+                opp_adj.add((nx, ny))
+    targets = list(opp_adj)
+    if not targets:
+        targets = list(unclaimed)
+
+    if not targets:
+        # If no targets, try to keep territory and pressure around opponent.
+        targets = [p for p in neigh8(ox, oy) if p not in obstacles and (0 <= p[0] < w and 0 <= p[1] < h)]
+
+    best = (0, 0)
+    best_score = -10**18
+    base_my = (sx, sy)
+    base_dist_opp = abs(sx - ox) + abs(sy - oy)
+
+    # For determinism, iterate in stable sorted order.
+    targets.sort(key=lambda p: (p[0], p[1]))
+
+    # Precompute a small set of candidate targets near self for speed/determinism.
+    # (Heuristic: only consider closest few.)
+    t_with_dist = []
+    for tx, ty in targets:
+        d = abs(tx - sx) + abs(ty - sy)
+        t_with_dist.append((d, tx, ty))
+    t_with_dist.sort()
+    t_with_dist = t_with_dist[:10]
+
+    for ddx, ddy in dirs:
+        nx, ny = sx + ddx, sy + ddy
+        if not inb(nx, ny):
+            continue
+
+        score = 0
+        cell = (nx, ny)
+
+        # Direct gains
+        if cell in opp_t:
+            score += 3000  # flipping on entry
+        if cell in unclaimed:
+            score += 120
+        if cell in self_t:
+            score += 10
+
+        # Edge pressure: prefer moving towards opponent-adjacent unclaimed
+        if cell in opp_adj:
+            score += 600
+
+        # Move quality relative to opponent
+        score += (base_dist_opp - (abs(nx - ox) + abs(ny - oy))) * 4
+
+        # Target-based shaping
+        local_best = -10**18
+        for d, tx, ty in t_with_dist:
+            # Encourage approaching targets and aligning with frontier
+            nd = abs(nx - tx) + abs(ny - ty)
+            adv = d - nd
+            t_adj_opp = 1 if (tx, ty) in opp_adj else 0
+            val = adv * (80 + 40 * t_adj_opp) + (20 if (nx, ny) == (tx, ty) else 0)
+            if val > local_best:
+                local_best = val
+        score += local_best
+
+        # Avoid getting stuck near obstacles by discouraging repeated stay unless best
+        if (ddx, ddy) == (0, 0):
+            score -= 5
+
+        # Deterministic tie-break
+        if score > best_score or (score == best_score and (ddx, ddy) < best):
+            best_score = score
+            best = (ddx, ddy)
+
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+    def md(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    opp_t = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    opp_adj = []
+    if opp_t and unclaimed:
+        for tx, ty in opp_t:
+            for dx, dy in dirs:
+                nx, ny = tx + dx, ty + dy
+                if (nx, ny) in unclaimed:
+                    opp_adj.append((nx, ny))
+    targets = opp_adj if opp_adj else list(unclaimed)
+
+    if not targets:
+        best = (md(sx, sy, ox, oy), sx, sy)
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+            d = md(nx, ny, ox, oy)
+            cand = (d, nx, ny)
+            if cand < best:
+                best = cand
+                bx, by = nx, ny
+        return [bx - sx, by - sy]
+
+    targets.sort(key=lambda t: (md(sx, sy, t[0], t[1]), t[0], t[1]))
+    tx, ty = targets[0]
+
+    best_move = (10**9, -10**9, sx, sy)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        dist = md(nx, ny, tx, ty)
+        gain = -(md(nx, ny, ox, oy))  # prefer moving closer to opponent if tied
+        cand = (dist, gain, nx, ny)
+        if cand < best_move:
+            best_move = cand
+            bx, by = nx, ny
+    return [bx - sx, by - sy]

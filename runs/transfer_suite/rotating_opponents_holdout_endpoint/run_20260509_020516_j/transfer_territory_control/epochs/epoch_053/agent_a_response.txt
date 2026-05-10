@@ -1,0 +1,181 @@
+def choose_move(observation):
+    W = int(observation.get("grid_width", 8) or 8)
+    H = int(observation.get("grid_height", 8) or 8)
+    sx, sy = map(int, observation.get("self_position", (0, 0)))
+    ox, oy = map(int, observation.get("opponent_position", (0, 0)))
+
+    def inb(x, y): return 0 <= x < W and 0 <= y < H
+
+    obs_cells = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            obs_cells.add((int(p[0]), int(p[1])))
+
+    def toset(lst):
+        s = set()
+        for p in lst or []:
+            if p and len(p) >= 2:
+                s.add((int(p[0]), int(p[1])))
+        return s
+
+    myT = toset(observation.get("self_territory"))
+    oppT = toset(observation.get("opponent_territory"))
+    unC = toset(observation.get("unclaimed_cells") or [])
+
+    neigh = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if (dx or dy)]
+    dirs = neigh + [(0, 0)]
+
+    def adj_to_set(tset, x, y):
+        for dx, dy in neigh:
+            if (x + dx, y + dy) in tset:
+                return True
+        return False
+
+    def dist(a, b): return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    target = None
+    if myT:
+        # Prefer unclaimed cells adjacent to our territory.
+        best_d = None
+        for ux, uy in unC:
+            if adj_to_set(myT, ux, uy):
+                d = (abs(ux - sx) + abs(uy - sy))
+                if best_d is None or d < best_d:
+                    best_d = d
+                    target = (ux, uy)
+    if target is None:
+        # Otherwise push towards nearest unclaimed; if none, towards opponent boundary.
+        best = None
+        for cell in unC:
+            d = dist(cell, (sx, sy))
+            if best is None or d < best[0]:
+                best = (d, cell)
+        if best is not None:
+            target = best[1]
+        else:
+            # Fallback: go near opponent territory if any.
+            if oppT:
+                best = None
+                for cell in oppT:
+                    d = dist(cell, (sx, sy))
+                    if best is None or d < best[0]:
+                        best = (d, cell)
+                target = best[1]
+            else:
+                target = (ox, oy)
+
+    cx, cy = None, None
+    if target is not None:
+        cx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+        cy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+
+    best_move = (0, 0)
+    best_score = -10**18
+    tie = int(observation.get("turn_index", 0) or 0) % 9
+
+    for i, (dx, dy) in enumerate(dirs):
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs_cells:
+            # invalid will be rejected by staying; still evaluate as staying.
+            nx, ny = sx, sy
+        score = 0
+
+        if (nx, ny) in myT:
+            score += 4
+        if (nx, ny) in oppT:
+            score += 12  # likely flips on entry
+        if (nx, ny) in unC:
+            score += 9
+        if adj_to_set(myT, nx, ny):
+            score += 3
+
+        # Encourage progress toward target; discourage back-and-forth into opponent.
+        if target is not None:
+            score += -2 * dist((nx, ny), target)
+
+        # Softly prefer moves roughly towards target direction.
+        if cx is not None and cy is not None:
+            score += 1 if (dx == cx or cx == 0) else -1
+            score += 1 if (dy == cy or cy == 0) else -1
+
+        # Deterministic tie-break: choose based on stable function of move index + turn.
+        score += -0.001 * (((i + 1 + tie) * (i + 2 + tie)) % 17)
+
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    W = int(observation.get("grid_width", 8) or 8)
+    H = int(observation.get("grid_height", 8) or 8)
+    sx, sy = map(int, observation.get("self_position", (0, 0)))
+    ox, oy = map(int, observation.get("opponent_position", (0, 0)))
+
+    def to_cells(v):
+        s = []
+        for p in v or []:
+            if p and len(p) >= 2:
+                x, y = int(p[0]), int(p[1])
+                s.append((x, y))
+        return s
+
+    obs = set(to_cells(observation.get("obstacles")))
+    myT = set(to_cells(observation.get("self_territory")))
+    oppT = set(to_cells(observation.get("opponent_territory")))
+    unC = to_cells(observation.get("unclaimed_cells"))
+    res = to_cells(observation.get("resources"))
+
+    neigh8 = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    neigh8z = neigh8 + [(0, 0)]
+
+    def inb(x, y): return 0 <= x < W and 0 <= y < H
+    def free(x, y): return inb(x, y) and (x, y) not in obs
+
+    def adj_to_t(tset, x, y):
+        for dx, dy in neigh8:
+            if (x + dx, y + dy) in tset:
+                return True
+        return False
+
+    def man(a, b): return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    target = None
+    best_td = None
+    if myT and unC:
+        for ux, uy in unC:
+            if free(ux, uy) and adj_to_t(myT, ux, uy):
+                d = man((sx, sy), (ux, uy))
+                if best_td is None or d < best_td:
+                    best_td = d
+                    target = (ux, uy)
+
+    if target is None and res:
+        target = min((p for p in res if free(p[0], p[1])), key=lambda p: man((sx, sy), p), default=None)
+
+    if target is None:
+        if oppT:
+            # head toward our nearest approach to opponent territory
+            target = min(oppT, key=lambda p: man((sx, sy), p), default=None)
+
+    if target is None:
+        # fallback: deterministically bias toward opponent, else stay
+        target = (ox, oy)
+
+    best_move = (0, 0)
+    best_val = None
+    for dx, dy in neigh8z:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny):
+            continue
+        d_to_target = man((nx, ny), target)
+        d_to_opp = man((nx, ny), (ox, oy))
+        # Prefer getting closer to target; then keep some distance from opponent slightly.
+        val = (d_to_target, -d_to_opp, dx, dy)
+        if best_val is None or val < best_val:
+            best_val = val
+            best_move = [dx, dy]
+    return best_move

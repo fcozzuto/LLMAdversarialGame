@@ -1,0 +1,154 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = observation.get("unclaimed_cells") or []
+    self_t = set(map(tuple, observation.get("self_territory") or []))
+    opp_t = set(map(tuple, observation.get("opponent_territory") or []))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    # Choose a strategic target deterministically
+    center = (w // 2, h // 2)
+    candidates = list(unclaimed)
+    if not candidates:
+        # If no unclaimed, try to invade near opponent territory boundary deterministically
+        if opp_t:
+            boundary = []
+            for (x, y) in opp_t:
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        nx, ny = x + dx, y + dy
+                        if inside(nx, ny) and (nx, ny) not in opp_t:
+                            boundary.append((nx, ny))
+            # Prefer cells closer to opponent and also closer to our current position
+            boundary = sorted(set(boundary), key=lambda p: (man(ox, oy, p[0], p[1]) - man(sx, sy, p[0], p[1]), p[1], p[0]))
+            candidates = boundary[:min(8, len(boundary))]
+        else:
+            candidates = [(sx, sy)]
+
+    # Score targets: expand (closer to self), deny (far from opponent), also bias toward center
+    best = None
+    best_score = -10**18
+    for tx, ty in candidates:
+        if not inside(tx, ty) or (tx, ty) in obstacles:
+            continue
+        ds = man(sx, sy, tx, ty)
+        do = man(ox, oy, tx, ty)
+        # If target is opponent territory, prefer if it can be reached quickly (flipping on entry)
+        invade_bonus = 8 if (tx, ty) in opp_t else 0
+        # If target is adjacent to our territory, prefer expansion
+        adj_self = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                nx, ny = tx + dx, ty + dy
+                if (nx, ny) in self_t:
+                    adj_self = 3
+        center_bias = -0.35 * man(center[0], center[1], tx, ty)
+        score = (do * 1.8) - (ds * 2.0) + invade_bonus + adj_self + center_bias
+        # Tie-break deterministically
+        score_key = (score, -tx, -ty)
+        if best is None or score_key > (best_score, -best[0], -best[1]):
+            best_score = score
+            best = (tx, ty)
+
+    tx, ty = best if best is not None else (sx, sy)
+
+    # Choose move that improves toward target, avoids obstacles, and reduces opponent's approach
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = (0, 0)
+    best_mscore = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            # Engine may keep us in place; penalize strongly
+            ns = man(sx, sy, tx, ty)
+            no = man(ox, oy, sx, sy)
+            mscore = -1000 + (no * 0.1) - ns
+        else:
+            ns = man(nx, ny, tx, ty)
+            no = man(nx, ny, ox, oy)
+            invade = 10 if (nx, ny) in opp_t else 0
+            adj = 0
+            for ax in (-1, 0, 1):
+                for ay in (-1, 0, 1):
+                    if (nx + ax, ny + ay) in self_t:
+                        adj = 2
+            mscore = (man(ox, oy,
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        try:
+            x, y = p
+            obstacles.add((x, y))
+        except Exception:
+            pass
+
+    self_t = set(map(tuple, observation.get("self_territory") or []))
+    opp_t = set(map(tuple, observation.get("opponent_territory") or []))
+    unclaimed = list(observation.get("unclaimed_cells") or [])
+
+    moves = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+    best = None
+    best_val = -10**18
+
+    targets = unclaimed if unclaimed else (list(opp_t) if opp_t else [(ox, oy)])
+    if not targets:
+        targets = [(ox, oy)]
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        md = abs(nx - sx) + abs(ny - sy)
+
+        # pick nearest target to influence
+        t = min(targets, key=lambda p: abs(nx - p[0]) + abs(ny - p[1]))
+        dist_to_t = abs(nx - t[0]) + abs(ny - t[1])
+
+        # heuristic: expand unclaimed, avoid opponent territory less, prefer our territory a bit
+        val = -dist_to_t
+        if (nx, ny) in unclaimed:
+            val += 100000
+        if (nx, ny) in opp_t:
+            val -= 20000
+        if (nx, ny) in self_t:
+            val += 2000
+
+        # slight tie-breaker toward moving closer to opponent when no targets
+        if not unclaimed and opp_t:
+            val += -2 * (abs(nx - ox) + abs(ny - oy))
+
+        if val > best_val or (val == best_val and (dx, dy) < best):
+            best_val = val
+            best = (dx, dy)
+
+    if best is None:
+        # fallback: try any in-bounds move even if blocked
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if inside(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    return [best[0], best[1]]

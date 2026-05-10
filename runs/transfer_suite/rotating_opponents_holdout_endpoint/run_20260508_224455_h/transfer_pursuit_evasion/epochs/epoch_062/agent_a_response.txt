@@ -1,0 +1,156 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obs = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    role_a = str(observation.get("self_role") or observation.get("role") or "pursuer").lower()
+    i_am_evader = "evader" in role_a
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx >= dy else dy
+
+    def obstacle_risk(x, y):
+        # Prefer not to "hug" obstacles when evading; prefer routes that don't immediately dead-end when pursuing.
+        r = 0
+        for ax, ay in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+            nx, ny = x + ax, y + ay
+            if (nx, ny) in obs:
+                r += 1
+        return r
+
+    def dist_to_goal(x, y):
+        # If evading, favor moving to far corners; if pursuing, favor moving along longest axis away from obstacles.
+        corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+        if i_am_evader:
+            return max(abs(cx - ox) + abs(cy - oy) for cx, cy in corners)  # constant-ish; replaced below
+        return 0
+
+    # Choose best move
+    best_move = [0, 0]
+    best_score = None
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+
+        d = cheb(nx, ny, ox, oy)
+        # Additional shaping with "wall runner": if blocked, prefer moving that changes relative x or y fastest.
+        relx = abs(nx - ox)
+        rely = abs(ny - oy)
+        d0 = cheb(sx, sy, ox, oy)
+
+        risk = obstacle_risk(nx, ny)
+        score = 0.0
+        if i_am_evader:
+            # Evader: maximize distance and steer toward a far corner, while avoiding obstacle risk.
+            corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+            far_corner = max(corners, key=lambda c: abs(c[0] - ox) + abs(c[1] - oy))
+            steer = - (abs(nx - far_corner[0]) + abs(ny - far_corner[1]))
+            score = (d * 10.0) + (relx + rely) * 0.5 + steer * 0.15 - risk * 1.0
+            # If capture is imminent, prioritize immediate escape
+            if d == 0:
+                score -= 1000.0
+        else:
+            # Pursuer: minimize distance, avoid getting trapped near obstacles.
+            progress = (d0 - d)  # positive if closing
+            score = (-d * 10.0) + progress * 2.0 - risk * 1.2
+           
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obs = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+        elif isinstance(p, dict) and "x" in p and "y" in p:
+            x, y = int(p["x"]), int(p["y"])
+        else:
+            continue
+        if 0 <= x < w and 0 <= y < h:
+            obs.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx >= dy else dy
+
+    role = str(observation.get("self_role") or observation.get("role") or "").lower()
+    evader = "evader" in role
+
+    resources = observation.get("resources") or []
+    targets = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if inb(rx, ry) and (rx, ry) not in obs:
+                targets.append((rx, ry))
+        elif isinstance(r, dict) and "x" in r and "y" in r:
+            rx, ry = int(r["x"]), int(r["y"])
+            if inb(rx, ry) and (rx, ry) not in obs:
+                targets.append((rx, ry))
+    if targets:
+        tx, ty = min(targets, key=lambda p: cheb(sx, sy, p[0], p[1]))
+    else:
+        tx, ty = (ox, oy)
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    best_val = None
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        if evader and not targets:
+            # evade opponent when no resources to pursue
+            v = cheb(nx, ny, ox, oy)
+        else:
+            # pursue resource if present, otherwise approach opponent
+            v = -cheb(nx, ny, tx, ty) if not evader else cheb(nx, ny, tx, ty)
+        # Prefer moves that also don't get immediately stuck near obstacles
+        adj_block = 0
+        for ax, ay in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            xx, yy = nx + ax, ny + ay
+            if not inb(xx, yy) or (xx, yy) in obs:
+                adj_block += 1
+        key = (adj_block, v)
+        if best is None or key < best_val:
+            best = [dx, dy]
+            best_val = key
+
+    if best is None:
+        return [0, 0]
+    return best

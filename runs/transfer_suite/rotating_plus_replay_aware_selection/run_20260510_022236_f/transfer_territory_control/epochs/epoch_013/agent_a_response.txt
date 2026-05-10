@@ -1,0 +1,137 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (w - 1, h - 1)
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    def to_set(lst):
+        s = set()
+        if not lst:
+            return s
+        for p in lst:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = int(p[0]), int(p[1])
+                if 0 <= x < w and 0 <= y < h:
+                    s.add((x, y))
+        return s
+
+    selfT = to_set(observation.get("self_territory"))
+    oppT = to_set(observation.get("opponent_territory"))
+    unclaimed = to_set(observation.get("unclaimed_cells") or observation.get("unclaimed"))
+    obstacles = to_set(observation.get("obstacles"))
+    resources = to_set(observation.get("resources"))
+
+    my_count = int(observation.get("self_territory_count") or 0)
+    opp_count = int(observation.get("opponent_territory_count") or 0)
+    aggressive = (my_count <= opp_count)
+
+    # Directional bias: head towards opponent, but avoid moving away from resources if present.
+    rtx = rty = None
+    if resources:
+        rtx, rty = min(resources, key=lambda p: (abs(sx - p[0]) + abs(sy - p[1]), p[0], p[1]))
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    opp_dx, opp_dy = ox - sx, oy - sy
+    pref_forward = (1 if opp_dx > 0 else -1 if opp_dx < 0 else 0, 1 if opp_dy > 0 else -1 if opp_dy < 0 else 0)
+
+    cand = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if not (0 <= nx < w and 0 <= ny < h):
+                continue
+            cand.append((dx, dy, nx, ny))
+    cand.sort(key=lambda t: (t[0], t[1]))  # deterministic tie-break
+
+    best = (0, 0, -10**18)
+    for dx, dy, nx, ny in cand:
+        if (nx, ny) in obstacles:
+            score = -10**18
+        else:
+            score = 0
+            if (nx, ny) in selfT:
+                score += 50 if aggressive else 80
+            elif (nx, ny) in oppT:
+                score += 220 if aggressive else 140
+            elif (nx, ny) in unclaimed:
+                score += 120 if aggressive else 90
+            else:
+                score += 40  # edge/empty squares still controllable by entry
+
+            # Avoid getting stuck: prefer not reducing frontier progress.
+            f_before = abs(sx - ox) + abs(sy - oy)
+            f_after = abs(nx - ox) + abs(ny - oy)
+            if aggressive:
+                score += 6 * (f_before - f_after)  # go closer
+            else:
+                score += 3 * (f_before - f_after)  # slight prefer closer but less
+
+            # If resource exists, bias towards it but only modestly.
+            if rtx is not None:
+                score += 4 * (dist((sx, sy), (rtx, rty)) - dist((nx, ny), (rtx, rty)))
+
+            # Prefer moves aligned with forward direction, discourage opposite.
+            adx, ady = dx, dy
+            score += 10 if (adx, ady) == pref_forward else 0
+            if (adx, ady) == (-pref_forward[0], -pref_forward[1]) and (pref_forward[0] or pref_forward[1]):
+                score -= 12
+
+            # Sub-heuristic: if we can immediately move into opponent territory, strongly prefer it.
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0)) or (0, 0)
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1)) or (w - 1, h - 1)
+    try:
+        sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    except:
+        sx, sy, ox, oy = 0, 0, w - 1, h - 1
+
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+    res = []
+    for p in resources:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                res.append((x, y))
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    target = None
+    if res:
+        target = min(res, key=lambda p: (abs(p[0] - sx) + abs(p[1] - sy), p[0], p[1]))
+    else:
+        target = (ox, oy)
+
+    def score(nx, ny):
+        if (nx, ny) in obs:
+            return -10**9
+        d1 = abs(nx - target[0]) + abs(ny - target[1])
+        d2 = abs(nx - ox) + abs(ny - oy)
+        myc = int(observation.get("self_territory_count") or 0)
+        opc = int(observation.get("opponent_territory_count") or 0)
+        if myc <= opc:
+            return -d1 + 0.2 * d2
+        return -d1 + 0.6 * d2
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1), (0, 0)]
+    best = (-(10**18), 0, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if 0 <= nx < w and 0 <= ny < h:
+            sc = score(nx, ny)
+            if sc > best[0] or (sc == best[0] and (dx, dy) < (best[1], best[2])):
+                best = (sc, dx, dy)
+
+    return [int(best[1]), int(best[2])]

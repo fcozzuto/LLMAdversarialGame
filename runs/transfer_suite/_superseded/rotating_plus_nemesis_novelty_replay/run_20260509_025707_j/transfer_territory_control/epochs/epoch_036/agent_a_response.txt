@@ -1,0 +1,122 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = {(x, y) for x, y in (observation.get("obstacles") or [])}
+    opp = {(x, y) for x, y in (observation.get("opponent_territory") or [])}
+    un = {(x, y) for x, y in (observation.get("unclaimed_cells") or [])}
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    opp_list = list(opp)
+    un_list = list(un)
+    if not opp_list and not un_list:
+        return [0, 0]
+
+    opp_pos = observation.get("opponent_position", None)
+    if opp_pos is None:
+        opp_pos = (w - 1, h - 1)
+
+    myc = observation.get("self_territory_count", len(opp))
+    opc = observation.get("opponent_territory_count", len(opp_list))
+    behind = myc < opc
+
+    # Alternate between attack (steal) and deny (claim safe unclaimed) deterministically.
+    attack_mode = (observation["turn_index"] % 4 != 0) or not behind
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    neigh = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1) if not (dx == 0 and dy == 0)]
+
+    def nearest_dist_to_set(p, S):
+        if not S:
+            return 10**9
+        return min(dist(p, q) for q in S)
+
+    best = (None, -10**18)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        p = (nx, ny)
+
+        local_opp = sum(((nx + ax, ny + ay) in opp) for ax, ay in neigh)
+        local_un = sum(((nx + ax, ny + ay) in un) for ax, ay in neigh)
+
+        if attack_mode:
+            d_opp = nearest_dist_to_set(p, opp_list)
+            # Prefer stepping into opponent territory (capture on entry).
+            enter_bonus = 3.0 if p in opp else 0.0
+            target_bonus = 0.2 * (local_opp + (p in opp))
+            val = -1.3 * d_opp + enter_bonus + target_bonus + 0.05 * local_un
+        else:
+            # Deny: take unclaimed far from opponent, but move there while keeping proximity reasonable.
+            if un_list:
+                d_me = min(dist(p, q) for q in un_list)
+                d_op_best = min(dist(opp_pos, q) for q in un_list)  # baseline for scaling
+                d_op = max(0, d_op_best)
+                # Approx: choose cells that increase distance from opponent when near current position.
+                d_op_now = nearest_dist_to_set(p, [q for q in opp_list]) if opp_list else d_op
+                # Encourage being closer to some unclaimed while still far from opponent.
+                val = -1.0 * d_me + 0.08 * local_un - 0.3 * d
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w, h = observation.get("grid_width", 0), observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    obs = set(observation.get("obstacles") or [])
+    un = list(observation.get("unclaimed_cells") or [])
+    resources = list(observation.get("resources") or [])
+    turn = observation.get("turn_index", 0)
+    behind = False
+    myc = observation.get("self_territory_count", 0)
+    opc = observation.get("opponent_territory_count", 0)
+    if myc < opc:
+        behind = True
+    attack = (turn % 2 == 1) or not behind
+
+    neigh = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    cand = []
+    for dx, dy in neigh + [(0, 0)]:
+        nx, ny = sx + dx, sy + dy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:
+            cand.append((dx, dy))
+    if not cand:
+        return [0, 0]
+
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    targets = un if un else (resources if resources else [])
+    if attack or not targets:
+        targets = [((ox, oy))]
+    else:
+        if not targets:
+            targets = [((ox, oy))]
+
+    best = None
+    bestv = None
+    for dx, dy in cand:
+        nx, ny = sx + dx, sy + dy
+        d = min(man((nx, ny), t) for t in targets) if targets else 0
+        # Prefer moving onto unclaimed/resources deterministically, then closer to target.
+        bonus = 0
+        if (nx, ny) in obs:
+            bonus = -10**9
+        elif (nx, ny) in set(un):
+            bonus += 50
+        elif (nx, ny) in set(resources):
+            bonus += 20
+        # Slight bias toward opponent when attacking, toward center otherwise.
+        bias = man((nx, ny), (w // 2, h // 2))
+        if attack:
+            bias = -man((nx, ny), (ox, oy))
+        v = bonus - d + (0.001 * (-bias))
+        if bestv is None or v > bestv or (v == bestv and (dx, dy) < best):
+            bestv = v
+            best = (dx, dy)
+    return [int(best[0]), int(best[1])]

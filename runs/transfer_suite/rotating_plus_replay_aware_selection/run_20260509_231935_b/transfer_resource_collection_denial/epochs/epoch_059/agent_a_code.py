@@ -1,0 +1,53 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+
+    res = [(p[0], p[1]) for p in resources if p and len(p) >= 2]
+    if not res:
+        return [0, 0]
+    obs = set((p[0], p[1]) for p in obstacles if p and len(p) >= 2)
+
+    dirs = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+
+    def cheb(a, b, c, d):
+        dx = a - c
+        if dx < 0: dx = -dx
+        dy = b - d
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    best_move = [0, 0]
+    best_score = None
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obs:
+            continue
+        best_for_cell = None
+        for rx, ry in res:
+            if (rx, ry) in obs:
+                continue
+            dself = cheb(nx, ny, rx, ry)
+            dopp = cheb(ox, oy, rx, ry)
+            score = dself * 10 - dopp
+            if best_for_cell is None or score < best_for_cell:
+                best_for_cell = score
+        if best_for_cell is None:
+            continue
+        if best_score is None or best_for_cell < best_score:
+            best_score = best_for_cell
+            best_move = [dx, dy]
+        elif best_for_cell == best_score:
+            if best_move == [0, 0] and (dx, dy) != (0, 0):
+                best_move = [dx, dy]
+            elif (dx, dy) != (0, 0):
+                if dx > best_move[0] or (dx == best_move[0] and dy > best_move[1]):
+                    best_move = [dx, dy]
+
+    return [int(best_move[0]), int(best_move[1])]

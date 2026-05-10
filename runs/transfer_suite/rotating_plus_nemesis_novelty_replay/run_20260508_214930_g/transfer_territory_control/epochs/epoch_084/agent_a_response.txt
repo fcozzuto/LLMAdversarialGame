@@ -1,0 +1,130 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [7, 7])
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_t = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_t = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    # Threat targets: unclaimed/self cells adjacent to opponent territory (harder for them if we occupy)
+    threat = set()
+    for (px, py) in opp_t:
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                q = (px + dx, py + dy)
+                if 0 <= q[0] < w and 0 <= q[1] < h and q not in obstacles and q in unclaimed:
+                    threat.add(q)
+
+    # Main target: choose a cell that best improves our territory expansion while considering blocking
+    def cell_value(x, y):
+        if (x, y) in opp_t:
+            return -10**6  # prefer not to step into their existing territory unless it's a winning capture
+        if (x, y) in self_t:
+            return 80
+        if (x, y) in threat:
+            return 420  # block frontier
+        if (x, y) in unclaimed:
+            return 240  # claim unknown
+        return 0
+
+    # Deterministic local move scoring (no grid-wide search)
+    base_d_opp = abs(sx - ox) + abs(sy - oy)
+    best = (0, 0)
+    best_score = -10**18
+    for ddx, ddy in dirs:
+        nx, ny = sx + ddx, sy + ddy
+        if not ok(nx, ny):
+            continue
+        score = 0
+        # Prefer occupying/expanding territory
+        if (nx, ny) in unclaimed:
+            score += 250
+        if (nx, ny) in self_t:
+            score += 120
+        if (nx, ny) in threat:
+            score += 380
+        # Strongly avoid getting immediately swept into opponent zone (unless it also moves closer to unclaimed)
+        if (nx, ny) in opp_t:
+            score -= 600
+        # Distance shaping: reduce distance to closest attractive cell among: threat, unclaimed, self
+        candidates = threat if threat else unclaimed
+        best_cell = None
+        best_cd = 10**9
+        for (tx, ty) in candidates:
+            cd = abs(nx - tx) + abs(ny - ty)
+            if cd < best_cd or (cd == best_cd and (tx < best_cell[0] or (best_cell and ty < best_cell[1]))):
+                best_cd = cd
+                best_cell = (tx, ty)
+                if best_cd == 0:
+                    break
+        if best_cell is None and unclaimed:
+            # fallback: nearest unclaimed
+            for (tx, ty) in unclaimed:
+                cd = abs(nx - tx) + abs(ny - ty)
+                if cd < best_cd:
+                    best_cd = cd
+        if best_cell is None:
+            best_cd = 0
+        score += max(0, 120 - best_cd * 10)
+
+        # Also keep moving away from opponent unless we can claim valuable threats
+        d_opp = abs(nx - ox) + abs(ny - oy)
+        score += (d_opp - base_d_opp) * 8
+        # Minor preference for staying consistent with territory (reduces oscillations)
+        if (nx, ny) in self_t:
+            score += 20
+
+        # Deterministic tie-break: smallest dx, then dy in a fixed order already; use explicit compare
+        if score > best_score:
+            best_score = score
+            best = (ddx, ddy)
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_t = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_t = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+
+    dirs = [(-1, 0), (0, -1), (0, 0), (1, 0), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    best = (-10**18, 0, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        if (nx, ny) == (ox, oy) or (nx, ny) in opp_t:
+            val = -10**12
+        else:
+            md = abs(nx - ox) + abs(ny - oy)
+            val = -md
+            if (nx, ny) in unclaimed:
+                val += 5
+            if (nx, ny) in self_t:
+                val += 1
+            if (nx, ny) in opp_t:
+                val -= 1000
+        if val > best[0]:
+            best = (val, dx, dy)
+    dx, dy = best[1], best[2]
+    if dx not in (-1, 0, 1) or dy not in (-1, 0, 1):
+        return [0, 0]
+    return [dx, dy]

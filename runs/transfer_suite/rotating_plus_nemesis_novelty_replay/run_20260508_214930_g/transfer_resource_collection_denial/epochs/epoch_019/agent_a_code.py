@@ -1,0 +1,62 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    if not resources:
+        return [0, 0]
+
+    cx, cy = w // 2, h // 2
+    best = None
+    for rx, ry in resources:
+        if not inb(rx, ry) or (rx, ry) in obs:
+            continue
+        myd = cheb(sx, sy, rx, ry)
+        oppd = cheb(ox, oy, rx, ry)
+        center = cheb(rx, ry, cx, cy)
+        closer = 1 if myd < oppd else 0
+        if best is None:
+            best = (closer, -(oppd - myd), -center, -(rx * 1000 + ry), rx, ry)
+        else:
+            cand = (closer, -(oppd - myd), -center, -(rx * 1000 + ry), rx, ry)
+            if cand > best:
+                best = cand
+
+    _, _, _, _, tx, ty = best
+    dx = 0 if tx == sx else (1 if tx > sx else -1)
+    dy = 0 if ty == sy else (1 if ty > sy else -1)
+
+    nx, ny = sx + dx, sy + dy
+    if not inb(nx, ny) or (nx, ny) in obs:
+        nx, ny = sx + dx, sy
+        if inb(nx, ny) and (nx, ny) not in obs:
+            dy = 0
+        else:
+            nx, ny = sx, sy + dy
+            if inb(nx, ny) and (nx, ny) not in obs:
+                dx = 0
+            else:
+                for adx, ady in ((1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)):
+                    xx, yy = sx + adx, sy + ady
+                    if inb(xx, yy) and (xx, yy) not in obs:
+                        return [adx, ady]
+                return [0, 0]
+    return [dx, dy]

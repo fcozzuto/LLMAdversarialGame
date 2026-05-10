@@ -1,0 +1,146 @@
+def choose_move(observation):
+    w = int(observation["grid_width"])
+    h = int(observation["grid_height"])
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        if p and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    self_t = set(tuple(p) for p in (observation.get("self_territory") or []) if p and len(p) >= 2)
+    opp_t = set(tuple(p) for p in (observation.get("opponent_territory") or []) if p and len(p) >= 2)
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []) if p and len(p) >= 2)
+
+    # Frontier = cells adjacent to opponent territory that we can step into
+    frontier = set()
+    for (x, y) in opp_t:
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if valid(nx, ny) and ((nx, ny) not in opp_t):
+                    frontier.add((nx, ny))
+    if not frontier:
+        # Fallback: head toward any unclaimed cell
+        un = [c for c in unclaimed if valid(c[0], c[1])]
+        frontier = set(un) if un else set([(sx, sy)])
+
+    moves = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    best = None
+    best_score = None
+
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    opp_dist = man((sx, sy), (ox, oy))
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        pos = (nx, ny)
+
+        # Primary: directly stepping onto opponent territory to flip
+        if pos in opp_t:
+            score = 100000 - man(pos, (ox, oy))
+        else:
+            # Secondary: capture/expand into frontier and unclaimed near opponent
+            score = 0
+            if pos in unclaimed:
+                score += 600
+            if pos in frontier:
+                score += 300
+            if pos in self_t:
+                score -= 80  # avoid re-entering our own interior
+
+            # Encourage moving closer to opponent and reducing distance to frontier
+            score += (200 - man(pos, (ox, oy)))
+            # If frontier exists, also bias toward nearest frontier cell
+            if frontier:
+                mindf = min(manh(pos, f) for f in frontier)
+                score += (80 - mindf * 10)
+
+            # Mild tie-breaker: prefer not-too-stationary when not improving
+            score += (-5 if (dx == 0 and dy == 0) else 0)
+
+        # Deterministic tie-break by coordinates
+        key = (-(score), nx, ny, dx, dy)
+        if best is None or key < best:
+            best = key
+            best_score = score
+
+    if best is None:
+        return [0, 0]
+    # Recover move from best key
+    _, nx, ny, dx, dy = best
+    return [dx, dy]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 0) or 0)
+    h = int(observation.get("grid_height", 0) or 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    targets = []
+    for k in ("unclaimed_cells", "resources", "unclaimed_cells_list"):
+        if k in observation and observation[k]:
+            for p in observation[k]:
+                if isinstance(p, (list, tuple)) and len(p) >= 2:
+                    x, y = p[0], p[1]
+                    if isinstance(x, int) and isinstance(y, int) and valid(x, y):
+                        targets.append((x, y))
+            if targets:
+                break
+    if not targets and isinstance(ox, int) and isinstance(oy, int) and valid(ox, oy):
+        targets = [(ox, oy)]
+
+    def best_score(nx, ny):
+        if targets:
+            bd = 10**18
+            for tx, ty in targets:
+                d = abs(tx - nx) + abs(ty - ny)
+                if d < bd:
+                    bd = d
+            return bd
+        return abs(ox - nx) + abs(oy - ny)
+
+    best = None
+    best_dir = (0, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        s = best_score(nx, ny)
+        if best is None or s < best:
+            best = s
+            best_dir = (dx, dy)
+
+    if valid(sx, sy):
+        return [best_dir[0], best_dir[1]]
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if valid(nx, ny):
+            return [dx, dy]
+    return [0, 0]

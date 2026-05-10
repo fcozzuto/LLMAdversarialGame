@@ -1,0 +1,163 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = {(p[0], p[1]) for p in (observation.get("obstacles") or [])}
+    my_set = {(p[0], p[1]) for p in (observation.get("self_territory") or [])}
+    opp_set = {(p[0], p[1]) for p in (observation.get("opponent_territory") or [])}
+    un_set = {(p[0], p[1]) for p in (observation.get("unclaimed_cells") or [])}
+
+    move_list = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not (0 <= sx < w and 0 <= sy < h):
+        return [0, 0]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cell_score(x, y):
+        # Higher is better.
+        if (x, y) in obstacles:
+            return -10**9
+        if (x, y) in opp_set:
+            # Flipping is enabled; strongly prefer contact.
+            base = 120
+        elif (x, y) in my_set:
+            base = 40
+        elif (x, y) in un_set:
+            base = 85
+        else:
+            base = 10
+
+        # Prefer frontier moves (adjacent to unclaimed or opponent).
+        near_opp = 0
+        near_un = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx or dy:
+                    nx, ny = x + dx, y + dy
+                    if inb(nx, ny):
+                        if (nx, ny) in opp_set:
+                            near_opp += 1
+                        if (nx, ny) in un_set:
+                            near_un += 1
+
+        # Penalize moving into "narrow" obstacle-adjacent areas.
+        obst_near = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx or dy:
+                    nx, ny = x + dx, y + dy
+                    if inb(nx, ny) and (nx, ny) in obstacles:
+                        obst_near += 1
+
+        # Deterministic tie-break favor toward nearest unclaimed if available.
+        # Use Manhattan to nearest unclaimed cell (cheap: sample up to 8 candidates).
+        nearest_un = 50
+        if un_set:
+            cnt = 0
+            for ux, uy in observation.get("unclaimed_cells") or []:
+                if cnt >= 8:
+                    break
+                d = abs(ux - x) + abs(uy - y)
+                if d < nearest_un:
+                    nearest_un = d
+                cnt += 1
+
+        # Encourage expansion away from opponent when leading; otherwise, press into opponent.
+        myc = observation.get("self_territory_count", len(my_set))
+        opc = observation.get("opponent_territory_count", len(opp_set))
+        leading = (myc - opc) >= 6
+
+        # Move toward corners late game, but only modestly.
+        corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+        corner_best = min(abs(cx - x) + abs(cy - y) for cx, cy in corners)
+
+        # Discourage staying still if there exists a beneficial unclaimed move.
+        return (base
+                + 10 * near_un
+                + (70 if leading else 95) * (near_opp > 0) + 6 * near_opp
+                - 5 * obst_near
+                - (0 if un_set else 8)
+                - 1.5 * nearest_un
+                - 0.2 * corner_best
+                - (8 if (x, y) == (sx, sy) else 0))
+
+    best = None
+    best_dxdy = (0, 0)
+    for dx, dy in move_list:
+        nx, ny = sx + dx, sy + dy
+        sc = cell_score(nx, ny)
+        if best is None or sc > best:
+            best = sc
+            best_dxdy = (dx, dy)
+
+    return [int(best_dxdy[0]), int(best_dxdy[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    w, h = observation.get("grid_width", 0), observation.get("grid_height", 0)
+    if not (isinstance(w, int) and isinstance(h, int) and 0 <= sx < w and 0 <= sy < h):
+        return [0, 0]
+
+    obstacles = observation.get("obstacles") or []
+    obst = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obst.add((p[0], p[1]))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    ox, oy = observation.get("opponent_position", (sx, sy))
+
+    unclaimed = observation.get("unclaimed_cells") or []
+    use_unclaimed = bool(unclaimed)
+
+    # Pre-pick a small set of target cells to keep deterministic and fast.
+    targets = []
+    if use_unclaimed:
+        lim = 40 if len(unclaimed) > 40 else len(unclaimed)
+        for i in range(lim):
+            p = unclaimed[i]
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                targets.append((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    best = (-(10**18), 0, 0)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obst:
+            continue
+
+        score = 0
+        d_opp = dist(nx, ny, ox, oy)
+        if (nx, ny) == (ox, oy):
+            score += 10**9
+        score += 200 - 3 * d_opp
+
+        if targets:
+            md = 10**9
+            # Only scan a small deterministic subset.
+            for tx, ty in targets:
+                d = dist(nx, ny, tx, ty)
+                if d < md:
+                    md = d
+            score += 120 - 2 * md
+
+        # Small deterministic tie-break: prefer moves that don't stay if equal score.
+        if score > best[0] or (score == best[0] and (dx, dy) != (0, 0) and best[1] == 0 and best[2] == 0):
+            best = (score, dx, dy)
+
+    return [int(best[1]), int(best[2])]

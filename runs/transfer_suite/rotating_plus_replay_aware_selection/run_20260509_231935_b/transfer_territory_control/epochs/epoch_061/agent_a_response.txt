@@ -1,0 +1,134 @@
+def choose_move(observation):
+    w = int(observation["grid_width"])
+    h = int(observation["grid_height"])
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    t = int(observation.get("turn_index", 0))
+    dirs = dirs[t % 9:] + dirs[:t % 9]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def neigh8(x, y):
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if inside(nx, ny):
+                yield nx, ny
+
+    def man(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    # Prefer stepping into unclaimed; then into opponent territory that is near us; else hold.
+    best = None
+    best_score = -10**9
+    self_pos = (sx, sy)
+
+    # Build a small deterministic "steal candidates" set: cells adjacent to opponent territory.
+    steal_candidates = set()
+    for px, py in opp_terr:
+        for nx, ny in neigh8(px, py):
+            if (nx, ny) not in obstacles and inside(nx, ny):
+                steal_candidates.add((nx, ny))
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        gain = 0
+        cell = (nx, ny)
+        if cell in unclaimed:
+            gain = 3
+        elif cell in opp_terr:
+            # Prefer captures that also reduce opponent pressure (closer to opponent than we are).
+            gain = 5 + (1.5 if man(nx, ny, ox, oy) <= man(sx, sy, ox, oy) else 0.0)
+        elif cell in self_terr:
+            gain = 1
+
+        # Boundary pressure: being closer to unclaimed or steal targets.
+        dist_to_unclaimed = 0
+        if unclaimed:
+            # Small deterministic sampling of unclaimed points
+            ulist = list(unclaimed)
+            k = min(6, len(ulist))
+            # deterministic pick based on t
+            for i in range(k):
+                p = ulist[(t + i * 3) % len(ulist)]
+                dist_to_unclaimed = 1e9 if i == 0 else dist_to_unclaimed
+                d = man(nx, ny, p[0], p[1])
+                if d < dist_to_unclaimed:
+                    dist_to_unclaimed = d
+            gain += 1.5 / (1 + dist_to_unclaimed)
+
+        dist_to_opp_territory = 0
+        if opp_terr:
+            # distance to nearest opp territory from a few deterministic samples
+            olist = list(opp_terr)
+            k = min(5, len(olist))
+            for i in range(k):
+                p = olist[(t + i * 2) % len(olist)]
+                d = man(nx, ny, p[0], p[1])
+                dist_to_opp_territory = 1e9 if i == 0 else dist_to_opp_territory
+                if d < dist_to_opp_territory:
+                    dist_to_opp_territory = d
+            gain += 0.7 / (1 + dist_to_opp_territory)
+
+        # If cell is in steal_candidates but we aren't directly capturing it, prefer moves that get adjacent.
+        if cell in steal_candidates and cell not in opp_terr:
+            gain += 1.0
+
+        # Avoid drifting away from center too much (stable territorial growth).
+        cx, cy = (w - 1) // 2, (h - 1) // 2
+        gain -= 0.02 * man(nx, ny, cx, cy)
+
+        # Tie-break deterministically by favoring smaller dx,dy ordering already in dirs; then by
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 0) or 0)
+    h = int(observation.get("grid_height", 0) or 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1), (0, 0)]
+    best = (0, 0)
+    best_score = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        score = 0
+        if (nx, ny) in unclaimed:
+            score += 50
+        if (nx, ny) in self_terr:
+            score += 5
+        if (nx, ny) in opp_terr:
+            score += 80
+        # Prefer moving away from opponent when safe, else move toward unclaimed/opp territory
+        md = abs(nx - ox) + abs(ny - oy)
+        score += (30 - md)
+        # Slightly prefer positions closer to center for stability
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        score -= abs(nx - cx) + abs(ny - cy)
+        if score > best_score:
+            best_score = score
+            best = [dx, dy]
+
+    return best

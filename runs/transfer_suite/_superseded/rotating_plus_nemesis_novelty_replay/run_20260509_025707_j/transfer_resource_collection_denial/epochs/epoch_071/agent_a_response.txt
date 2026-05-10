@@ -1,0 +1,165 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles_list = observation.get("obstacles", []) or []
+    obstacles = set()
+    for p in obstacles_list:
+        if p is not None and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not resources:
+        return [0, 0]
+
+    tr = observation.get("turns_remaining", 0)
+    turns_weight = 1 + (0 if tr is None else min(6, int(tr / 8)))
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    # Choose best resource by who can reach sooner; bias toward states where we stay ahead.
+    best_r = None
+    best_v = -10**18
+    for r in resources:
+        rx, ry = r
+        if not (0 <= rx < w and 0 <= ry < h):
+            continue
+        my_d = man(sx, sy, rx, ry)
+        opp_d = man(ox, oy, rx, ry)
+        # If we're ahead, large reward; if behind, still chase but with penalty.
+        v = (opp_d - my_d) * 100 - my_d * 2 + (6 if my_d == 0 else 0) - (2 if opp_d < my_d else 0)
+        # Mild preference for earlier collection when turns are low
+        v += (my_d <= tr if tr is not None else 0) * 5
+        v += (turns_weight if opp_d - my_d > 0 else 0)
+        if v > best_v:
+            best_v = v
+            best_r = (rx, ry)
+
+    rx, ry = best_r
+
+    # Candidate move: step that reduces distance to chosen target, then improve locally if invalid/suboptimal.
+    def toward(cx, cy, tx, ty):
+        dx = 0 if tx == cx else (1 if tx > cx else -1)
+        dy = 0 if ty == cy else (1 if ty > cy else -1)
+        return dx, dy
+
+    dx0, dy0 = toward(sx, sy, rx, ry)
+    # If invalid, fall back to best valid move locally.
+    def move_value(nx, ny):
+        # Evaluate against both: chosen target + "steal potential" from resources.
+        my_d = man(nx, ny, rx, ry)
+        opp_d = man(ox, oy, rx, ry)
+        v = (opp_d - my_d) * 100 - my_d * 2
+        # Interception-ish: consider nearest few resources by opponent advantage
+        for r in resources:
+            if r is None or len(r) < 2:
+                continue
+            rxx, ryy = r
+            md = man(nx, ny, rxx, ryy)
+            od = man(ox, oy, rxx, ryy)
+            # Focus only on resources where opponent is closer (we can contest)
+            if od - md > 0:
+                v += (od - md) * 25 - md
+        # Small preference for moving (avoid staying still unless it doesn't hurt)
+        if nx == sx and ny == sy:
+            v -= 3
+        return v
+
+    best_move = (0, 0)
+    best_mv = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        mv = move_value(nx, ny)
+        if mv > best_mv:
+            best_mv = mv
+            best_move = (dx, dy)
+
+    # Ensure within bounds even if something weird happens
+    if inb(sx + dx0, sy + dy0):
+        # If local best is worse than moving toward target and target isn't blocked, use it
+        nx, ny = sx + dx0, sy + dy0
+        if move_value(nx, ny) >= best_mv - 1:
+            return [dx0, dy0]
+
+    return [best_move[0], best_move[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+
+    obs_list = observation.get("obstacles", []) or []
+    obstacles = set()
+    for p in obs_list:
+        if p and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    resources = observation.get("resources", []) or []
+    if not resources:
+        return [0, 0]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def best_target():
+        best = None
+        best_score = -10**18
+        for r in resources:
+            if not r or len(r) < 2:
+                continue
+            rx, ry = r[0], r[1]
+            if not inb(rx, ry):
+                continue
+            my_d = man(sx, sy, rx, ry)
+            op_d = man(ox, oy, rx, ry)
+            s = (op_d - my_d) * 100 - my_d * 2
+            if my_d == 0:
+                s += 500
+            if op_d == 0:
+                s -= 200
+            if op_d < my_d:
+                s -= 60
+            if best is None or s > best_score:
+                best_score = s
+                best = (rx, ry)
+        return best
+
+    target = best_target()
+    if target is None:
+        return [0, 0]
+    tx, ty = target
+
+    best_move = [0, 0]
+    best_val = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        my_d = man(nx, ny, tx, ty)
+        op_d = man(ox, oy, tx, ty)
+        val = (op_d - my_d) * 100 - my_d * 2
+        if my_d == 0:
+            val += 500
+        if dx == 0 and dy == 0:
+            val -= 3
+        if val > best_val:
+            best_val = val
+            best_move = [dx, dy]
+    return [best_move[0], best_move[1]]

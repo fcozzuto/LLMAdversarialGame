@@ -1,0 +1,161 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0]) or [0, 0]
+    ox, oy = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    role = str(observation.get("self_role", "")).lower()
+    we_evader = ("evader" in role) or ("runner" in role)
+
+    blocked = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            blocked.add((int(p[0]), int(p[1])))
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+
+    # If evading: go to farthest corner, but also break the direct line to opponent (strafe).
+    # If pursuing: go to opponent, with mild preference for approaching along diagonals.
+    target_corner = max(corners, key=lambda c: cheb(c[0], c[1], ox, oy))
+    tx, ty = target_corner if we_evader else (ox, oy)
+
+    # Prefer a move set order that deterministically breaks ties.
+    cand = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    best = None
+    best_score = None
+
+    for dx, dy in cand:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            nx, ny = sx, sy
+            dx, dy = 0, 0
+        if (nx, ny) in blocked:
+            continue
+
+        dist_to_t = cheb(nx, ny, tx, ty)
+        dist_to_o = cheb(nx, ny, ox, oy)
+        # Anti-alignment: encourage moves perpendicular to the vector from opponent to self (evader),
+        # and alignment for pursuer to cut off.
+        vx, vy = sx - ox, sy - oy
+        nvx, nvy = nx - ox, ny - oy
+        # Use sign-based "perpendicularity" proxy: maximize |vx*nvy - vy*nvx| for evader,
+        # minimize for pursuer.
+        cross = vx * nvy - vy * nvx
+        align_metric = abs(cross)
+
+        # Obstacle proximity penalty (counts blocked cells in 3x3 around next position).
+        pen = 0
+        for i in (-1, 0, 1):
+            xi = nx + i
+            if xi < 0 or xi >= w:
+                continue
+            for j in (-1, 0, 1):
+                yj = ny + j
+                if yj < 0 or yj >= h:
+                    continue
+                if (xi, yj) in blocked:
+                    pen += 3 if (i == 0 and j == 0) else 1
+
+        # If roles are unknown, use relative objective to current opponent position.
+        if we_evader:
+            # Primary: increase distance to opponent and to target corner
+            score = dist_to_o * 3 + dist_to_t * 1 + align_metric * 0.7 - pen * 1.2
+        else:
+            # Primary: decrease distance to opponent and move toward target (opponent)
+            score = -dist_to_o * 3 - dist_to_t * 1 - align_metric * 0.2 - pen * 1.2
+            # small preference for diagonal if available
+            if dx != 0 and dy != 0:
+                score += 0.1
+
+        if best is None:
+            best = [dx, dy]
+            best_score = score
+        else:
+            if score > best_score:
+                best = [dx, dy]
+                best_score = score
+
+    if best is None:
+        # Fallback: deterministic safe move (or stay).
+        dx = 0
+        dy = 0
+        for ddx, ddy in cand:
+            nx, ny = sx + ddx, sy + ddy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in blocked:
+                dx, dy = dd
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0]) or [0, 0]
+    ox, oy = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    role = str(observation.get("self_role", "")).lower()
+    evader = ("evader" in role) or ("runner" in role)
+
+    blocked = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            blocked.add((int(p[0]), int(p[1])))
+
+    def manhattan(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    resources = observation.get("resources", []) or []
+    if resources:
+        best_r = None
+        best_d = None
+        for r in resources:
+            if isinstance(r, (list, tuple)) and len(r) >= 2:
+                rx, ry = int(r[0]), int(r[1])
+                if (rx, ry) in blocked:
+                    continue
+                d = manhattan(sx, sy, rx, ry)
+                if best_d is None or d < best_d or (d == best_d and (rx, ry) < best_r):
+                    best_d = d
+                    best_r = (rx, ry)
+        target = best_r if best_r is not None else (ox, oy)
+    else:
+        target = (ox, oy)
+
+    if evader:
+        tx, ty = (0, 0)
+        corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+        best = corners[0]
+        bestv = -1
+        for cx, cy in corners:
+            v = manhattan(cx, cy, ox, oy)
+            if v > bestv or (v == bestv and (cx, cy) > best):
+                bestv = v
+                best = (cx, cy)
+        tx, ty = best
+    else:
+        tx, ty = target
+
+    cand = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best_move = cand[4]
+    best_val = None
+    for dx, dy in cand:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or ny < 0 or nx >= w or ny >= h:
+            continue
+        if (nx, ny) in blocked:
+            continue
+        d = manhattan(nx, ny, tx, ty)
+        oppd = manhattan(nx, ny, ox, oy)
+        val = (-d, oppd) if not evader else (d, -oppd)
+        if best_val is None or val > best_val or (val == best_val and (dx, dy) < best_move):
+            best_val = val
+            best_move = (dx, dy)
+    return [best_move[0], best_move[1]]

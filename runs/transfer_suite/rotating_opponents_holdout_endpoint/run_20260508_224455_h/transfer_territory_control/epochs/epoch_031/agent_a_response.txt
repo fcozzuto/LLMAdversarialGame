@@ -1,0 +1,169 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8)) or 8
+    h = int(observation.get("grid_height", 8)) or 8
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    obstacles = set(map(tuple, observation.get("obstacles", []) or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells", []) or []))
+    self_ter = set(map(tuple, observation.get("self_territory", []) or []))
+    opp_ter = set(map(tuple, observation.get("opponent_territory", []) or []))
+
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    dirs = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def is_blocked(x, y):
+        return (x, y) in obstacles
+
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    # Choose a target: unclaimed closest to center but biased toward stealing near opponent territory.
+    # If no unclaimed, target the closest opponent-occupied cell.
+    target = None
+    if unclaimed:
+        best = None
+        bestk = None
+        for ux, uy in unclaimed:
+            center_dist = abs(ux - cx) + abs(uy - cy)
+            # Prefer cells adjacent to opponent territory (likely to flip quickly).
+            adj_opp = 0
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if (ux + dx, uy + dy) in opp_ter:
+                        adj_opp = 1
+                        break
+                if adj_opp:
+                    break
+            k = (center_dist, man((ux, uy), (sx, sy)), -2 if adj_opp else 0)
+            if best is None or k < bestk:
+                best = (ux, uy)
+                bestk = k
+        target = best
+    else:
+        if opp_ter:
+            target = min(opp_ter, key=lambda p: (man(p, (sx, sy)), man(p, (int(round(cx)), int(round(cy))))))
+
+    # If still none, just move toward opponent to contest.
+    if target is None:
+        target = (ox, oy)
+
+    best_move = (0, 0)
+    best_score = -10**9
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or is_blocked(nx, ny):
+            continue
+
+        score = 0.0
+
+        # Basic drive: approach target
+        score += -man((nx, ny), target) * 1.2
+
+        # Avoid being dragged away from center too much
+        score += -(abs(nx - cx) + abs(ny - cy)) * 0.35
+
+        # Immediate territory value
+        if (nx, ny) in opp_ter:
+            score += 8.5  # stepping onto opponent territory should flip
+        if (nx, ny) in self_ter:
+            score += 1.0
+        if (nx, ny) in unclaimed:
+            score += 3.0
+
+        # If near opponent, increase pressure
+        score += -man((nx, ny), (ox, oy)) * 0.08
+
+        # Prefer routes that increase distance from obstacles (local safety)
+        if obstacles:
+            mind = 10**9
+            for ax, ay in obstacles:
+                d = abs(nx - ax) + abs(ny - ay)
+                if d < mind:
+                    mind = d
+            score += (mind if mind < 4 else 4) * 0.12
+
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    # If all moves blocked (should be rare), stay.
+    dx, dy = best_move
+    if dx not in (-1, 0, 1) or dy not in (-1, 0, 1):
+        return [0, 0]
+    return [int(dx), int(dy)]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8)) or 8
+    h = int(observation.get("grid_height", 8)) or 8
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+
+    obstacles = set(map(tuple, observation.get("obstacles", []) or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells", []) or []))
+    opp_ter = set(map(tuple, observation.get("opponent_territory", []) or []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def blocked(x, y):
+        return (x, y) in obstacles
+
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    nbrs = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+
+    if unclaimed:
+        best = None
+        bestv = None
+        for ux, uy in unclaimed:
+            dcent = abs(ux - cx) + abs(uy - cy)
+            dadv = min(abs(ux - tx) + abs(uy - ty) for tx, ty in opp_ter) if opp_ter else 999
+            v = (-(dcent), (0 if dadv == 0 else -dadv))
+            key = (v[0], v[1])
+            if best is None or key > bestv:
+                bestv = key
+                best = (ux, uy)
+        tx, ty = best
+    else:
+        tx, ty = ox, oy
+
+    if (sx, sy) == (tx, ty):
+        for dx, dy in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and not blocked(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in nbrs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or blocked(nx, ny):
+            continue
+        d = abs(nx - tx) + abs(ny - ty)
+        adj = 0
+        if opp_ter:
+            for adx, ady in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                if (nx + adx, ny + ady) in opp_ter:
+                    adj = 1
+                    break
+        score = (-d, adj, -abs(nx - cx) - abs(ny - cy))
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    nx, ny = sx + best_move[0], sy + best_move[1]
+    if not inb(nx, ny) or blocked(nx, ny):
+        for dx, dy in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and not blocked(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+    return [best_move[0], best_move[1]]

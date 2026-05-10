@@ -1,0 +1,138 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    self_pos = observation.get("self_position", [0, 0])
+    opp_pos = observation.get("opponent_position", [w - 1, h - 1])
+    x, y = int(self_pos[0]), int(self_pos[1])
+    ox, oy = int(opp_pos[0]), int(opp_pos[1])
+
+    obstacles = observation.get("obstacles", []) or []
+    obs = set((int(a), int(b)) for a, b in obstacles)
+
+    my_role = str(observation.get("self_role", "")).lower()
+    is_pursuer = ("pursuer" in my_role) or ("pursue" in my_role)
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def in_bounds(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    def d2(ax, ay, bx, by):
+        dx, dy = ax - bx, ay - by
+        return dx * dx + dy * dy
+
+    # Lookahead 2-ply (deterministic greedy): anticipate opponent move by using same evaluation for them
+    # If we are pursuer, we want to minimize distance after their best (for them) move (i.e., maximize distance).
+    # If we are evader, we want to maximize distance after their best (for them) move (i.e., minimize distance).
+    def score_after(my_move, their_move_assumption=True):
+        nx, ny = x + my_move[0], y + my_move[1]
+        # Opponent best response assuming its objective (pursuer->minimize dist, evader->maximize dist)
+        best = None
+        for td in deltas:
+            tx, ty = nx + td[0], ny + td[1]
+            if not in_bounds(tx, ty):
+                continue
+            dist = d2(tx, ty, ox, oy) if is_pursuer else d2(tx, ty, ox, oy)
+            # Actually we evaluate distance between opponent and our position next turn.
+            # Since opponent positions are not updated explicitly in observation, use distance between our next position and opponent.
+            dist = d2(nx, ny, ox + 0, oy + 0)  # placeholder replaced below
+        # Instead compute directly without fake opponent position update:
+        return None
+
+    # Since observation doesn't provide opponent next position, use standard 1-ply heuristic against current opponent:
+    # pursuer: minimize d2 after our move
+    # evader: maximize d2 after our move, with tie-breaker toward corners away from opponent's direction.
+    best_move = (0, 0)
+    best_val = None
+
+    # Prefer pushing to opposite corner (from opponent) when evading; keep deterministic tie-breaking.
+    corner_targets = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+    # pick one deterministic target "farthest" from opponent
+    cx, cy = corner_targets[0]
+    best_corner_d = -1
+    for tx, ty in corner_targets:
+        cd = d2(tx, ty, ox, oy)
+        if cd > best_corner_d:
+            best_corner_d = cd
+            cx, cy = tx, ty
+
+    for dx, dy in deltas:
+        nx, ny = x + dx, y + dy
+        if not in_bounds(nx, ny):
+            continue
+        dist2 = d2(nx, ny, ox, oy)
+        # Secondary: progress toward chosen corner (for evader) or toward opponent (for pursuer)
+        if is_pursuer:
+            primary = -dist2  # higher is better => minimize dist
+            secondary = -d2(nx, ny, cx, cy)  # prefer staying away from far corner; deterministic
+        else:
+            primary = dist2  # maximize distance
+            secondary = -d2(nx, ny, cx, cy)  # closer to farthest corner from opponent
+
+        val = (primary, secondary, -((nx * 31 + ny * 17) % 97))  # deterministic tie-breaker
+        if best_val is None or val > best_val:
+            best_val = val
+            best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    x, y = int(sx), int(sy)
+    ex, ey = int(ox), int(oy)
+
+    obstacles = observation.get("obstacles", []) or []
+    obs = set()
+    for a in obstacles:
+        if isinstance(a, (list, tuple)) and len(a) >= 2:
+            obs.add((int(a[0]), int(a[1])))
+
+    resources = observation.get("resources", []) or []
+    res = []
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in obs:
+                res.append((rx, ry))
+
+    role = str(observation.get("self_role", "")).lower()
+    pursuer = ("pursuer" in role) or ("pursue" in role)
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def d2(ax, ay, bx, by):
+        dx, dy = ax - bx, ay - by
+        return dx * dx + dy * dy
+
+    target = None
+    if res:
+        if pursuer:
+            target = min(res, key=lambda p: d2(x, y, p[0], p[1]))
+        else:
+            target = max(res, key=lambda p: d2(x, y, p[0], p[1]))
+
+    def ok(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    best = None
+    best_score = None
+    for dx, dy in deltas:
+        nx, ny = x + dx, y + dy
+        if not ok(nx, ny):
+            continue
+        dist_opp = d2(nx, ny, ex, ey)
+        if target is not None:
+            dist_t = d2(nx, ny, target[0], target[1])
+            if pursuer:
+                score = -(dist_opp + dist_t)
+            else:
+                score = (dist_opp - dist_t)
+        else:
+            score = -dist_opp if pursuer else dist_opp
+        if best_score is None or score > best_score:
+            best_score = score
+            best = [dx, dy]
+    return best if best is not None else [0, 0]

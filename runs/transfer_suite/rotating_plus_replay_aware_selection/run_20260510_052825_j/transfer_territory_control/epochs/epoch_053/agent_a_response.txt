@@ -1,0 +1,138 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    selfT = set(tuple(p) for p in (observation.get("self_territory") or []))
+    oppT = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    def inb(nx, ny): return 0 <= nx < w and 0 <= ny < h
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        dy = ay - by
+        return (dx if dx >= 0 else -dx) + (dy if dy >= 0 else -dy)
+    def step_valid(nx, ny):
+        return inb(nx, ny) and (nx, ny) not in obstacles
+
+    # Pick a deterministic target among a small set of unclaimed cells.
+    best = None
+    if unclaimed:
+        # Prefer cells that are unclaimed and closer to us than to opponent, and away from opponent.
+        # Also bias towards our corner (0,0) or (7,7) depending on start side.
+        corner = (0, 0) if (x + y) <= (w - 1 - x + h - 1 - y) else (w - 1, h - 1)
+        # Candidate subset: sort by (distance to opponent, distance to self) then take first 20.
+        cand = sorted(unclaimed, key=lambda p: (man(p[0], p[1], ox, oy), man(p[0], p[1], x, y)))[:20]
+        for tx, ty in cand:
+            ds = man(tx, ty, x, y)
+            do = man(tx, ty, ox, oy)
+            # Want ds <= do and far from opponent to reduce contest.
+            t = (do - ds) * 10 - do * 2 + (tx + ty) * 0.01
+            t += -man(tx, ty, corner[0], corner[1]) * 0.02
+            if best is None or t > best[0]:
+                best = (t, tx, ty)
+
+    def cell_score(nx, ny):
+        # Avoid committing into obstacles neighborhood (deterministic local risk).
+        risk = 0
+        for dx in (-1,0,1):
+            for dy in (-1,0,1):
+                ax, ay = nx + dx, ny + dy
+                if inb(ax, ay) and (ax, ay) in obstacles:
+                    risk += 3
+        s = 0.0
+        if (nx, ny) in selfT:
+            s += 2.0
+        if (nx, ny) in unclaimed:
+            s += 8.0
+        if (nx, ny) in oppT:
+            # Flipping enabled: entering opponent territory should be valuable.
+            s += 6.0
+        # Move toward target if exists
+        if best is not None:
+            tx, ty = best[1], best[2]
+            s += (man(nx, ny, ox, oy) * 0.05)  # keep away from opponent a bit
+            s += (man(x, y, ox, oy) - man(nx, ny, ox, oy)) * 1.5  # prefer increasing distance from opponent
+            s += (man(x, y, tx, ty) - man(nx, ny, tx, ty)) * 4.0
+        else:
+            # Without target, expand toward farthest unclaimed (if any already filtered poorly) or just drift away from opponent.
+            s += (man(x, y, ox, oy) - man(nx, ny, ox, oy)) * -2.0  # prefer increasing distance
+            s += (nx - x) * 0.01 + (ny - y) * 0.01
+        s -= risk * 0.5
+        return s
+
+    best_move = (0, 0)
+    best_sc = -10**18
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not step_valid(nx, ny):
+            continue
+        sc = cell_score(nx, ny)
+        # Small tie-breaker to reduce oscillation: prefer not to stay if beneficial.
+        if sc > best_sc + 1e-9 or (abs(sc - best_sc) <= 1e-9 and (dx, dy) != (0, 0)):
+            best_sc = sc
+            best_move =
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 1)
+    h = observation.get("grid_height", 1)
+    x, y = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    unclaimed = list(map(tuple, observation.get("unclaimed_cells") or []))
+    resources = list(map(tuple, observation.get("resources") or []))
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    if unclaimed:
+        # Prefer cells closer to us than to opponent, then by distance from opponent, then by coordinates.
+        best_cell = None
+        best_key = None
+        for cx, cy in unclaimed:
+            if (cx, cy) in obstacles or not inb(cx, cy):
+                continue
+            ds = man(cx, cy, x, y)
+            do = man(cx, cy, ox, oy)
+            key = (0 if ds <= do else 1, do, ds, cx, cy)
+            if best_key is None or key < best_key:
+                best_key = key
+                best_cell = (cx, cy)
+        tx, ty = best_cell if best_cell is not None else (ox, oy)
+    elif resources:
+        rx, ry = min(resources, key=lambda p: (man(p[0], p[1], ox, oy), man(p[0], p[1], x, y), p[0], p[1]))
+        tx, ty = rx, ry
+    else:
+        # No targets known: move away from opponent.
+        tx, ty = ox, oy
+
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        d_target = man(nx, ny, tx, ty)
+        d_opp = man(nx, ny, ox, oy)
+        # Maximize: farther from opponent, closer to target (or away if target is opponent).
+        score = (d_opp, -d_target, dx, dy)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

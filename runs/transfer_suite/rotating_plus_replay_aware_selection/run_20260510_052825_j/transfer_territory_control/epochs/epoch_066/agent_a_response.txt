@@ -1,0 +1,164 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    x, y = observation.get("self_position", (0, 0))
+    selfT_list = observation.get("self_territory") or []
+    oppT_list = observation.get("opponent_territory") or []
+    unclaimed_list = observation.get("unclaimed_cells") or []
+    obs_list = observation.get("obstacles") or []
+
+    selfT = set((p[0], p[1]) for p in selfT_list if p is not None and len(p) >= 2)
+    oppT = set((p[0], p[1]) for p in oppT_list if p is not None and len(p) >= 2)
+    unclaimed = set((p[0], p[1]) for p in unclaimed_list if p is not None and len(p) >= 2)
+    obstacles = set((p[0], p[1]) for p in obs_list if p is not None and len(p) >= 2)
+
+    deltas = [(-1, -1), (0, -1), (1, -1),
+              (-1, 0), (0, 0), (1, 0),
+              (-1, 1), (0, 1), (1, 1)]
+    deltas.sort()
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    # If both territories already cover everything relevant, just hold.
+    if not unclaimed and not oppT:
+        return [0, 0]
+
+    # Precompute nearest distances to guide expansion (limited by small board; deterministic).
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    nearest_unclaimed = None
+    if unclaimed:
+        bestd = 10**9
+        for cx, cy in unclaimed:
+            d = man((x, y), (cx, cy))
+            if d < bestd or (d == bestd and (cy, cx) < (nearest_unclaimed[1], nearest_unclaimed[0])):
+                bestd = d
+                nearest_unclaimed = (cx, cy)
+
+    # If no unclaimed, target nearest opponent territory.
+    if nearest_unclaimed is None and oppT:
+        bestd = 10**9
+        nearest_opp = None
+        for cx, cy in oppT:
+            d = man((x, y), (cx, cy))
+            if d < bestd or (d == bestd and (cy, cx) < (nearest_opp[1], nearest_opp[0])):
+                bestd = d
+                nearest_opp = (cx, cy)
+        nearest_unclaimed = nearest_opp
+
+    tx, ty = nearest_unclaimed if nearest_unclaimed else (x, y)
+
+    best_move = (0, 0)
+    best_val = -10**18
+
+    for dx, dy in deltas:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        # Base value for capturing.
+        val = 0
+        if (nx, ny) in unclaimed:
+            val += 80
+        if (nx, ny) in oppT:
+            val += 35
+        if (nx, ny) in selfT:
+            val += 8
+
+        # Steering toward target.
+        d_now = abs(x - tx) + abs(y - ty)
+        d_new = abs(nx - tx) + abs(ny - ty)
+        val += 6 * (d_now - d_new)
+
+        # Prefer moves that increase mobility (avoid getting boxed in).
+        mob = 0
+        for ddx, ddy in deltas:
+            mx, my = nx + ddx, ny + ddy
+            if inb(mx, my) and (mx, my) not in obstacles:
+                if (mx, my) in unclaimed:
+                    mob += 2
+                elif (mx, my) in oppT:
+                    mob += 1
+                else:
+                    mob += 1
+        val += mob * 0.5
+
+        # Avoid stagnation loops: discourage stepping back into a "dead zone".
+        # Deterministic: penalize moves that keep same distance to target while not capturing.
+        if d_new == d_now and (nx, ny) not in unclaimed and (nx, ny) not in oppT:
+            val -= 2
+
+        if val > best_val or (val == best_val and (dy, dx) < (best_move[1], best_move[0])):
+            best_val = val
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    x, y = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (x, y))
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if p is not None and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    unclaimed = observation.get("unclaimed_cells") or []
+    targets = []
+    for p in unclaimed:
+        if p is not None and len(p) >= 2:
+            targets.append((p[0], p[1]))
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    moves.sort()
+
+    opp = (ox, oy)
+    best_move = moves[0]
+    best_score = -10**18
+
+    if targets:
+        # Score by closeness to nearest unclaimed, then distance from opponent
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if not inb(nx, ny) or (nx, ny) in obs:
+                continue
+            d = min(man((nx, ny), t) for t in targets)
+            score = -d * 10 - man((nx, ny), opp)
+            if score > best_score:
+                best_score = score
+                best_move = [dx, dy]
+        return best_move
+
+    # If no unclaimed info, chase nearest opponent territory (if provided), else hold
+    oppT = observation.get("opponent_territory") or []
+    tset = []
+    for p in oppT:
+        if p is not None and len(p) >= 2:
+            tset.append((p[0], p[1]))
+
+    if tset:
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if not inb(nx, ny) or (nx, ny) in obs:
+                continue
+            d = min(man((nx, ny), t) for t in tset)
+            score = -d * 10 + man((nx, ny), opp)
+            if score > best_score:
+                best_score = score
+                best_move = [dx, dy]
+        return best_move
+
+    return [0, 0]

@@ -1,0 +1,139 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    self_role = (observation.get("self_role", "") or "").lower()
+    opp_role = (observation.get("opponent_role", "") or "").lower()
+    is_pursuer = ("purs" in self_role) or (("evad" in opp_role) and ("evad" not in self_role))
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        try:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+        except Exception:
+            pass
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def mobility(x, y):
+        c = 0
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                c += 1
+        return c
+
+    def step_options(x, y):
+        opts = []
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                opts.append((nx, ny))
+        return opts if opts else [(x, y)]
+
+    def score_move(me_x, me_y, them_x, them_y, pretend_evader):
+        my_opts = step_options(me_x, me_y)
+        # choose the best next position for the moving agent (evader maximizes, pursuer minimizes)
+        best = None
+        for nx, ny in my_opts:
+            dman = abs(nx - them_x) + abs(ny - them_y)
+            # discourage getting stuck near walls/obstacles
+            mob = mobility(nx, ny)
+            # slight preference for keeping mid/diagonal pressure for pursuer
+            diag = (nx != me_x and ny != me_y)
+            s = (-dman if not pretend_evader else dman) + (0.08 * mob) + (0.02 * (1 if diag else 0))
+            if best is None or (s > best[0] if pretend_evader else s < best[0]):
+                best = (s, nx, ny)
+        return best[1], best[2]
+
+    # If we are pursuer: anticipate evader's greedy response.
+    # If we are evader: just maximize distance with tie-breaking toward open space.
+    my_next = None
+    my_opts = step_options(sx, sy)
+
+    if is_pursuer:
+        best_s = None
+        best = (sx, sy)
+        for nx, ny in my_opts:
+            # anticipate opponent (evader) reply
+            ex, ey = score_move(ox, oy, nx, ny, pretend_evader=True)
+            d_after = abs(nx - ex) + abs(ny - ey)
+            s = d_after - 0.07 * mobility(nx, ny)  # smaller distance after is better
+            if best_s is None or s < best_s:
+                best_s = s
+                best = (nx, ny)
+        my_next = best
+    else:
+        # we are evader: anticipate pursuer response
+        best_s = None
+        best = (sx, sy)
+        for nx, ny in my_opts:
+            # anticipate pursuer greedy response toward us (minimizing distance)
+            px, py = score_move(nx, ny, ox, oy, pretend_evader=False)
+            # Actually px,py are next for "pursuer" position variable; we misuse score_move:
+            # We need pursuer to be at opponent position and move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        try:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+        except Exception:
+            pass
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    inb = lambda x, y: 0 <= x < w and 0 <= y < h
+
+    res = observation.get("resources", None)
+    target = None
+    bestd = None
+    if isinstance(res, list) and res:
+        for r in res:
+            try:
+                rx, ry = int(r[0]), int(r[1])
+            except Exception:
+                continue
+            if (rx, ry) in obstacles or not inb(rx, ry):
+                continue
+            d = abs(rx - sx) + abs(ry - sy)
+            if bestd is None or d < bestd:
+                bestd = d
+                target = (rx, ry)
+
+    if target is None:
+        target = (ox, oy)
+
+    best_move = (0, 0)
+    best_key = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        d = abs(target[0] - nx) + abs(target[1] - ny)
+        opp_d = abs(target[0] - (ox)) + abs(target[1] - (oy))
+        key = (d, abs(ox - nx) + abs(oy - ny), dx, dy, opp_d)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

@@ -1,0 +1,64 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (0, 0)
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                obstacles.add((x, y))
+
+    unclaimed = set()
+    for p in observation.get("unclaimed_cells") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                unclaimed.add((x, y))
+
+    targets = []
+    for p in (observation.get("resources") or []):
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                targets.append((x, y))
+
+    if not targets and unclaimed:
+        targets = list(unclaimed)
+
+    moves = [(-1, 0), (0, -1), (0, 0), (0, 1), (1, 0), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+    best = None
+    best_val = None
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        dist_opp = abs(nx - ox) + abs(ny - oy)
+        val = 0
+        if (nx, ny) in unclaimed:
+            val += 1000000
+        if targets:
+            md = None
+            for tx, ty in targets:
+                d = abs(nx - tx) + abs(ny - ty)
+                if md is None or d < md:
+                    md = d
+            val += -md * 10
+        val += dist_opp  # prefer moving away when indifferent
+        if best_val is None or val > best_val:
+            best_val = val
+            best = [dx, dy]
+
+    if best is None:
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if inside(nx, ny) and (nx, ny) not in obstacles:
+                return [dx, dy]
+        return [0, 0]
+    return best

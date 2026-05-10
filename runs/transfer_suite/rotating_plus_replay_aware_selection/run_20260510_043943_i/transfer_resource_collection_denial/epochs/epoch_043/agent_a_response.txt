@@ -1,0 +1,167 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(a, b, c, d):
+        x = a - c
+        if x < 0:
+            x = -x
+        y = b - d
+        if y < 0:
+            y = -y
+        return x + y
+
+    def blocked(x, y):
+        return (not inb(x, y)) or ((x, y) in obstacles)
+
+    moves = [(-1, -1), (0, -1), (1, -1),
+             (-1, 0), (0, 0), (1, 0),
+             (-1, 1), (0, 1), (1, 1)]
+
+    if not resources:
+        tx, ty = (w - 1) // 2, (h - 1) // 2
+        best = None
+        bestv = -10**18
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if blocked(nx, ny):
+                continue
+            d = man(nx, ny, tx, ty)
+            v = -d
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+        return list(best if best is not None else (0, 0))
+
+    # Pick a target resource that we can reach first with some preference for closeness.
+    # Deterministic: tie-break by (resource x, y).
+    best_target = None
+    best_key = None
+    for rx, ry in resources:
+        ds = man(sx, sy, rx, ry)
+        do = man(ox, oy, rx, ry)
+        # Prefer resources where we are strictly ahead; otherwise still consider near ones.
+        key = (0 if ds < do else 1, ds - do, ds, rx, ry)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_target = (rx, ry)
+
+    rx, ry = best_target
+
+    # Score each immediate move by: how much it decreases our distance to target,
+    # whether it also keeps opponent from getting a faster race to the target,
+    # and a small obstacle/edge penalty via "blocked move" avoidance (handled by filtering).
+    best_move = (0, 0)
+    best_score = -10**18
+    ds_now = man(sx, sy, rx, ry)
+    do_now = man(ox, oy, rx, ry)
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        ds1 = man(nx, ny, rx, ry)
+        do1 = do_now  # opponent position unchanged this turn
+        # Encourage immediate capture: exact landing on resource.
+        capture_bonus = 0
+        if (nx, ny) == (rx, ry):
+            capture_bonus = 10**6
+        # Race advantage: prefer maintaining ds < do and increasing gap.
+        race = 0
+        if ds1 < do1:
+            race = (do1 - ds1) * 5000
+        # If we are behind, reduce the gap to catch up.
+        if ds1 >= do1:
+            race = -(ds1 - do1) * 2000
+        # Also add slight preference to move toward nearest other resources (opportunistic).
+        near_bonus = 0
+        best_other = 10**9
+        for ax, ay in resources:
+            if (ax, ay) == (rx, ry):
+                continue
+            d = man(nx, ny, ax, ay)
+            if d < best_other:
+                best_other = d
+        if best_other < 10**9:
+            near_bonus = -best_other
+
+        # Small deterministic preference for moves that don't drift away too much.
+        drift = -(abs(nx - sx) + abs(ny - sy)) * 1
+
+        score = capture_bonus + race + (ds_now - ds1) * 100 + near_bonus + drift
+        # Deterministic tie-break: lexicographic on (dx,dy).
+        if score > best_score or (score == best_score and (dx, dy) < best_move):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def blocked(x, y):
+        return (not inb(x, y)) or ((x, y) in obstacles)
+
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not resources:
+        tx, ty = (w - 1) // 2, (h - 1) // 2
+        best = (0, 0)
+        bestv = -10**18
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if blocked(nx, ny):
+                continue
+            v = -man(nx, ny, tx, ty) - 0.3 * man(nx, ny, ox, oy)
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    best = (0, 0)
+    bestv = -10**18
+    min_opp = man(sx, sy, ox, oy)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        mind = 10**9
+        near = 0
+        for rx, ry in resources:
+            d = man(nx, ny, rx, ry)
+            if d < mind:
+                mind = d
+            if d <= 2:
+                near += 1
+        v = -mind + 0.25 * near - 0.2 * man(nx, ny, ox, oy)
+        if min_opp <= 1:
+            v -= 0.5 * man(nx, ny, ox, oy)
+        if v > bestv or (v == bestv and (dx, dy) < best):
+            bestv = v
+            best = (dx, dy)
+    return [best[0], best[1]]

@@ -1,0 +1,157 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    resources = list(map(tuple, observation.get("resources") or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells") or []))
+    self_terr = set(map(tuple, observation.get("self_territory") or []))
+    op_terr = set(map(tuple, observation.get("opponent_territory") or []))
+    scores = observation.get("scores") or {}
+    self_name = observation.get("self_name", "agent_a")
+    opponent_name = observation.get("opponent_name", "agent_b")
+    my_score = float(scores.get(self_name, 0.0) or 0.0)
+    op_score = float(scores.get(opponent_name, 0.0) or 0.0)
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def legal(nx, ny):
+        return inb(nx, ny) and (nx, ny) not in obstacles
+
+    def md(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    aggressive = my_score < op_score
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    def frontier_bias(x, y):
+        # Encourage claiming near our boundary (neighbors owned by us)
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if (nx, ny) in self_terr:
+                return 6
+        return 0
+
+    best = None
+    best_key = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        key = 0
+        # Cell desirability
+        if (nx, ny) in self_terr:
+            key += 2
+        elif (nx, ny) in unclaimed:
+            key += 18 + frontier_bias(nx, ny)
+        elif (nx, ny) in op_terr:
+            key += 8 + frontier_bias(nx, ny)
+            if not aggressive:
+                key -= 10  # deny counterclaim when leading
+        else:
+            key += 3  # empty/unseen: mild neutral
+
+        # Prefer expanding toward nearest unclaimed, but only locally (one-step)
+        if unclaimed:
+            # Compute minimal distance from this candidate to any unclaimed cell deterministically with pruning
+            # (keep it small: look at a few closest unclaimed by distance from current pos)
+            ux = None
+            best_d = 10**9
+            # deterministic subset: iterate in given order from observation
+            for (tx, ty) in unclaimed:
+                d0 = md(sx, sy, tx, ty)
+                if d0 > 6:
+                    continue
+                d = md(nx, ny, tx, ty)
+                if d < best_d:
+                    best_d = d
+                    ux = (tx, ty)
+            if ux is not None:
+                key += (10 - best_d) * 3 if best_d < 10 else 0
+
+        # Resources: deterministic attraction
+        if resources:
+            dres = min(md(nx, ny, rx, ry) for rx, ry in resources)
+            key += (8 - min(dres, 8)) * 2
+
+        # Territory control race: avoid moving too far into opponent side unless aggressive
+        d_op = md(nx, ny, ox, oy)
+        key += (d_op - 2) * (-1 if aggressive else 1)
+
+        # Center control
+        key += (8 - (abs(nx - cx) + abs(ny - cy))) * 0.5
+
+        # Deterministic tie-breaker: prefer moves in fixed dirs order already; keep earliest lex by key
+        if best_key is None or key > best_key:
+            best_key = key
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    resources = list(map(tuple, observation.get("resources") or []))
+    scores = observation.get("scores") or {}
+    self_name = observation.get("self_name", "agent_a")
+    opponent_name = observation.get("opponent_name", "agent_b")
+    my_score = float(scores.get(self_name, 0.0) or 0.0)
+    op_score = float(scores.get(opponent_name, 0.0) or 0.0)
+
+    dirs = [(-1, 0), (0, -1), (0, 0), (0, 1), (1, 0), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+    def ok(x, y):
+        return inb(x, y) and (x, y) not in obstacles
+
+    tx, ty = (w - 1) / 2.0, (h - 1) / 2.0
+    if resources:
+        best = None
+        bestd = 10**9
+        for rx, ry in resources:
+            d = abs(sx - rx) + abs(sy - ry)
+            if d < bestd or (d == bestd and (rx, ry) < best):
+                bestd, best = d, (rx, ry)
+        tx, ty = best
+    elif my_score < op_score:
+        tx, ty = ox, oy
+
+    best_move = (0, 0)
+    best_val = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        dres = 0
+        if resources:
+            mdres = 10**9
+            for rx, ry in resources:
+                if rx == nx and ry == ny:
+                    mdres = 0
+                    break
+                dd = abs(nx - rx) + abs(ny - ry)
+                if dd < mdres:
+                    mdres = dd
+            dres = -mdres
+        else:
+            dres = - (abs(nx - tx) + abs(ny - ty))
+        center_bonus = - (abs(nx - (w - 1) / 2.0) + abs(ny - (h - 1) / 2.0)) * 0.01
+        goal_bonus = - (abs(nx - tx) + abs(ny - ty))
+        val = dres + center_bonus + goal_bonus * 0.1
+        if val > best_val or (val == best_val and (dx, dy) < best_move):
+            best_val = val
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    return [int(dx), int(dy)]

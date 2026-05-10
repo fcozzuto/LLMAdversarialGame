@@ -1,0 +1,60 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            resources.append((int(r[0]), int(r[1])))
+
+    role = (observation.get("self_role") or "").lower()
+    evader = ("evad" in role) or ("escape" in role) or ("runner" in role)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def legal(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def cheb(x, y, a, b):
+        dx = x - a
+        if dx < 0: dx = -dx
+        dy = y - b
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def nearest_res_dist(x, y):
+        if not resources:
+            return 10**9
+        best = 10**9
+        for rx, ry in resources:
+            d = cheb(x, y, rx, ry)
+            if d < best:
+                best = d
+        return best
+
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not legal(nx, ny):
+            continue
+        d_op = cheb(nx, ny, ox, oy)
+        d_res = nearest_res_dist(nx, ny)
+        # If pursuing: minimize opponent distance; if evading: maximize opponent distance.
+        # Also move toward resources (lower d_res is better).
+        score = (d_op if evader else -d_op) - d_res
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    return [int(dx), int(dy)]

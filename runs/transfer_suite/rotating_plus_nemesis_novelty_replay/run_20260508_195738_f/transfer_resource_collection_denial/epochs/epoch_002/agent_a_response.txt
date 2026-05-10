@@ -1,0 +1,145 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []))
+    resources = observation.get("resources", [])
+    turns_remaining = observation.get("turns_remaining", 0)
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(x1, y1, x2, y2):
+        a = abs(x1 - x2)
+        b = abs(y1 - y2)
+        return a if a > b else b
+
+    # Choose a target resource where we have an advantage
+    best = None
+    best_val = None
+    for rx, ry in resources:
+        myd = cheb(sx, sy, rx, ry)
+        oppd = cheb(ox, oy, rx, ry)
+        # Prefer resources where we are closer; add a small tie-break for nearer resources and for "upper-left" determinism
+        val = (oppd - myd) * 10 - myd
+        if best_val is None or val > best_val or (val == best_val and (rx, ry) < best):
+            best_val = val
+            best = (rx, ry)
+
+    if best is not None:
+        tx, ty = best
+    else:
+        # No resources visible: push toward the farthest corner from the opponent, but deterministically
+        corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+        # If we can see nothing, go where we'd likely meet remaining resources (center-ish) but bias away from opponent
+        cx, cy = (w - 1) // 2, (h - 1) // 2
+        # Deterministic choice among corners
+        target = None
+        bestc = None
+        for x, y in corners:
+            val = cheb(cx, cy, x, y) - cheb(ox, oy, x, y)
+            if bestc is None or val > bestc or (val == bestc and (x, y) < target):
+                bestc = val
+                target = (x, y)
+        tx, ty = target
+
+    # Move selection: greedy toward target, avoid obstacles, and don't allow opponent to close too easily
+    candidates = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if in_bounds(nx, ny) and (nx, ny) not in obstacles:
+                candidates.append((dx, dy, nx, ny))
+
+    # Deterministic ordering for tie-breaking
+    candidates.sort(key=lambda t: (abs(t[0]) + abs(t[1]), t[0], t[1]))
+
+    best_move = (0, 0)
+    best_util = None
+    for dx, dy, nx, ny in candidates:
+        myd = cheb(nx, ny, tx, ty)
+        # Penalize moves that move closer to opponent; allow some approach if winning is likely
+        oppd = cheb(nx, ny, ox, oy)  # after-move distance to opponent
+        myd0 = cheb(sx, sy, tx, ty)
+        # If we are behind, value opponent distance more; if ahead, value progress more
+        # Use best_val sign as a proxy for "ahead/behind"
+        ahead = 1 if (best_val is not None and best_val > 0) else 0
+        util = (-myd) * (2 if ahead else 1) + (0.8 if not ahead else 0.3) * oppd
+        # Small obstacle proximity penalty (deterministic local effect)
+        adj_pen = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                if ax == 0 and ay == 0:
+                    continue
+                px, py = nx + ax, ny + ay
+                if (px, py) in obstacles:
+                    adj_pen += 1
+        util -= 0.05 * adj_pen
+        # Slight preference for not getting stuck early
+        if turns_remaining and turns_remaining < 10:
+            util -= 0.02 * (myd - myd0)
+        if best_util is None or util > best_util:
+            best_util = util
+            best_move = (dx, dy)
+
+   
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation["grid_width"])
+    h = int(observation["grid_height"])
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []) or [])
+    resources = observation.get("resources", []) or []
+
+    def cheb(x1, y1, x2, y2):
+        ax = x1 - x2
+        if ax < 0: ax = -ax
+        ay = y1 - y2
+        if ay < 0: ay = -ay
+        return ax if ax > ay else ay
+
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+
+    if resources:
+        best = None
+        bestv = None
+        for rx, ry in resources:
+            myd = cheb(sx, sy, rx, ry)
+            oppd = cheb(ox, oy, rx, ry)
+            v = (oppd - myd) * 1000 - myd
+            if bestv is None or v > bestv or (v == bestv and (rx, ry) < best):
+                bestv = v
+                best = (rx, ry)
+        tx, ty = best
+    else:
+        corners = [(0,0),(0,h-1),(w-1,0),(w-1,h-1)]
+        # move toward the corner farthest from opponent
+        tx, ty = None, None
+        bestv = None
+        for cx, cy in corners:
+            v = -cheb(ox, oy, cx, cy)
+            if bestv is None or v > bestv or (v == bestv and (cx, cy) < (tx, ty)):
+                bestv = v
+                tx, ty = cx, cy
+
+    bestmove = (0, 0)
+    bestscore = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        myd = cheb(nx, ny, tx, ty)
+        oppd = cheb(ox, oy, tx, ty)
+        # prefer decreasing myd; also prefer moves that keep distance from opponent slightly
+        odist = cheb(nx, ny, ox, oy)
+        score = (oppd - myd) * 1000 - myd - odist
+        if bestscore is None or score > bestscore:
+            bestscore = score
+            bestmove = (dx, dy)
+    return [int(bestmove[0]), int(bestmove[1])]

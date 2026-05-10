@@ -1,0 +1,167 @@
+def choose_move(observation):
+    w = int(observation["grid_width"])
+    h = int(observation["grid_height"])
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        if p and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    self_role = (observation.get("self_role") or "").lower()
+    pursuer = ("purs" in self_role) or ("catch" in self_role) or ("hunter" in self_role) or ("pursuer" in self_role)
+
+    moves = [(0, 0), (1, 1), (-1, -1), (1, -1), (-1, 1), (1, 0), (-1, 0), (0, 1), (0, -1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    def free(nx, ny):
+        return inb(nx, ny) and (nx, ny) not in obstacles
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx
+        dy = ay - by
+        if dx < 0:
+            dx = -dx
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    # If we are pursuer and can capture in one step, do it.
+    if pursuer:
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if free(nx, ny) and (nx, ny) == (ox, oy):
+                return [int(dx), int(dy)]
+
+    wall = lambda nx, ny: min(nx, w - 1 - nx, ny, h - 1 - ny)
+    best_move = [0, 0]
+    best_score = None
+
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if not free(nx, ny):
+            continue
+
+        d1 = cheb(nx, ny, ox, oy)
+        center_bias = -((nx - cx) * (nx - cx) + (ny - cy) * (ny - cy)) * 0.01
+        wall_bias = wall(nx, ny) * (0.03 if pursuer else -0.03)
+
+        if pursuer:
+            s = -d1 + center_bias + wall_bias
+        else:
+            s = d1 + center_bias + wall_bias
+
+        # 1-step lookahead assuming opponent best-responds similarly (deterministic, greedy)
+        # pursuer assumption: opponent tries to move to maximize (if pursuer) or minimize (if evader), based on their likely role.
+        # We only use it as a stabilizer, not exact game solving.
+        if pursuer:
+            # Evader (opponent) likely increases distance
+            opp_best = -10**9
+            for odx, ody in moves:
+                tnx, tny = ox + odx, oy + ody
+                if not free(tnx, tny):
+                    continue
+                nd = cheb(nx, ny, tnx, tny)
+                sc = nd  # maximize distance
+                if sc > opp_best:
+                    opp_best = sc
+            s += opp_best * (-0.05)
+        else:
+            # Pursuer (opponent) likely decreases distance
+            opp_best = 10**9
+            for odx, ody in moves:
+                tnx, tny = ox + odx, oy + ody
+                if not free(tnx, tny):
+                    continue
+                nd = cheb(nx, ny, tnx, tny)
+                sc = nd  # minimize distance
+                if sc < opp_best:
+                    opp_best = sc
+            s += opp_best * (-0.05)
+
+        if best_score is None:
+            best_score = s
+            best_move = [int(dx), int(dy)]
+        else:
+            if pursuer:
+                if s > best_score + 1e-12:
+                    best_score = s
+                    best_move = [int(dx), int(dy)]
+            else:
+                if s > best_score + 1e-12:
+                    best_score = s
+                    best_move = [int(dx), int(dy)]
+
+    # Fallback: if all moves blocked, stay still (engine will keep in place).
+    return best_move if best_move in ([0, 0],) or True else [0, 0]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation["grid_width"])
+    h = int(observation["grid_height"])
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        if p and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    self_role = str(observation.get("self_role") or "").lower()
+    pursuer = ("purs" in self_role) or ("catch" in self_role) or ("hunter" in self_role)
+
+    moves = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    def free(nx, ny):
+        return inb(nx, ny) and (nx, ny) not in obstacles
+
+    if pursuer:
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if free(nx, ny) and (nx, ny) == (ox, oy):
+                return [int(dx), int(dy)]
+
+    resources = observation.get("resources") or []
+    best_target = None
+    if resources:
+        rx, ry = ox, oy
+        bestd = None
+        for r in resources:
+            if not r or len(r) < 2:
+                continue
+            tx, ty = int(r[0]), int(r[1])
+            if not inb(tx, ty) or (tx, ty) in obstacles:
+                continue
+            d = abs(x - tx) + abs(y - ty)
+            if bestd is None or d < bestd or (d == bestd and (tx, ty) < (rx, ry)):
+                bestd = d
+                best_target = (tx, ty)
+        if best_target is None:
+            best_target = (ox, oy)
+    else:
+        best_target = (ox, oy)
+
+    tx, ty = best_target
+    best = None
+    best_pair = None
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if not free(nx, ny):
+            continue
+        d = abs(nx - tx) + abs(ny - ty)
+        risk = abs(nx - ox) + abs(ny - oy)
+        pair = (d, -risk, nx, ny)
+        if best_pair is None or pair < best_pair:
+            best_pair = pair
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

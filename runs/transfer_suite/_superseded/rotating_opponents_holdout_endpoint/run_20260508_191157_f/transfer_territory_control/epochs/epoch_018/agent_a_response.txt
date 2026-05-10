@@ -1,0 +1,141 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    legal = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if inside(nx, ny) and (nx, ny) not in obstacles:
+            legal.append((dx, dy, nx, ny))
+    if not legal:
+        return [0, 0]
+
+    # Prefer moves that expand toward the center and claim unclaimed; discourage moving into risky opponent adjacency.
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    opp_adj = set()
+    for x, y in opp_terr:
+        for ddx in (-1, 0, 1):
+            for ddy in (-1, 0, 1):
+                if ddx == 0 and ddy == 0:
+                    continue
+                nx, ny = x + ddx, y + ddy
+                if inside(nx, ny):
+                    opp_adj.add((nx, ny))
+
+    # Frontier cells: our territory cells adjacent to unclaimed or opponent territory.
+    frontier = set()
+    for x, y in self_terr:
+        for ddx in (-1, 0, 1):
+            for ddy in (-1, 0, 1):
+                if ddx == 0 and ddy == 0:
+                    continue
+                nx, ny = x + ddx, y + ddy
+                if inside(nx, ny) and ((nx, ny) in unclaimed or (nx, ny) in opp_terr):
+                    frontier.add((nx, ny))
+
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    best = None
+    best_val = -10**18
+    for dx, dy, nx, ny in legal:
+        val = 0
+        if (nx, ny) in opp_terr:
+            val += 9000  # flipping reward
+        if (nx, ny) in unclaimed:
+            val += 6000  # claim reward
+        if (nx, ny) in self_terr:
+            val += 1200  # keep control
+
+        # Center pressure (opponent archetype often centralizes)
+        val += int(250 - 35 * (abs(nx - cx) + abs(ny - cy)))
+
+        # Frontier bias
+        if (nx, ny) in frontier:
+            val += 3500
+        else:
+            # distance to nearest frontier (small local compute)
+            if frontier:
+                dmin = min(man((nx, ny), t) for t in frontier)
+                val += int(900 - 220 * dmin)
+
+        # Risk: adjacent to opponent territory unless capturing it.
+        if (nx, ny) != (sx, sy) and (nx, ny) in opp_adj and (nx, ny) not in opp_terr:
+            val -= 2500
+
+        # Mild strategy: move away from opponent if not capturing, toward opponent if capturing.
+        d_op = man((nx, ny), (ox, oy))
+        d_here = man((sx, sy), (ox, oy))
+        if (nx, ny) in opp_terr:
+            val += int(1400 - 180 * d_op)
+        else:
+            val += int(200 * (d_op - d_here))
+
+        # Deterministic tie-break: fixed order by (dx,dy,nx,ny)
+        key = (val, -(abs(dx) + abs(dy)), -nx, -ny, dx, dy)
+        if key > (best_val if best is not None else -10**18):
+            best_val = key
+            best = (dx, dy)
+
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    resources = set(tuple(p) for p in (observation.get("resources") or []))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    best_score = None
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        score = 0
+        if (nx, ny) in unclaimed:
+            score += 6
+        if (nx, ny) in resources:
+            score += 4
+
+        d_opp = man(nx, ny, ox, oy)
+        if d_opp <= 1:
+            score -= 20
+        else:
+            score += d_opp
+
+        cx, cy = (w - 1) // 2, (h - 1) // 2
+        score -= man(nx, ny, cx, cy) // 2
+
+        if best is None or score > best_score:
+            best = (dx, dy)
+            best_score = score
+        elif score == best_score and best is not None:
+            if (dx, dy) < best:
+                best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

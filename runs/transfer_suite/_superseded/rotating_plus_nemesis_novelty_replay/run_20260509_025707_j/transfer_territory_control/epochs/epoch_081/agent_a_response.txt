@@ -1,0 +1,124 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = {(p[0], p[1]) for p in (observation.get("obstacles") or [])}
+    my_set = {(p[0], p[1]) for p in (observation.get("self_territory") or [])}
+    opp_set = {(p[0], p[1]) for p in (observation.get("opponent_territory") or [])}
+    un_set = {(p[0], p[1]) for p in (observation.get("unclaimed_cells") or [])}
+
+    def safe(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def neighbors8(x, y):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx or dy:
+                    nx, ny = x + dx, y + dy
+                    if 0 <= nx < w and 0 <= ny < h:
+                        yield nx, ny
+
+    def step_toward(tx, ty):
+        dx = 0 if tx == sx else (1 if tx > sx else -1)
+        dy = 0 if ty == sy else (1 if ty > sy else -1)
+        if dx == 0 and dy == 0:
+            return [0, 0]
+        nx, ny = sx + dx, sy + dy
+        if safe(nx, ny):
+            return [dx, dy]
+        # try orthogonal components deterministically
+        for ddx, ddy in ((dx, 0), (0, dy), (0, 0), (-dx, 0), (0, -dy)):
+            nx2, ny2 = sx + ddx, sy + ddy
+            if ddx in (-1, 0, 1) and ddy in (-1, 0, 1) and safe(nx2, ny2):
+                return [ddx, ddy]
+        return [0, 0]
+
+    myc = observation.get("self_territory_count", len(my_set))
+    opc = observation.get("opponent_territory_count", len(opp_set))
+    behind = myc <= opc
+
+    # If behind, prioritize expanding/attacking opponent frontier; else expand unclaimed near our boundary.
+    candidates = []
+    if behind and opp_set:
+        for (ox, oy) in opp_set:
+            for nx, ny in neighbors8(ox, oy):
+                if not safe(nx, ny):
+                    continue
+                if (nx, ny) in opp_set:
+                    # entering opponent cell flips too; still allow
+                    pass
+                score = 0
+                # favor cells adjacent to many opponent cells (frontier)
+                for ax, ay in neighbors8(nx, ny):
+                    if (ax, ay) in opp_set:
+                        score += 3
+                    if (ax, ay) in my_set:
+                        score -= 1
+                # prefer unclaimed targets
+                if (nx, ny) in un_set:
+                    score += 5
+                else:
+                    score -= 1
+                dist = abs(nx - sx) + abs(ny - sy)
+                candidates.append((-(score * 100 + (dist)), nx, ny))
+    if not candidates:
+        # boundary growth: unclaimed cells adjacent to our territory, or direct to nearest unclaimed.
+        for (mx, my) in my_set:
+            for nx, ny in neighbors8(mx, my):
+                if safe(nx, ny) and (nx, ny) in un_set:
+                    score = 10
+                    for ax, ay in neighbors8(nx, ny):
+                        if (ax, ay) in my_set:
+                            score += 2
+                        if (ax, ay) in opp_set:
+                            score -= 2
+                    dist = abs(nx - sx) + abs(ny - sy)
+                    candidates.append((-(score * 100 + (dist)), nx, ny))
+        if not candidates:
+            for (ux, uy) in (observation.get("unclaimed_cells") or []):
+                if safe(ux, uy):
+                    dist = abs(ux - sx) + abs(uy - sy)
+                    # slight preference away from obstacles is implicit via safe()
+                    candidates.append((-(1000 - dist), ux, uy))
+
+    if not candidates:
+        return [0, 0]
+    candidates.sort(key=lambda t: t[0])
+    _, tx, ty = candidates[0]
+    return step_toward(tx, ty)
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (sx, sy))
+    w = int(observation.get("grid_width", 1))
+    h = int(observation.get("grid_height", 1))
+    obstacles = observation.get("obstacles") or []
+    obst = {(p[0], p[1]) for p in obstacles if isinstance(p, (list, tuple)) and len(p) >= 2}
+    rx = observation.get("resources") or []
+    remaining = observation.get("remaining_resource_count", len(rx) if rx else 0)
+    if remaining and rx:
+        targets = [(p[0], p[1]) for p in rx if isinstance(p, (list, tuple)) and len(p) >= 2]
+        tx, ty = min(targets, key=lambda t: abs(t[0] - sx) + abs(t[1] - sy))
+    else:
+        tx, ty = ox, oy
+
+    best = None
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                nx, ny = sx, sy
+            else:
+                nx, ny = sx + dx, sy + dy
+            if not (0 <= nx < w and 0 <= ny < h):
+                continue
+            if (nx, ny) in obst:
+                continue
+            d = abs(tx - nx) + abs(ty - ny)
+            score = (d, abs(ox - nx) + abs(oy - ny))
+            cand = (score, dx, dy)
+            if best is None or cand < best:
+                best = cand
+    if best is None:
+        return [0, 0]
+    return [best[1], best[2]]

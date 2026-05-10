@@ -1,0 +1,147 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    self_t = set(map(tuple, observation.get("self_territory") or []))
+    opp_t = set(map(tuple, observation.get("opponent_territory") or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells") or []))
+
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+    dirs8 = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    # Find frontier unclaimed cells adjacent to opponent territory (edge-contest)
+    frontier = set()
+    for (x, y) in opp_t:
+        for dx, dy in [(-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)]:
+            nx, ny = x + dx, y + dy
+            if inside(nx, ny) and (nx, ny) in unclaimed and (nx, ny) not in obstacles:
+                frontier.add((nx, ny))
+
+    candidates = []
+    if frontier:
+        targets = list(frontier)
+    else:
+        targets = list(unclaimed) if unclaimed else [(sx, sy)]
+
+    # Prefer targets that would be captured (unclaimed/opp-adjacent), and also keep distance from opponent
+    best_t = None
+    best_tv = -10**18
+    for tx, ty in targets:
+        if (tx, ty) in obstacles:
+            continue
+        d_op = abs(tx - ox) + abs(ty - oy)
+        d_me = abs(tx - sx) + abs(ty - sy)
+        # Edge contest boost if it's in frontier
+        boost = 5000.0 if (tx, ty) in frontier else 800.0
+        # Favor closer, and slightly prefer positions closer to center for stability
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        d_center = abs(tx - cx) + abs(ty - cy)
+        val = boost + (120.0 - 4.0 * d_op) + (260.0 - 10.0 * d_me) - 2.0 * d_center
+        if val > best_tv:
+            best_tv = val
+            best_t = (tx, ty)
+
+    tx, ty = best_t if best_t else (sx, sy)
+
+    # Greedy one-step move towards target with strong preference for opponent-owned/adjacent flips
+    best_move = (0, 0)
+    best_s = -10**18
+    for dx, dy in dirs8:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        if (nx, ny) in opp_t:
+            s = 1e9 - 10 * (abs(nx - ox) + abs(ny - oy))  # likely flip
+        elif (nx, ny) in unclaimed:
+            s = 200000.0 - 20 * (abs(nx - ox) + abs(ny - oy)) - 6 * (abs(nx - tx) + abs(ny - ty))
+        elif (nx, ny) in self_t:
+            s = 5000.0 - 2 * (abs(nx - tx) + abs(ny - ty))
+        else:
+            s = -10000.0 - 2 * (abs(nx - tx) + abs(ny - ty))
+        # discourage drifting into opponent's immediate area too much unless capturing
+        s -= 0.5 * (abs(nx - ox) + abs(ny - oy)) if (nx, ny) not in opp_t
+        if s > best_s:
+            best_s = s
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells") or []))
+    opp_t = set(map(tuple, observation.get("opponent_territory") or []))
+    resources = observation.get("resources") or []
+    score_map = set(map(tuple, observation.get("scores") or [])) if observation.get("scores") is not None else set()
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def sgn(a):
+        return (a > 0) - (a < 0)
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    opp_adj = []
+    for x, y in opp_t:
+        for dx, dy in [(-1,-1),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)]:
+            nx, ny = x + dx, y + dy
+            if inside(nx, ny) and (nx, ny) in unclaimed and (nx, ny) not in obstacles:
+                opp_adj.append((nx, ny))
+    targets = opp_adj[:]
+    if not targets:
+        for r in resources:
+            try:
+                rx, ry = r
+            except Exception:
+                continue
+            if inside(rx, ry) and (rx, ry) not in obstacles:
+                targets.append((rx, ry))
+    if not targets:
+        targets = [c for c in unclaimed if inside(c[0], c[1]) and c not in obstacles]
+    if not targets:
+        targets = [(sx, sy)]
+
+    def dist2(a, b, c, d):
+        dx = a - c
+        dy = b - d
+        return dx * dx + dy * dy
+
+    best = None
+    best_sc = -10**30
+    for tx, ty in targets:
+        if (tx, ty) in obstacles:
+            continue
+        adj = 1 if (tx, ty) in opp_adj else 0
+        if (tx, ty) in score_map:
+            rb = 50
+        else:
+            rb = 0
+        sc = adj * 10000 + rb * 10 - dist2(sx, sy, tx, ty) - dist2(ox, oy, tx, ty) // 3
+        if sc > best_sc or (sc == best_sc and (tx, ty) < best):
+            best_sc = sc
+            best = (tx, ty)
+    tx, ty = best
+
+    chosen = (0, 0)
+    chosen_sc = -10**30
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        sc = -dist2(nx, ny, tx, ty) - dist2(nx, ny, ox, oy) // 3
+        if (nx, ny) in unclaimed:
+            sc += 2000
+            if (nx, ny) in opp_adj:
+                sc += 3000
+        if sc > chosen_sc or (sc == chosen_sc and (dx, dy) < chosen):
+            chosen_sc = sc
+            chosen = (dx, dy)
+    return [int(chosen[0]), int(chosen[1])]

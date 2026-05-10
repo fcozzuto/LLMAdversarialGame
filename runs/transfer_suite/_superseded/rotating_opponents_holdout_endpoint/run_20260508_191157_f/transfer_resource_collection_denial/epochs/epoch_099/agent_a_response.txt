@@ -1,0 +1,129 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    if not resources:
+        return [0, 0]
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    rem = observation.get("remaining_resource_count", len(resources))
+    scarcity = 1 if rem <= 4 else 0
+
+    candidates = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles:
+                candidates.append((dx, dy, nx, ny))
+
+    if not candidates:
+        return [0, 0]
+
+    # Prefer moving toward best "available" resource while denying closer opponent targets.
+    # Create a simple ranking of resources by our advantage.
+    res_info = []
+    for rx, ry in resources:
+        ds = man(sx, sy, rx, ry)
+        do = man(ox, oy, rx, ry)
+        # Higher is better for us; scarcity encourages grabbing any nearby resource.
+        adv = do - ds
+        res_info.append((rx, ry, adv, ds, do))
+    res_info.sort(key=lambda t: (-(t[2] + 0.2 * (4 - min(4, t[4])))), (t[4], t[3]))
+
+    # Consider top few targets for scoring.
+    top = res_info[: min(6, len(res_info))]
+
+    best = None
+    best_score = -10**18
+    opp_close = man(sx, sy, ox, oy) <= 3
+
+    for dx, dy, nx, ny in candidates:
+        score = 0.0
+
+        # Capture reward
+        for rx, ry, adv, ds, do in top:
+            if nx == rx and ny == ry:
+                score += 5e5 + 2e4 * scarcity
+
+        # Move quality toward best targets; deny if opponent is closer.
+        # Also add "line" pressure: if our next step reduces opponent access more.
+        for rx, ry, adv, ds, do in top:
+            dsn = man(nx, ny, rx, ry)
+            don = man(ox, oy, rx, ry)
+            # If opponent is closer to that target, prioritize denying by getting in the way (via proximity).
+            if don < dsn:
+                score += -3.0 * (don - dsn)  # being farther than opponent hurts
+                # but if we can still come within 1 of it, prioritize
+                if dsn <= 1:
+                    score += 1200
+            else:
+                score += 35.0 * (dsn - do * 0.0 + (do - dsn))  # encourage narrowing gap
+                score += 6.0 * (do - dsn) if adv > 0 else 0
+
+            # Greedy distance improvement
+            score += -1.2 * (dsn - ds)
+
+            # Scarcity: when few resources remain, pick nearest regardless of race
+            if scarcity:
+                score += -0.8 * dsn
+
+        # Obstacle-aware slight penalty for stagnation when resources exist
+        if dx == 0 and dy == 0:
+            score -= 3.0 + 1.0 * (not opp_close)
+
+        # Prefer moves that also keep opponent from immediately collecting
+        # Estimate: if opponent next could collect a nearby resource, reduce their access by approaching same region.
+        if opp_close:
+            for rx, ry in resources:
+                dso = man(ox, oy, rx, ry)
+                dsn = man(nx, ny, rx, ry)
+                if dso <= 2:
+                    score += 6.0 * (2 - dsn)  # approach so we can contest
+
+        if score > best_score:
+            best_score = score
+            best = [dx, dy]
+
+    return best if best is not None else [0, 0]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = observation.get("grid_width", 1)
+    h = observation.get("grid_height", 1)
+    resources = observation.get("resources", []) or []
+    if not resources:
+        return [0, 0]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    def dist(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        best_adv = None
+        for rx, ry in resources:
+            ds = dist(nx, ny, rx, ry)
+            do = dist(ox, oy, rx, ry)
+            adv = do - ds
+            if best_adv is None or adv > best_adv:
+                best_adv = adv
+        if best_adv is None:
+            continue
+        score = best_adv
+        tie = (dx, dy)
+        if best is None or score > best[0] or (score == best[0] and tie < best[1]):
+            best = (score, tie, dx, dy)
+    if best is None:
+        return [0, 0]
+    return [best[2], best[3]]

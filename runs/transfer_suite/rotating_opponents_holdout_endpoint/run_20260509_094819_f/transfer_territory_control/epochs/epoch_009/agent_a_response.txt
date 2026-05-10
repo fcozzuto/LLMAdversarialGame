@@ -1,0 +1,139 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = [tuple(p) for p in (observation.get("unclaimed_cells") or [])]
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    res = observation.get("resources") or []
+    resources = [tuple(p) for p in res if isinstance(p, (list, tuple)) and len(p) >= 2]
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def md(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    valid = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            valid.append((dx, dy, nx, ny))
+    if not valid:
+        return [0, 0]
+
+    # Build a deterministic priority set of target cells.
+    # Prefer: reachable unclaimed adjacent to our territory; then cells adjacent to opponent territory (to flip),
+    # then remaining unclaimed; then resources; else steer away/toward opponent.
+    nbrs = [(1,0),(-1,0),(0,1),(0,-1),(1,1),(1,-1),(-1,1),(-1,-1)]
+    candidates = []
+    target_from_res = None
+    if resources:
+        target_from_res = min(resources, key=lambda p: md(sx, sy, p[0], p[1]))
+
+    # Filter unclaimed to reduce work and keep deterministic.
+    if unclaimed:
+        for x, y in unclaimed:
+            if (x, y) in self_terr or (x, y) in opp_terr:
+                continue
+            adj_self = False
+            adj_opp = False
+            for dx, dy in nbrs:
+                xx, yy = x + dx, y + dy
+                if (xx, yy) in self_terr: adj_self = True
+                if (xx, yy) in opp_terr: adj_opp = True
+            # Score components: closer is better; adj_self/adj_opp change priority.
+            # Also mildly prefer cells farther from opponent to avoid immediate contest loss,
+            # but allow adj_opp to push a sweep.
+            d_me = md(sx, sy, x, y)
+            d_opp = md(ox, oy, x, y)
+            pr = d_me
+            if adj_self: pr -= 2
+            if adj_opp: pr -= 1
+            pr += 0.25 * d_opp
+            candidates.append((pr, x, y))
+        candidates.sort()
+        tx, ty = candidates[0][1], candidates[0][2]
+    elif target_from_res is not None:
+        tx, ty = target_from_res
+    else:
+        # No unclaimed: just move to extend/contest near opponent.
+        tx, ty = ox, oy
+
+    # Evaluate next-step moves: maximize immediate gain heuristics.
+    best = None
+    for dx, dy, nx, ny in valid:
+        # If stepping into opponent territory, flipping is enabled: very good.
+        step_adj_opp = any((nx + ddx, ny + ddy) in opp_terr for ddx, ddy in nbrs)
+        step_adj_self = any((nx + ddx, ny + ddy) in self_terr for ddx, ddy in nbrs)
+        into_opp = (nx, ny) in opp_terr
+        into_self = (nx, ny) in self_terr
+        is_unclaimed = (nx, ny) in set(unclaimed) if unclaimed else False
+
+        d_to_target = md(nx, ny, tx, ty)
+        d_to_opp = md(nx, ny, ox, oy)
+
+        score = 0
+        score -= d_to_target
+        score += 0.3 * d_to_opp  # keep some distance unless flipping
+        if into_opp: score += 50
+        if step_adj_opp: score += 6
+        if step_adj_self: score += 3
+        if is_unclaimed: score += 2
+        if into_self: score += 1
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (sx, sy))
+    w = observation.get("grid_width", 1)
+    h = observation.get("grid_height", 1)
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    resources = set(tuple(p) for p in (observation.get("resources") or []))
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    candidates = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            candidates.append((dx, dy, nx, ny))
+    if not candidates:
+        return [0, 0]
+    def md(x1, y1, x2, y2):
+        d = x1 - x2
+        if d < 0: d = -d
+        e = y1 - y2
+        if e < 0: e = -e
+        return d + e
+    best = None
+    best_score = None
+    for dx, dy, nx, ny in candidates:
+        score = 0
+        if (nx, ny) in resources:
+            score += 60
+        if (nx, ny) in unclaimed:
+            score += 35
+        if (nx, ny) in self_terr:
+            score -= 5
+        if (nx, ny) in opp_terr:
+            score -= 20
+        adj_opp = False
+        for ax, ay in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            if (nx + ax, ny + ay) in opp_terr:
+                adj_opp = True
+                break
+        if adj_opp:
+            score += 25
+        score += (w + h) - md(nx, ny, ox, oy)
+        if best_score is None or score > best_score:
+            best_score = score
+            best = (dx, dy)
+    return [int(best[0]), int(best[1])]

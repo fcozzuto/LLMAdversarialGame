@@ -1,0 +1,167 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles_list = observation.get("obstacles", []) or []
+    obstacles = set()
+    for p in obstacles_list:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def ok(x, y):
+        return inb(x, y) and (x, y) not in obstacles
+
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    # No resources: don't waste a move
+    if not resources:
+        return [0, 0]
+
+    # Pick best target with a tie-break toward being earlier
+    best_target = None
+    best_cand = None
+    for r in resources:
+        if not (isinstance(r, (list, tuple)) and len(r) >= 2):
+            continue
+        rx, ry = r[0], r[1]
+        if not ok(rx, ry):
+            continue
+        ds = man(sx, sy, rx, ry)
+        do = man(ox, oy, rx, ry)
+        pri = do - ds
+        cand = (pri, -ds, rx, ry)
+        if best_cand is None or cand > best_cand:
+            best_cand = cand
+            best_target = (rx, ry)
+
+    if best_target is None:
+        return [0, 0]
+
+    tx, ty = best_target
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    # Evaluate each move by (how much closer we are than opponent to a nearby best resource).
+    # Also discourage stepping away from our chosen target.
+    curr_best_resource = None
+    for r in resources:
+        if isinstance(r, (list, tuple)) and len(r) >= 2 and ok(r[0], r[1]):
+            curr_best_resource = r
+            break
+
+    best_move = [0, 0]
+    best_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+
+        # Choose a "myopically good" resource: the one maximizing (opp_dist - self_dist) after move,
+        # but clamp to resources close to our chosen target to keep behavior stable/deterministic.
+        local_best = None
+        local_best_score = None
+        for r in resources:
+            if not (isinstance(r, (list, tuple)) and len(r) >= 2):
+                continue
+            rx, ry = r[0], r[1]
+            if not ok(rx, ry):
+                continue
+            # Prefer cells not too far from our target (keeps momentum)
+            if man(rx, ry, tx, ty) > 10:
+                continue
+            ds = man(nx, ny, rx, ry)
+            do = man(ox, oy, rx, ry)
+            pri = do - ds
+            cand = (pri, -ds, rx, ry)
+            if local_best_score is None or cand > local_best_score:
+                local_best_score = cand
+                local_best = (rx, ry)
+
+        if local_best is None:
+            rx, ry = tx, ty
+            ds = man(nx, ny, rx, ry)
+            do = man(ox, oy, rx, ry)
+            pri = do - ds
+            local_best_score = (pri, -ds, rx, ry)
+        else:
+            pri, negds, rx, ry = local_best_score[0], local_best_score[1], local_best[0], local_best[1]
+            ds = -negds
+
+        # Momentum: encourage decreasing distance to the chosen target
+        d_now = man(sx, sy, tx, ty)
+        d_new = man(nx, ny, tx, ty)
+        momentum = d_now - d_new  # positive if we get closer
+
+        # Final deterministic score
+        score = (pri, momentum, -ds, dx, dy)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+
+    # If all candidate moves were invalid (rare), stay
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+
+    resources = observation.get("resources", []) or []
+    if not resources:
+        return [0, 0]
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    moves = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    best = None
+    best_mv = [0, 0]
+
+    def mhd(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0: dx = -dx
+        dy = ay - by
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+
+        best_for_move = -10**9
+        for r in resources:
+            if not (isinstance(r, (list, tuple)) and len(r) >= 2):
+                continue
+            rx, ry = r[0], r[1]
+            if not valid(rx, ry):
+                continue
+            ds = mhd(nx, ny, rx, ry)
+            do = mhd(ox, oy, rx, ry)
+            score = (do - ds) * 1000 - ds
+            if score > best_for_move:
+                best_for_move = score
+
+        cand = (best_for_move, -abs(dx) - abs(dy), -dx, -dy)
+        if best is None or cand > best:
+            best = cand
+            best_mv = [dx, dy]
+
+    return best_mv if valid(sx + best_mv[0], sy + best_mv[1]) else [0, 0]

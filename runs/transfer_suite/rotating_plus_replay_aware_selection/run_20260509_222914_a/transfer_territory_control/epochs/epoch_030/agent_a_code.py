@@ -1,0 +1,65 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0)) or (0, 0)
+    ox, oy = observation.get("opponent_position", (sx, sy)) or (sx, sy)
+    try:
+        sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    except:
+        sx, sy, ox, oy = 0, 0, 0, 0
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                obs.add((x, y))
+
+    unclaimed = observation.get("unclaimed_cells") or []
+    if not isinstance(unclaimed, list):
+        unclaimed = []
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    best = None
+    bestv = -10**18
+    for cell in unclaimed:
+        if not (isinstance(cell, (list, tuple)) and len(cell) >= 2):
+            continue
+        tx, ty = cell[0], cell[1]
+        if not (isinstance(tx, int) and isinstance(ty, int) and inside(tx, ty)):
+            continue
+        if (tx, ty) in obs:
+            continue
+        ds = abs(tx - sx) + abs(ty - sy)
+        do = abs(tx - ox) + abs(ty - oy)
+        center = abs(tx - cx) + abs(ty - cy)
+        # Prefer cells we can beat opponent to; break ties by proximity and center.
+        v = (do - ds) * 1000 - ds * 5 - center
+        if v > bestv:
+            bestv = v
+            best = (tx, ty)
+
+    if best is None:
+        best = (sx, sy)
+
+    tx, ty = best
+    cand = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obs:
+            continue
+        ds = abs(tx - nx) + abs(ty - ny)
+        do = abs(tx - ox) + abs(ty - oy)
+        # Also discourage moving into positions that worsen our relative reach.
+        v = -ds + (do - (abs(tx - nx) + abs(ty - ny))) * 0.01
+        cand.append((v, dx, dy))
+    if not cand:
+        return [0, 0]
+    cand.sort(key=lambda t: (t[0], -t[1], -t[2]))
+    return [int(cand[0][1]), int(cand[0][2])]

@@ -1,0 +1,163 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    resources = set(map(tuple, observation.get("resources") or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells") or []))
+    self_terr = set(map(tuple, observation.get("self_territory") or []))
+    opp_terr = set(map(tuple, observation.get("opponent_territory") or []))
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def manhattan(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    def nearest_from_set(x, y, cells, cap=30):
+        if not cells:
+            return 10**9
+        best = 10**9
+        i = 0
+        for (cx, cy) in cells:
+            d = manhattan(x, y, cx, cy)
+            if d < best:
+                best = d
+                if best == 0:
+                    return 0
+            i += 1
+            if i >= cap:
+                break
+        return best
+
+    # Prefer immediate flips: opponent cells adjacent to our territory (or near us).
+    adj_flip_targets = []
+    for (ox, oy) in opp_terr:
+        if manhattan(ox, oy, sx, sy) > 4:
+            continue
+        for dx, dy in dirs:
+            ax, ay = ox - dx, oy - dy
+            if (ax, ay) in self_terr:
+                adj_flip_targets.append((ox, oy))
+                break
+
+    if adj_flip_targets:
+        tx, ty = min(adj_flip_targets, key=lambda p: manhattan(sx, sy, p[0], p[1]))
+        target_kind = 2  # flip
+    else:
+        # Otherwise: closest unclaimed; if none, chase opponent territory; else resource.
+        if unclaimed:
+            tx, ty = min(unclaimed, key=lambda p: manhattan(sx, sy, p[0], p[1]))
+            target_kind = 1  # claim
+        elif opp_terr:
+            tx, ty = min(opp_terr, key=lambda p: manhattan(sx, sy, p[0], p[1]))
+            target_kind = 2  # counter
+        elif resources:
+            tx, ty = min(resources, key=lambda p: manhattan(sx, sy, p[0], p[1]))
+            target_kind = 3  # resource
+        else:
+            # Fallback: expand toward center-ish to avoid getting stuck.
+            tx, ty = (w // 2, h // 2)
+            target_kind = 0
+
+    opp_near = nearest_from_set(sx, sy, opp_terr, cap=30)
+    best_score = -10**18
+    best_move = [0, 0]
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            score = -10**12
+        else:
+            score = 0
+            if (nx, ny) in self_terr:
+                score += 1
+            if (nx, ny) in unclaimed:
+                score += 3
+            if (nx, ny) in opp_terr:
+                score += 8
+            # Encourage moving closer to target and away from being far from opponent.
+            dist_t = manhattan(nx, ny, tx, ty)
+            score += 4.0 / (1 + dist_t)
+            opp_d = nearest_from_set(nx, ny, opp_terr, cap=30)
+            score += 1.5 / (1 + opp_d)
+            # Mild preference for forward progress away from staying
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    px, py = observation.get("opponent_position", [w - 1, h - 1])
+
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    resources = set(map(tuple, observation.get("resources") or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells") or []))
+    opp_terr = set(map(tuple, observation.get("opponent_territory") or []))
+    my_terr = set(map(tuple, observation.get("self_territory") or []))
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    def nearest_dist(x, y, cells):
+        if not cells:
+            return 10**9
+        best = 10**9
+        for cx, cy in cells:
+            d = man(x, y, cx, cy)
+            if d < best:
+                best = d
+                if best == 0:
+                    return 0
+        return best
+
+    target_cells = resources if resources else (unclaimed if unclaimed else (opp_terr if opp_terr else set()))
+    if not target_cells:
+        target_cells = {(px, py)}
+
+    best_dir = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        score = 0
+        if (nx, ny) in resources:
+            score += 1000
+        if (nx, ny) in unclaimed:
+            score += 40
+        if (nx, ny) in opp_terr:
+            score += 120
+
+        score += -nearest_dist(nx, ny, target_cells)
+        score += 5 if (nx, ny) in my_terr else 0
+        score += -2 * man(nx, ny, px, py)
+
+        if score > best_score:
+            best_score = score
+            best_dir = (dx, dy)
+
+    return [best_dir[0], best_dir[1]]

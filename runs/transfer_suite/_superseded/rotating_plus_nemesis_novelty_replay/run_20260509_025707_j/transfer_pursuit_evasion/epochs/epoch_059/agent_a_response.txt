@@ -1,0 +1,162 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for t in observation.get("obstacles") or []:
+        if isinstance(t, (list, tuple)) and len(t) >= 2:
+            x, y = int(t[0]), int(t[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def is_evader(role):
+        r = (role or "").lower()
+        return ("evader" in r) or ("runner" in r) or ("evasion" in r) or ("evasive" in r)
+
+    self_evade = is_evader(observation.get("self_role"))
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist(ax, ay, bx, by):
+        return (ax - bx) * (ax - bx) + (ay - by) * (ay - by)
+
+    # If evading: move to maximize min future distance; if pursuing: move to minimize opponent-expected distance.
+    best_move = [0, 0]
+    best_val = None
+
+    for dx, dy in dirs:
+        nsx, nsy = sx + dx, sy + dy
+        if not valid(nsx, nsy):
+            continue
+
+        # Opponent best response (greedy) assuming same role type, but using our hypothetical position.
+        # We evaluate 1-ply minimax: our choice vs opponent greedy.
+        opp_target = (nsx, nsy)
+
+        best_opp = None
+        best_opp_val = None
+        for odx, ody in dirs:
+            nox, noy = ox + odx, oy + ody
+            if not valid(nox, noy):
+                continue
+            # If opponent is evader, it tries to maximize distance from our hypothetical; else minimize.
+            dv = dist(nox, noy, opp_target[0], opp_target[1])
+            if best_opp is None:
+                best_opp = [odx, ody]
+                best_opp_val = dv
+            else:
+                better = (dv > best_opp_val) if is_evader(observation.get("opponent_role")) else (dv < best_opp_val)
+                if better:
+                    best_opp = [odx, ody]
+                    best_opp_val = dv
+
+        if best_opp is None:
+            # No valid opponent move; just score current hypothetical.
+            score = dist(nsx, nsy, ox, oy)
+        else:
+            # Opponent moves to best_opp; score from our perspective.
+            score = best_opp_val
+
+        # Add small obstacle-aware bias: prefer moves that don't "hug" obstacles too tightly.
+        # Count invalid neighbor cells around new position.
+        block = 0
+        for ndx, ndy in dirs:
+            tx, ty = nsx + ndx, nsy + ndy
+            if not (0 <= tx < w and 0 <= ty < h) or (tx, ty) in obstacles:
+                block += 1
+        score2 = score - (0.05 * block)
+
+        if best_val is None:
+            best_val = score2
+            best_move = [dx, dy]
+        else:
+            if self_evade:
+                # maximize distance
+                if score2 > best_val:
+                    best_val = score2
+                    best_move = [dx, dy]
+            else:
+                # minimize distance (capture is direct with radius 0; closer is better)
+                if score2 < best_val:
+                    best_val = score2
+                    best_move = [dx, dy]
+
+    # Fallback: greedy direct move, deterministic.
+    if best_val is None:
+        dx = 0 if ox == sx else (1 if ox > sx else -1)
+        dy = 0 if oy == sy else (1 if oy > sy else -1)
+        for cand in ([dx, dy], [dx, 0], [0, dy], [0, 0]):
+            nx, ny = sx + cand[0], sy + cand[1]
+            if valid(nx, ny):
+                return cand
+        return [0, 0]
+
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for t in observation.get("obstacles") or []:
+        if isinstance(t, (list, tuple)) and len(t) >= 2:
+            x, y = int(t[0]), int(t[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    resources = observation.get("resources") or []
+    res_pos = []
+    for t in resources:
+        if isinstance(t, (list, tuple)) and len(t) >= 2:
+            x, y = int(t[0]), int(t[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                res_pos.append((x, y))
+
+    dirs = [(-1, 0), (0, -1), (0, 0), (1, 0), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist2(ax, ay, bx, by):
+        dx, dy = ax - bx, ay - by
+        return dx * dx + dy * dy
+
+    best = None
+    best_score = None
+
+    if res_pos:
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            dmin = min(dist2(nx, ny, rx, ry) for rx, ry in res_pos)
+            dopp = dist2(nx, ny, ox, oy)
+            score = (-dmin, -dopp)  # closer to resource, also stay away from opponent
+            if best_score is None or score > best_score:
+                best_score = score
+                best = [dx, dy]
+    else:
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            score = (dist2(nx, ny, ox, oy),)
+            if best_score is None or score > best_score:
+                best_score = score
+                best = [dx, dy]
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

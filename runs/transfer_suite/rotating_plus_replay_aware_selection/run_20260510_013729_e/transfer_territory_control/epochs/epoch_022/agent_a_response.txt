@@ -1,0 +1,152 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    if not w or not h:
+        return [0, 0]
+    x, y = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+
+    obstacles = set(map(tuple, observation.get("obstacles", [])))
+    self_ter = set(map(tuple, observation.get("self_territory", [])))
+    opp_ter = set(map(tuple, observation.get("opponent_territory", [])))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells", [])))
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    def adj_count(nx, ny, cellset):
+        c = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                if ax == 0 and ay == 0:
+                    continue
+                tx, ty = nx + ax, ny + ay
+                if inb(tx, ty) and (tx, ty) in cellset:
+                    c += 1
+        return c
+
+    sc_self = observation.get("self_territory_count", len(self_ter))
+    sc_opp = observation.get("opponent_territory_count", len(opp_ter))
+    we_behind = sc_self < sc_opp
+
+    center_x, center_y = (w - 1) / 2.0, (h - 1) / 2.0
+    dist_center = abs(x - center_x) + abs(y - center_y)
+
+    def score_cell(nx, ny):
+        t = (nx, ny)
+        if t in obstacles:
+            return -10**9
+        a_self = adj_count(nx, ny, self_ter)
+        a_opp = adj_count(nx, ny, opp_ter)
+        a_un = adj_count(nx, ny, unclaimed)
+        on_self = 1 if t in self_ter else 0
+        on_opp = 1 if t in opp_ter else 0
+        on_un = 1 if t in unclaimed else 0
+
+        d_opp = abs(nx - ox) + abs(ny - oy)
+        d_c = abs(nx - center_x) + abs(ny - center_y)
+
+        # Expansion / capture pressure
+        base = 0
+        base += 6 * a_self + 3 * a_un
+        base += 8 * on_un
+        base += 14 * on_opp + 2 * a_opp
+        base += 2 * on_self
+
+        # Tactical: if behind, push into opponent fronts; else, expand toward unclaimed/front.
+        if we_behind:
+            base += 3 * a_opp
+            base += (9 - d_opp) * 0.7
+        else:
+            base += 1.2 * (dist_center - d_c)
+
+        # Micro-penalty for stepping into crowded enemy territory without adjacency benefit
+        if on_opp and a_self == 0 and a_un == 0:
+            base -= 6
+
+        # Slight preference to keep moving (avoid pure stalling) unless at edge-block
+        if t != (x, y):
+            base += 0.15
+        else:
+            base -= 0.05
+        return base
+
+    best_move = [0, 0]
+    best_sc = -10**18
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        sc = score_cell(nx, ny)
+        if sc > best_sc:
+            best_sc = sc
+            best_move = [dx, dy]
+        elif sc == best_sc:
+            # Deterministic tie-break: closer to opponent if behind else closer to center; then larger dx, then larger dy
+            t1 = abs(nx - ox) + abs(ny - oy) if we_behind else abs(nx - center_x) + abs(ny - center_y)
+            cb = best_move
+            bx, by = x + cb[0], y + cb[1]
+            t
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sp = observation.get("self_position", [0, 0])
+    op = observation.get("opponent_position", [0, 0])
+    if not w or not h:
+        return [0, 0]
+    x, y = sp[0], sp[1]
+    ox, oy = op[0], op[1]
+    obstacles = set(map(tuple, observation.get("obstacles", [])))
+    resources = observation.get("resources", [])
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def best_resource_dist(nx, ny):
+        if not resources:
+            return 0
+        best = None
+        for r in resources:
+            if isinstance(r, (list, tuple)) and len(r) >= 2:
+                rx, ry = int(r[0]), int(r[1])
+                d = abs(nx - rx) + abs(ny - ry)
+                if best is None or d < best:
+                    best = d
+        return 0 if best is None else best
+
+    # If we are behind, prioritize moving toward resources; otherwise, prioritize distancing.
+    sc_self = observation.get("scores", {}).get("self", observation.get("self_score", 0))
+    sc_opp = observation.get("scores", {}).get("opponent", observation.get("opponent_score", 0))
+    if sc_self == 0 and sc_opp == 0:
+        sc_self = observation.get("self_territory_count", 0)
+        sc_opp = observation.get("opponent_territory_count", 0)
+    chase = sc_self < sc_opp
+
+    opp_cur_dist = abs(x - ox) + abs(y - oy)
+    best = None
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny):
+            continue
+        nd_op = abs(nx - ox) + abs(ny - oy)
+        nd_res = best_resource_dist(nx, ny)
+        if chase:
+            # Lower resource distance is better; also keep some separation.
+            cand = (-(0 if nd_res is None else nd_res), nd_op)
+        else:
+            # Higher separation is better; then prefer reducing resource distance.
+            cand = (nd_op, -(0 if nd_res is None else nd_res))
+        # Deterministic tie-break: prefer moves with smaller (dx,dy) lexicographically.
+        tie = (cand[0], cand[1], dx, dy)
+        if best is None or tie > best:
+            best = tie
+    if best is None:
+        return [0, 0]
+    # Decode chosen dx,dy from stored tie
+    dx, dy = best[2], best[3]
+    return [int(dx), int(dy)]

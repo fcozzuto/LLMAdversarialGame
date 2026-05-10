@@ -1,0 +1,149 @@
+def choose_move(observation):
+    w, h = observation["grid_width"], observation["grid_height"]
+    x, y = observation["self_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    opp_pos = observation.get("opponent_position") or [w - 1, h - 1]
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def absd(a, b):
+        d = a - b
+        return d if d >= 0 else -d
+
+    def man(a, b):
+        return absd(a[0], b[0]) + absd(a[1], b[1])
+
+    def centroid(pts):
+        if not pts:
+            return opp_pos
+        sx = sy = 0
+        for px, py in pts:
+            sx += px
+            sy += py
+        return [sx // len(pts), sy // len(pts)]
+
+    opp_cent = centroid(list(opp_terr))
+    self_cent = centroid(list(self_terr)) if self_terr else [x, y]
+
+    # Encourage expansion near our front, and opportunistic counterclaim
+    frontier = []
+    for px, py in self_terr:
+        for dx, dy in moves:
+            nx, ny = px + dx, py + dy
+            if inb(nx, ny) and ((nx, ny) in unclaimed or (nx, ny) in opp_terr):
+                frontier.append((nx, ny))
+    if not frontier:
+        frontier = list(unclaimed) + list(opp_terr)
+    if not frontier:
+        return [0, 0]
+
+    best_move = (0, 0)
+    best_key = None
+    order = {(-1, -1): 0, (-1, 0): 1, (-1, 1): 2, (0, -1): 3, (0, 0): 4, (0, 1): 5, (1, -1): 6, (1, 0): 7, (1, 1): 8}
+
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny):
+            continue
+
+        gain = 0
+        if (nx, ny) in opp_terr:
+            gain = 6
+        elif (nx, ny) in unclaimed:
+            gain = 3
+        elif (nx, ny) in self_terr:
+            gain = 1
+
+        # Avoid obstacles / reduce getting "stuck" into obstacle-near cul-de-sacs
+        adj_obstacles = 0
+        for ax, ay in moves:
+            tx, ty = nx + ax, ny + ay
+            if 0 <= tx < w and 0 <= ty < h and (tx, ty) in obstacles:
+                adj_obstacles += 1
+
+        # Distance-based attraction to best frontier cell, but bias towards counterclaim if adjacent
+        target = frontier[0]
+        best_front = None
+        for fx, fy in frontier:
+            d = absd(fx, nx) + absd(fy, ny)
+            if best_front is None or d < best_front[0] or (d == best_front[0] and (fx, fy) < best_front[1]):
+                best_front = (d, (fx, fy))
+        if best_front is not None:
+            target = best_front[1]
+
+        to_front = absd(target[0], nx) + absd(target[1], ny)
+        to_opp = absd(opp_cent[0], nx) + absd(opp_cent[1], ny)
+        to_self = absd(self_cent[0], nx) + absd(self_cent[1], ny)
+
+        # tie-break: prefer moves that are closer to opponent's controlled center when counterclaim is possible
+        counter_bias = 0
+        if (nx, ny) in opp_terr:
+            counter_bias = -2 * to_opp
+        elif (nx, ny) in unclaimed:
+            counter_bias = -1 * to_opp
+
+        # Higher is better; also subtract obstacle adjacency and long distance to chosen frontier
+        score = 10 * gain + counter_bias - 1.5 * to_front - 0.8 * adj_obstacles + 0.05 * order[(dx, dy)] - 0.02 * to_self
+
+        key = (-(score), order[(dx, dy)], nx, ny)
+        if best_key is None or key < best_key:
+            best_key = key
+            best_move = (dx, dy)
+
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w, h = observation["grid_width"], observation["grid_height"]
+    x, y = observation["self_position"]
+    ox, oy = observation.get("opponent_position") or [w - 1, h - 1]
+
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    resources = set(tuple(p) for p in (observation.get("resources") or []))
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def md(nx, ny, ax, ay):
+        dx = nx - ax
+        if dx < 0:
+            dx = -dx
+        dy = ny - ay
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = None
+    best_score = None
+
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny):
+            continue
+        s = 0
+        # Prefer approaching opponent, but strongly prefer stepping onto resources.
+        s += 20 if (nx, ny) in resources else 0
+        s += -md(nx, ny, ox, oy)
+        # Small preference to keep moving (reduce chance of getting stuck).
+        if dx == 0 and dy == 0:
+            s -= 1
+        if best is None or s > best_score:
+            best_score = s
+            best = [dx, dy]
+
+    if best is None:
+        # Fallback: any in-bounds, non-obstacle move (including stay if possible).
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+    return best

@@ -1,0 +1,146 @@
+def choose_move(observation):
+    w, h = observation["grid_width"], observation["grid_height"]
+    sx, sy = observation["self_position"]
+    obs = set(tuple(p) for p in (observation.get("obstacles") or []))
+    un_cells = [tuple(p) for p in (observation.get("unclaimed_cells") or [])]
+    opp_t = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    opp_pos = tuple(observation.get("opponent_position") or (sx, sy))
+    ox, oy = opp_pos
+    if not un_cells:
+        return [0, 0]
+
+    un_set = set(un_cells)
+    opp_list = list(opp_t) if opp_t else []
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def dist(a, b, x, y):
+        return abs(a - x) + abs(b - y)
+
+    # If opponent is ahead, prioritize unclaimed adjacent to opponent territory (fast frontier grab).
+    self_cnt = observation.get("self_territory_count", len(observation.get("self_territory") or []))
+    opp_cnt = observation.get("opponent_territory_count", len(observation.get("opponent_territory") or []))
+    frontier = []
+    if opp_t:
+        for cx, cy in un_cells:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if (cx + dx, cy + dy) in opp_t:
+                        frontier.append((cx, cy))
+                        dx = dy = 2  # break-ish
+                        break
+                else:
+                    continue
+                break
+
+    prefer = frontier if (opp_cnt >= self_cnt and frontier) else un_cells
+
+    # Scoring neighbors with deterministic risk model.
+    options = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = [0, 0]
+    best_val = -10**18
+
+    # Precompute nearest opponent distance quickly (small list).
+    def opp_nearest_distance(x, y):
+        if not opp_list:
+            return 10**9
+        d = 10**9
+        for a, b in opp_list:
+            dd = abs(a - x) + abs(b - y)
+            if dd < d:
+                d = dd
+        return d
+
+    for dx, dy in options:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        val = 0.0
+
+        if (nx, ny) in un_set:
+            # Higher if this move heads toward priority targets.
+            t_dist = 10**9
+            for tx, ty in prefer:
+                dd = abs(tx - nx) + abs(ty - ny)
+                if dd < t_dist:
+                    t_dist = dd
+            val += 60.0
+            val += 14.0 / (1 + t_dist)
+        elif (nx, ny) in opp_t:
+            # Entering opponent territory flips: do it only if it's beneficial and we're not too exposed.
+            val += 18.0
+        else:
+            val += 2.0
+
+        # Risk: being too close to opponent territory.
+        d_op = opp_nearest_distance(nx, ny)
+        val -= 10.0 / (1 + d_op)
+
+        # Mild bias: avoid moving away from nearest priority target too much.
+        # Use direct distance from current to target.
+        t_best = 10**9
+        for tx, ty in prefer:
+            dd = abs(tx - sx) + abs(ty - sy)
+            if dd < t_best:
+                t_best = dd
+        cur_to_target = t_best if t_best < 10**9 else 0
+        next_to_target = 10**9
+        for tx, ty in prefer:
+            dd = abs(tx - nx) + abs(ty - ny)
+            if dd < next_to_target:
+                next_to_target = dd
+        if next_to_target < 10**9:
+            val += 6.0 * (cur_to_target - next_to_target)
+
+        # Deterministic tie-break: prefer staying still last.
+        if val > best_val or (val == best_val and (dx, dy) != (0, 0) and best == [0, 0]):
+            best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (sx, sy))
+    obstacles = observation.get("obstacles") or []
+    obs = set((p[0], p[1]) for p in obstacles)
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    un_cells = observation.get("unclaimed_cells") or []
+    if not un_cells:
+        target = (ox, oy)
+    else:
+        target = None
+        best = 10**9
+        for p in un_cells:
+            x, y = p[0], p[1]
+            d = abs(sx - x) + abs(sy - y)
+            if d < best:
+                best = d
+                target = (x, y)
+        if target is None:
+            target = (ox, oy)
+
+    moves = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+    best_move = [0, 0]
+    best_score = -10**18
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        dist_to_target = abs(nx - target[0]) + abs(ny - target[1])
+        dist_to_opp = abs(nx - ox) + abs(ny - oy)
+        # Prefer getting closer to target and (slightly) farther from opponent.
+        score = (-dist_to_target) + 0.1 * dist_to_opp
+        if score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+
+    return best_move

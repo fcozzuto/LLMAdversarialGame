@@ -1,0 +1,64 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    ax, ay = observation.get("self_position", (0, 0))
+    oppx, oppy = observation.get("opponent_position", (0, 0))
+    ax, ay, oppx, oppy = int(ax), int(ay), int(oppx), int(oppy)
+
+    def toset(v):
+        s = set()
+        for p in v or []:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = int(p[0]), int(p[1])
+                if 0 <= x < w and 0 <= y < h:
+                    s.add((x, y))
+        return s
+
+    ob = toset(observation.get("obstacles"))
+    selft = toset(observation.get("self_territory"))
+    oppT = toset(observation.get("opponent_territory"))
+    un = toset(observation.get("unclaimed_cells"))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    legal = []
+    for dx, dy in moves:
+        nx, ny = ax + dx, ay + dy
+        if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in ob:
+            legal.append((dx, dy, nx, ny))
+    if not legal:
+        return [0, 0]
+
+    neigh = [(-1, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    best = None
+    for dx, dy, nx, ny in legal:
+        score = 0
+        target_list = []
+        if un:
+            if selft:
+                adj = set()
+                for x, y in selft:
+                    for ddx, ddy in neigh:
+                        tx, ty = x + ddx, y + ddy
+                        if (tx, ty) in un:
+                            adj.add((tx, ty))
+                target_list = list(adj)
+            if not target_list:
+                target_list = list(un)
+            if target_list:
+                dmin = 10**9
+                for tx, ty in target_list:
+                    d = abs(tx - nx) + abs(ty - ny)
+                    if d < dmin:
+                        dmin = d
+                score = -dmin
+        if not un or (not selft and not selft):
+            score = -(abs(oppx - nx) + abs(oppy - ny))
+        if oppT and (nx, ny) in oppT:
+            score -= 100000
+        score -= 0.001 * (abs(oppx - nx) + abs(oppy - ny))  # deterministic tie-break
+        if best is None or score > best[0]:
+            best = (score, dx, dy)
+
+    return [int(best[1]), int(best[2])]

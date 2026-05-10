@@ -1,0 +1,148 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+
+    scores = observation.get("scores") or {}
+    self_name = observation.get("self_name")
+    opp_name = observation.get("opponent_name")
+    gap = 0
+    if isinstance(scores, dict) and self_name is not None and opp_name is not None:
+        gap = scores.get(self_name, 0) - scores.get(opp_name, 0)
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+    def manh(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    # Precompute a few target signals
+    opp_list = list(opp_terr)
+    opp_min = 999
+    opp_cent = (0, 0)
+    if opp_list:
+        sxum = 0
+        syum = 0
+        for x, y in opp_list[:min(16, len(opp_list))]:
+            sxum += x
+            syum += y
+            d = manh(sx, sy, x, y)
+            if d < opp_min:
+                opp_min = d
+        n = min(16, len(opp_list))
+        opp_cent = (sxum / n, syum / n)
+
+    best = [0, 0]
+    best_val = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        in_unclaimed = (nx, ny) in unclaimed
+        in_self = (nx, ny) in self_terr
+        in_opp = (nx, ny) in opp_terr
+
+        # Distance to opponent territory (avoid when ahead, invade when behind)
+        d_to_opp = 999
+        if opp_list:
+            for x, y in opp_list[:min(16, len(opp_list))]:
+                d = manh(nx, ny, x, y)
+                if d < d_to_opp:
+                    d_to_opp = d
+        else:
+            d_to_opp = manh(nx, ny, ox, oy)
+
+        # Move preference: capture unclaimed; if behind, prioritize entering opponent territory
+        v = 0
+        v += 200 if in_unclaimed else 0
+        v += 20 if in_self else 0
+
+        if in_opp:
+            v += 160 if gap < 0 else 40
+
+        # If ahead: keep distance; if behind: close distance
+        if gap >= 0:
+            v += (60 - 6 * d_to_opp)
+            v += -3 * manh(nx, ny, int(opp_cent[0]), int(opp_cent[1]))
+        else:
+            v += (10 * (15 - d_to_opp))
+            v += -1 * manh(nx, ny, ox, oy)
+
+        # Mild anti-stagnation: prefer moves that reduce distance to nearest unclaimed cell
+        # (look at a few unclaimed only)
+        if unclaimed:
+            un_list = list(unclaimed)
+            d_un = 999
+            for ux, uy in un_list[:min(16, len(un_list))]:
+                d = manh(nx, ny, ux, uy)
+                if d < d_un:
+                    d_un = d
+            v += 25 - 2 * d_un
+
+        # Prefer staying within bounds while not walking into opponent too eagerly when ahead
+        if gap >= 1 and in_opp:
+            v -= 80
+
+        if v > best_val:
+            best_val = v
+            best = [dx, dy]
+
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width") or 8
+    h = observation.get("grid_height") or 8
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (0, 0)
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def manh(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    targets = list(opp_terr) if opp_terr else [(ox, oy)]
+    if not targets:
+        targets = [(ox, oy)]
+    best_t = targets[0]
+    best_d = 10**9
+    for tx, ty in targets[:32]:
+        d = manh(sx, sy, tx, ty)
+        if d < best_d:
+            best_d = d
+            best_t = (tx, ty)
+    tx, ty = best_t
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = (0, 0)
+    best_val = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        d = manh(nx, ny, tx, ty)
+        val = -d
+        if (nx, ny) in unclaimed:
+            val += 2
+        if (nx, ny) in self_terr:
+            val += 1
+        if (nx, ny) == (sx, sy):
+            val -= 0.1
+        if val > best_val + 1e-12:
+            best_val = val
+            best_move = (dx, dy)
+    return [int(best_move[0]), int(best_move[1])]

@@ -1,0 +1,128 @@
+def choose_move(observation):
+    x, y = observation.get("self_position", [0, 0])
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    obstacles = observation.get("obstacles", []) or []
+    obs = set((p[0], p[1]) for p in obstacles)
+    opp = set((p[0], p[1]) for p in (observation.get("opponent_territory", []) or []))
+    unclaimed = set((p[0], p[1]) for p in (observation.get("unclaimed_cells", []) or []))
+    selft = set((p[0], p[1]) for p in (observation.get("self_territory", []) or []))
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    def inb(a, b): return 0 <= a < w and 0 <= b < h
+    def d(ax, ay, bx, by): return abs(ax - bx) + abs(ay - by)
+
+    # Prefer claiming near opponent boundary (counterclaim disruption)
+    opp_list = list(opp)
+    if opp_list:
+        cx = sum(p[0] for p in opp_list) / len(opp_list)
+        cy = sum(p[1] for p in opp_list) / len(opp_list)
+    else:
+        cx, cy = w - 1, h - 1
+
+    frontier = []
+    if unclaimed and opp:
+        for ux, uy in unclaimed:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx == 0 and dy == 0: 
+                        continue
+                    nx, ny = ux + dx, uy + dy
+                    if (nx, ny) in opp:
+                        frontier.append((ux, uy))
+                        dx = 2  # break-ish
+                        break
+                else:
+                    continue
+                break
+
+    candidates = frontier if frontier else list(unclaimed)
+    if not candidates:
+        # Fallback: move toward opponent centroid
+        tx, ty = int(round(cx)), int(round(cy)))
+    else:
+        # Deterministically choose best target for current position (not dependent on sorting stability)
+        # by minimizing manhattan to a small set of best frontier points
+        best = None
+        best_key = None
+        for i, (tx, ty) in enumerate(candidates):
+            key = (d(x, y, tx, ty), (tx - x) * (tx - x) + (ty - y) * (ty - y), tx, ty)
+            if best_key is None or key < best_key:
+                best_key = key
+                best = (tx, ty)
+                if i > 80 and best_key[0] == 0:
+                    break
+        tx, ty = best
+
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        # Immediate value shaping: flipping opponent territory > claiming unclaimed near boundary > reinforcing self
+        immediate = 0
+        if (nx, ny) in opp:
+            immediate += 50
+        elif (nx, ny) in unclaimed:
+            immediate += 10
+        elif (nx, ny) in selft:
+            immediate += 2
+
+        # Continue pressure toward target; also avoid getting surrounded by opponent by preferring safer distance
+        dist_to_target = d(nx, ny, tx, ty)
+        opp_dist = min((d(nx, ny, ox, oy) for ox, oy in opp_list), default=8)
+        score = immediate * 1.0 - dist_to_target * 3.0 + opp_dist * 0.7
+
+        # Slightly prefer staying within territory if scores are close (deterministic tiebreak)
+        if (dx, dy) == (0, 0):
+            score -= 0.15
+
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    x, y = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    obstacles = observation.get("obstacles", []) or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((int(p[0]), int(p[1])))
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+    resources = observation.get("resources", []) or []
+    target = (ox, oy)
+    if resources:
+        best = None
+        bx, by = target
+        for p in resources:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                rx, ry = int(p[0]), int(p[1])
+                d = abs(x - rx) + abs(y - ry)
+                if best is None or d < best:
+                    best = d
+                    bx, by = rx, ry
+        target = (bx, by)
+    tx, ty = target
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = int(x + dx), int(y + dy)
+        if not inb(nx, ny):
+            continue
+        dist = abs(nx - tx) + abs(ny - ty)
+        opp_dist = abs(nx - ox) + abs(ny - oy)
+        score = dist * 10 - opp_dist
+        if best_score is None or score < best_score:
+            best_score = score
+            best_move = (dx, dy)
+    return [int(best_move[0]), int(best_move[1])]

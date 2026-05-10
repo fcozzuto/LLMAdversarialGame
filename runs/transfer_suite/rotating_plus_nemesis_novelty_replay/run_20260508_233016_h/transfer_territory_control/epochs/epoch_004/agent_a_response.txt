@@ -1,0 +1,150 @@
+def choose_move(observation):
+    x, y = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def md(a, b):
+        d = a - b
+        return d if d >= 0 else -d
+
+    def dist(ax, ay, bx, by):
+        return md(ax, bx) + md(ay, by)
+
+    # Build candidate expansion frontier: unclaimed adjacent to our territory.
+    frontier = set()
+    if self_terr:
+        for sx, sy in self_terr:
+            for dx, dy in dirs:
+                nx, ny = sx + dx, sy + dy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) in unclaimed:
+                    frontier.add((nx, ny))
+    candidates = list(frontier) if frontier else list(unclaimed)
+
+    # Deterministic move evaluation; prefer frontier expansion while not feeding opponent.
+    def best_target_score(tx, ty):
+        d_to_you = dist(x, y, tx, ty)
+        d_to_opp = dist(ox, oy, tx, ty)
+        # Want: close to us, far from opponent to avoid edge-claim battles.
+        return d_to_you * 5 - d_to_opp * 2 - (0 if (tx, ty) in frontier else 6)
+
+    target = None
+    if candidates:
+        best = 10**18
+        for tx, ty in candidates:
+            s = best_target_score(tx, ty)
+            if s < best:
+                best = s
+                target = (tx, ty)
+
+    # If no targets, try to reduce opponent influence: move toward nearest cell adjacent to their territory.
+    if target is None:
+        adj = set()
+        for px, py in opp_terr:
+            for dx, dy in dirs:
+                nx, ny = px + dx, py + dy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) != (x, y):
+                    adj.add((nx, ny))
+        if adj:
+            target = min(adj, key=lambda p: dist(x, y, p[0], p[1]) - dist(ox, oy, p[0], p[1]))
+        else:
+            target = (x, y)
+
+    # Evaluate immediate moves with simple territory/flip heuristics and obstacle safety.
+    best_move = [0, 0]
+    best_val = -10**18
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) == (x, y):
+            nnx, nny = nx, ny
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        in_self = (nx, ny) in self_terr
+        in_opp = (nx, ny) in opp_terr
+        in_un = (nx, ny) in unclaimed
+
+        val = 0
+        if in_un:
+            val += 30
+            if (nx, ny) in frontier:
+                val += 20
+        elif in_self:
+            val += 6
+        elif in_opp:
+            val += 12  # flipping enabled; contest only if it doesn't march into bad battles
+        else:
+            val += 2  # unknown/unoccupied-ish
+
+        # Prefer stepping toward target.
+        val += -dist(nx, ny, target[0], target[1]) * 4
+
+        # Discourage moving closer to opponent
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 0))
+    h = int(observation.get("grid_height", 0))
+    x, y = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+
+    unclaimed = observation.get("unclaimed_cells") or []
+    self_terr = observation.get("self_territory") or []
+    obstacles = observation.get("obstacles") or []
+
+    if not unclaimed and not self_terr:
+        return [0, 0]
+
+    obst = set((int(px), int(py)) for px, py in obstacles)
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def dist(ax, ay, bx, by):
+        d = ax - bx
+        if d < 0:
+            d = -d
+        e = ay - by
+        return d + (e if e >= 0 else -e)
+
+    targets = []
+    sset = set((int(px), int(py)) for px, py in self_terr)
+    if sset:
+        u = set((int(px), int(py)) for px, py in unclaimed)
+        for sx, sy in sset:
+            for dx, dy in dirs:
+                nx, ny = sx + dx, sy + dy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) in u:
+                    targets.append((nx, ny))
+    if not targets:
+        targets = [(int(px), int(py)) for px, py in unclaimed]
+
+    if not targets:
+        return [0, 0]
+
+    best_t = targets[0]
+    best_key = (dist(x, y, best_t[0], best_t[1]), -dist(best_t[0], best_t[1], ox, oy))
+    for tx, ty in targets[1:]:
+        key = (dist(x, y, tx, ty), -dist(tx, ty, ox, oy))
+        if key < best_key:
+            best_key, best_t = key, (tx, ty)
+
+    tx, ty = best_t
+    best_m = (0, 0)
+    best_s = -10**18
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obst:
+            continue
+        s = -dist(nx, ny, tx, ty) + dist(nx, ny, ox, oy) // 2
+        if s > best_s or (s == best_s and (dx, dy) < best_m):
+            best_s, best_m = s, (dx, dy)
+
+    return [int(best_m[0]), int(best_m[1])]

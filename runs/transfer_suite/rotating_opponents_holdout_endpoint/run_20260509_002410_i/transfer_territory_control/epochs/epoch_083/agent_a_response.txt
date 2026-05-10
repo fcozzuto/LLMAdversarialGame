@@ -1,0 +1,145 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8) or 8
+    h = observation.get("grid_height", 8) or 8
+    sx, sy = observation.get("self_position", (0, 0))
+    sx, sy = int(sx), int(sy)
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    unclaimed = observation.get("unclaimed_cells") or []
+    self_t = set((int(p[0]), int(p[1])) for p in (observation.get("self_territory") or []) if p and len(p) >= 2)
+    opp_t = set((int(p[0]), int(p[1])) for p in (observation.get("opponent_territory") or []) if p and len(p) >= 2)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    if not unclaimed:
+        return [0, 0]
+
+    # choose best target among a small deterministic subset to keep cheap
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    unclaimed_list = [(int(p[0]), int(p[1])) for p in unclaimed if p and len(p) >= 2 and inb(int(p[0]), int(p[1]))]
+    if not unclaimed_list:
+        return [0, 0]
+
+    def adj_op(x, y):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                if (x + dx, y + dy) in opp_t:
+                    return 1
+        return 0
+
+    # deterministic ordering: distance to center then to self
+    unclaimed_list.sort(key=lambda p: (abs(p[0] - cx) + abs(p[1] - cy), dist(p, (sx, sy)), p[0], p[1]))
+    candidates = unclaimed_list[:18] if len(unclaimed_list) > 18 else unclaimed_list
+
+    best_target = candidates[0]
+    best_score = -10**9
+    for x, y in candidates:
+        d = dist((sx, sy), (x, y))
+        to_opp = min((abs(x - ox) + abs(y - oy) for ox, oy in [ob for ob in [observation.get("opponent_position", (w-1, h-1))] for ob in [ob]]), 0)
+        # above is pointless; keep stable without extra fields
+        val = -d
+        val += 2.2 * adj_op(x, y)
+        # prefer not too close to opponent territory unless it's adjacent
+        if (x, y) in opp_t:
+            val += 3.0
+        val += 0.05 * (-(abs(x - cx) + abs(y - cy)))
+        if val > best_score:
+            best_score = val
+            best_target = (x, y)
+
+    tx, ty = best_target
+    best_move = (0, 0)
+    best_gain = -10**9
+    cur = (sx, sy)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        p = (nx, ny)
+        gain = 0.0
+        if p in opp_t:
+            gain += 2.6  # flipping on entry
+        if p in self_t:
+            gain += 0.2
+        if p not in self_t and p not in opp_t:
+            gain += 1.0 + 1.0 * adj_op(nx, ny)
+        # also progress toward target
+        gain += 0.8 * (-dist(p, (tx, ty)))
+        # lightly avoid stepping into
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    unclaimed = observation.get("unclaimed_cells") or []
+    targets = []
+    for p in unclaimed:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if ok(x, y):
+                targets.append((x, y))
+    if not targets:
+        # No unclaimed: move toward away from opponent slightly while staying valid
+        best = (0, 0)
+        bestv = -10**9
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not ok(nx, ny):
+                continue
+            d = abs(nx - ox) + abs(ny - oy)
+            if d > bestv:
+                bestv = d
+                best = (dx, dy)
+        return [int(best[0]), int(best[1])]
+
+    tx, ty = targets[0]
+    md = abs(sx - tx) + abs(sy - ty)
+    for x, y in targets[1:]:
+        d = abs(sx - x) + abs(sy - y)
+        if d < md:
+            md = d
+            tx, ty = x, y
+
+    best = (0, 0)
+    bestv = -10**9
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        d = abs(nx - tx) + abs(ny - ty)
+        # Prefer getting closer to target; tiebreak by being farther from opponent
+        v = -d * 1000 + (abs(nx - ox) + abs(ny - oy))
+        if v > bestv:
+            bestv = v
+            best = (dx, dy)
+    return [int(best[0]), int(best[1])]

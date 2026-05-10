@@ -1,0 +1,170 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    resources = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            resources.append((p[0], p[1]))
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def man(ax, ay, bx, by):
+        axd = ax - bx
+        if axd < 0:
+            axd = -axd
+        wyd = ay - by
+        if wyd < 0:
+            wyd = -wyd
+        return axd + wyd
+
+    # If no info, do safe center drift
+    if not resources:
+        tx, ty = w // 2, h // 2
+        best = None
+        for dx, dy in deltas:
+            nx, ny = x + dx, y + dy
+            if not inb(nx, ny):
+                continue
+            d = man(nx, ny, tx, ty)
+            if best is None or (d, nx, ny) < best:
+                best = (d, nx, ny)
+        return [best[1] - x, best[2] - y] if best else [0, 0]
+
+    # Score moves by (1) being able to collect, (2) winning races to resources,
+    # (3) safety vs denier (avoid getting too close when behind),
+    # (4) progress otherwise.
+    best_move = (10**18, 0, 0)
+    for dx, dy in deltas:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny):
+            continue
+
+        my_gain = 0
+        my_prog = 10**9
+        opp_prog = 10**9
+        min_diff = 10**9
+        got = 0
+
+        for rx, ry in resources:
+            md = man(nx, ny, rx, ry)
+            od = man(ox, oy, rx, ry)
+
+            if md == 0:
+                got = 1
+                my_gain += 1000000  # immediate collection
+            # Race pressure: positive when we are closer than opponent
+            diff = od - md  # higher is better
+            if diff < min_diff:
+                min_diff = diff
+            # Keep best resource by our distance (for progress)
+            if md < my_prog:
+                my_prog = md
+                opp_prog = od
+
+        # Prefer moves that can collect now
+        # Then prefer moves that win at least some resource race (diff high),
+        # else progress to the nearest resource.
+        # Safety: if we're not winning races, keep some distance from opponent.
+        my_to_opp = man(nx, ny, ox, oy)
+        race_win = (opp_prog - my_prog)  # estimate vs nearest by our distance
+
+        score = 0
+        score += -my_gain
+        if got:
+            score += 0
+        else:
+            # Make race_win dominant; also encourage larger my_to_opp when behind
+            score += -race_win * 200
+            if race_win < 0:
+                score += my_prog * 3 + (8 - my_to_opp) * 50
+
+        # Secondary: overall progress + tie-break deterministically by coordinate
+        score += my_prog * 10
+        score += (abs(nx - (w - 1 - ox)) + abs(ny - (h - 1 - oy))) * 0  # keep deterministic without effect
+        score += (0 if dx == 0 else 1) * 0  # stabilize ordering
+
+        cand = (score, nx, ny)
+        if cand < best_move:
+            best_move = cand
+
+    _, bx, by = best_move
+    return [bx - x, by - y]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    obs = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    res = []
+    for p in observation.get("resources") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            res.append((p[0], p[1]))
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    def man(a, b, c, d):
+        aa = a - c
+        if aa < 0:
+            aa = -aa
+        bb = b - d
+        if bb < 0:
+            bb = -bb
+        return aa + bb
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    if not res:
+        tx, ty = w // 2, h // 2
+        best = None
+        for dx, dy in deltas:
+            nx, ny = x + dx, y + dy
+            if not inb(nx, ny):
+                continue
+            score = man(nx, ny, tx, ty)
+            if best is None or score < best[0] or (score == best[0] and (nx, ny) < best[1]):
+                best = (score, (nx, ny))
+        return [best[1][0] - x, best[1][1] - y] if best else [0, 0]
+
+    target = None
+    bestd = None
+    for rx, ry in res:
+        d = man(x, y, rx, ry)
+        if bestd is None or d < bestd or (d == bestd and (rx, ry) < target):
+            bestd = d
+            target = (rx, ry)
+
+    trx, try_ = target
+    best = None
+    for dx, dy in deltas:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny):
+            continue
+        d_self = man(nx, ny, trx, try_)
+        d_opp = man(nx, ny, ox, oy)
+        on_res = 0 if (nx, ny) == (trx, try_) else 1
+        score = d_self * 10 + on_res * 3 - d_opp
+        cand = (score, -d_opp, d_self, nx, ny)
+        if best is None or cand < best:
+            best = cand
+
+    return [best[3] - x, best[4] - y] if best else [0, 0]

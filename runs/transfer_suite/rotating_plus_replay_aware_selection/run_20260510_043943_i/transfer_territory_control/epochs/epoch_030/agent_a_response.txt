@@ -1,0 +1,142 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    op = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    self_terr = set()
+    for p in observation.get("self_territory", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            self_terr.add((int(p[0]), int(p[1])))
+
+    opp_terr = set()
+    for p in observation.get("opponent_territory", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            opp_terr.add((int(p[0]), int(p[1])))
+
+    unclaimed = []
+    for p in observation.get("unclaimed_cells", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            unclaimed.append((int(p[0]), int(p[1])))
+
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    prefer = min(corners, key=lambda c: abs(c[0] - sx) + abs(c[1] - sy))
+    if unclaimed:
+        # Prefer corner-adjacent cells that are far from opponent (deny center claim)
+        tx, ty = max(unclaimed, key=lambda p: (-(abs(p[0] - prefer[0]) + abs(p[1] - prefer[1])) , (abs(p[0] - ox) + abs(p[1] - oy))))
+        tx2, ty2 = tx, ty
+    else:
+        # If no unclaimed info, push away from opponent territory toward outer space
+        if self_terr:
+            fx, fy = max(self_terr, key=lambda p: (abs(p[0] - ox) + abs(p[1] - oy)))
+            tx2, ty2 = fx, fy
+        else:
+            tx2, ty2 = prefer[0], prefer[1]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = None
+    bestv = -10**18
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        dist_to_target = abs(nx - tx2) + abs(ny - ty2)
+        dist_opp = abs(nx - ox) + abs(ny - oy)
+        is_unclaimed = ((nx, ny) not in self_terr) and ((nx, ny) not in opp_terr)
+        is_self = (nx, ny) in self_terr
+        is_opp = (nx, ny) in opp_terr
+
+        # Entering opponent territory can be good, but default to expanding while avoiding being dragged inward
+        v = 0
+        v += 120 if is_unclaimed else 0
+        v += 60 if is_self else 0
+        v -= 80 if is_opp else 0
+        v += 0.6 * dist_opp
+        v += -1.2 * dist_to_target
+
+        if best is None or v > bestv:
+            bestv = v
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    op = observation.get("opponent_position", [w - 1, h - 1]) or [w - 1, h - 1]
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    unclaimed = []
+    for p in observation.get("unclaimed_cells", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                unclaimed.append((x, y))
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
+    if not unclaimed:
+        dirs = [d for d in dirs]  # keep deterministic
+        best = None
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obstacles:
+                continue
+            score = (abs(nx - ox) + abs(ny - oy), -abs(nx - sx) - abs(ny - sy))
+            if best is None or score > best[0]:
+                best = (score, [dx, dy])
+        return best[1] if best else [0, 0]
+
+    # Consider only up to 20 unclaimed cells closest to current
+    unclaimed_sorted = []
+    for x, y in unclaimed:
+        d = abs(x - sx) + abs(y - sy)
+        if len(unclaimed_sorted) < 20:
+            unclaimed_sorted.append((d, x, y))
+            if len(unclaimed_sorted) == 20:
+                unclaimed_sorted.sort(reverse=True)
+        else:
+            if d < unclaimed_sorted[0][0]:
+                unclaimed_sorted[0] = (d, x, y)
+                unclaimed_sorted.sort(reverse=True)
+    unclaimed_sorted.sort(key=lambda t: t[0])
+    targets = [(x, y) for _, x, y in unclaimed_sorted[:20]] if unclaimed_sorted else unclaimed
+
+    best_move = [0, 0]
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obstacles:
+            continue
+        best_to_target = 10**9
+        for tx, ty in targets:
+            d = abs(tx - nx) + abs(ty - ny)
+            if d < best_to_target:
+                best_to_target = d
+        dist_opp = abs(nx - ox) + abs(ny - oy)
+        score = (-best_to_target, dist_opp, -abs(nx - sx) - abs(ny - sy), dx, dy)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+    return best_move

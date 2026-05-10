@@ -1,0 +1,173 @@
+def choose_move(observation):
+    ax, ay = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    inb = lambda x, y: 0 <= x < w and 0 <= y < h
+
+    obstacles = observation.get("obstacles") or []
+    obs = set((x, y) for x, y in obstacles if inb(x, y))
+
+    my_t = observation.get("self_territory") or []
+    op_t = observation.get("opponent_territory") or []
+    unclaimed = observation.get("unclaimed_cells") or []
+
+    my_set = set((x, y) for x, y in my_t if inb(x, y))
+    op_set = set((x, y) for x, y in op_t if inb(x, y))
+    un_set = set((x, y) for x, y in unclaimed if inb(x, y))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def dist2(x, y, p):
+        dx = x - p[0]
+        dy = y - p[1]
+        return dx * dx + dy * dy
+
+    # Prefer unclaimed; if none, prefer cells adjacent to opponent territory.
+    targets = None
+    if un_set:
+        targets = list(un_set)
+        targets.sort(key=lambda p: dist2(ax, ay, p))
+        targets = targets[:25]
+    else:
+        adj = []
+        seen = set()
+        for ox, oy in op_set:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    nx, ny = ox + dx, oy + dy
+                    if inb(nx, ny) and (nx, ny) not in obs and (nx, ny) not in my_set and (nx, ny) not in seen:
+                        seen.add((nx, ny))
+                        adj.append((nx, ny))
+        if adj:
+            adj.sort(key=lambda p: dist2(ax, ay, p))
+            targets = adj[:25]
+        else:
+            targets = [(ox, oy) for ox, oy in op_set][:25] if op_set else []
+
+    if not targets:
+        # Fallback: expand toward center
+        cx, cy = w // 2, h // 2
+        best = (0, 0)
+        best_sc = -10**18
+        for dx, dy in moves:
+            nx, ny = ax + dx, ay + dy
+            if not inb(nx, ny) or (nx, ny) in obs:
+                continue
+            sc = -(nx - cx) * (nx - cx) - (ny - cy) * (ny - cy)
+            if sc > best_sc:
+                best_sc = sc
+                best = (dx, dy)
+        return [best[0], best[1]]
+
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = ax + dx, ay + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+
+        p = (nx, ny)
+        # Immediate gain signals
+        sc = 0
+        if p in un_set:
+            sc += 40
+        elif p in op_set:
+            sc += 30
+
+        # Distance pressure toward nearest good target
+        near = targets[0]
+        dmin = dist2(nx, ny, near)
+        for t in targets[1:]:
+            d = dist2(nx, ny, t)
+            if d < dmin:
+                dmin = d
+        sc += -dmin / 4.0
+
+        # Mild preference for not walking away from our territory when unclaimed exist
+        if un_set:
+            if my_set:
+                # encourage staying closer to any of our territory cells (weakly)
+                # sample up to 10 closest my cells deterministically
+                # (since we can't full search much, approximate by checking few)
+                count = 0
+                best_my = None
+                best_d = 10**9
+                for qx, qy in my_set:
+                    d = dist2(nx, ny, (qx, qy))
+                    if d < best_d:
+                        best_d = d
+                        best_my = (qx, qy)
+                    count += 1
+                    if count >= 10:
+                        break
+                sc += -best_d / 12.0
+
+        # Prefer entering cells we don't already own
+        if p not in my_set:
+            sc += 2
+
+        if sc > best_score:
+            best_score = sc
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    ax, ay = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    resources = observation.get("resources") or []
+    res = []
+    for p in resources:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obs:
+                res.append((x, y))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def clamp(v, lo, hi):
+        return lo if v < lo else hi if v > hi else v
+
+    def best_step_to(tx, ty):
+        best = None
+        for dx, dy in dirs:
+            nx, ny = ax + dx, ay + dy
+            if nx < 0 or ny < 0 or nx >= w or ny >= h:
+                continue
+            if (nx, ny) in obs:
+                continue
+            score = (nx - tx) * (nx - tx) + (ny - ty) * (ny - ty)
+            # tie-break toward moving right/down deterministically
+            tb = (dx, dy)
+            cand = (score, tb)
+            if best is None or cand < best[0]:
+                best = (cand, (dx, dy))
+        if best is None:
+            for dx, dy in dirs:
+                nx, ny = ax + dx, ay + dy
+                if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs:
+                    return [dx, dy]
+            return [0, 0]
+        return [best[1][0], best[1][1]]
+
+    if res:
+        # nearest resource
+        tx, ty = min(res, key=lambda p: (p[0] - ax) * (p[0] - ax) + (p[1] - ay) * (p[1] - ay))
+        return best_step_to(tx, ty)
+
+    # fallback: chase opponent deterministically
+    tx = clamp(ox, 0, w - 1)
+    ty = clamp(oy, 0, h - 1)
+    return best_step_to(tx, ty)

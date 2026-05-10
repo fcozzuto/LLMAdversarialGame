@@ -1,0 +1,127 @@
+def choose_move(observation):
+    sx, sy = observation.get("self_position", [0, 0])
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    obstacles = observation.get("obstacles", []) or []
+    obs = set((p[0], p[1]) for p in obstacles)
+    selft = set((p[0], p[1]) for p in (observation.get("self_territory", []) or []))
+    opp = set((p[0], p[1]) for p in (observation.get("opponent_territory", []) or []))
+    unclaimed = observation.get("unclaimed_cells", []) or []
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def adj_to_self(x, y):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx or dy:
+                    if (x + dx, y + dy) in selft:
+                        return True
+        return False
+
+    dirs = [(dx, dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+    best_targets = []
+    # Prefer unclaimed cells that are fronts right next to our territory
+    for (ux, uy) in unclaimed:
+        if inb(ux, uy) and adj_to_self(ux, uy):
+            d = abs(ux - sx) + abs(uy - sy)
+            best_targets.append((d, ux, uy))
+    if not best_targets:
+        # Then closest unclaimed overall
+        for (ux, uy) in unclaimed:
+            if inb(ux, uy):
+                best_targets.append((abs(ux - sx) + abs(uy - sy), ux, uy))
+    # If no unclaimed, try to attack opponent territory if adjacent
+    if best_targets:
+        _, tx, ty = min(best_targets)
+        mode = "claim"
+    else:
+        # Find an opponent cell we can reach in one step that isn't blocked
+        tx, ty = sx, sy
+        mode = "attack"
+        for (ox, oy) in opp:
+            if inb(ox, oy) and abs(ox - sx) <= 1 and abs(oy - sy) <= 1:
+                tx, ty = ox, oy
+                break
+        # Otherwise hold: move toward nearest border cell of our territory (keeps pressure)
+        if (tx, ty) == (sx, sy) and selft:
+            cx, cy = sx, sy
+            # choose "extreme" self territory cell to expand: maximize (x+y) or (x-y) depending on corner
+            corner = (sx < w // 2, sy < h // 2)
+            best = (-10**9, sx, sy)
+            for (px, py) in selft:
+                score = (px + py) if not corner[0] else (px - py)
+                if score > best[0]:
+                    best = (score, px, py)
+            tx, ty = best[1], best[2]
+
+    # Greedy one-step toward target with obstacle avoidance
+    def step_toward(nx, ny, tx, ty):
+        dx = 0 if tx == nx else (1 if tx > nx else -1)
+        dy = 0 if ty == ny else (1 if ty > ny else -1)
+        return dx, dy
+
+    cand = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        d2 = abs(tx - nx) + abs(ty - ny)
+        # Immediate preference: claim unclaimed, then flip opponent, then reduce distance
+        gain = 0
+        if (nx, ny) in opp:
+            gain += 6
+        else:
+            # unclaimed list might be large; use membership via a small set for current decision
+            # deterministic without extra state:
+            # If it's not in opp and not in selft, treat as potentially claimable unless it's occupied by obstacles
+            gain += 3 if (nx, ny) not in selft else 0
+        # discourage stepping backward from fronts: keep moving toward target
+        cand.append((-(gain), d2, dx, dy))
+    if not cand:
+        return [0, 0]
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", [0, 0])
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    obstacles = observation.get("obstacles", []) or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, 0), (0, -1), (1, 0), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)]
+    unclaimed = observation.get("unclaimed_cells", []) or []
+    targets = []
+    for p in unclaimed:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if inb(x, y) and (x, y) not in obs:
+                targets.append((x, y))
+    if targets:
+        targets.sort(key=lambda t: abs(t[0] - sx) + abs(t[1] - sy))
+        targets = targets[:20]
+    else:
+        op = observation.get("opponent_position", None) or [sx, sy]
+        tx, ty = op[0], op[1]
+        targets = [(tx, ty)]
+
+    best = None
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        md = min(abs(nx - tx) + abs(ny - ty) for tx, ty in targets)
+        score = (md, abs(dx) + abs(dy))
+        if best_score is None or score < best_score:
+            best_score = score
+            best = [dx, dy]
+    if best is None:
+        return [0, 0]
+    return best

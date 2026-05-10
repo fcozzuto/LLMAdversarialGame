@@ -1,0 +1,135 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    ox, oy = observation["opponent_position"]
+
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    selfT = set(tuple(p) for p in (observation.get("self_territory") or []))
+    oppT = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+
+    unclaimed = observation.get("unclaimed_cells") or []
+    unclaimed = [tuple(c) for c in unclaimed] if unclaimed else []
+
+    if not unclaimed:
+        return [0, 0]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    # Prefer unclaimed cells that are (1) near us, (2) also near opponent influence.
+    # Also prefer cells adjacent to opponent territory to enable aggressive boundary capture.
+    opp_adj = set()
+    for (x, y) in oppT:
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny):
+                opp_adj.add((nx, ny))
+
+    # Select a small deterministic candidate set of targets
+    scored_targets = []
+    for (x, y) in unclaimed:
+        d_us = man(x, y, sx, sy)
+        d_opp = man(x, y, ox, oy)
+        adj = 1 if (x, y) in opp_adj else 0
+        in_opp = 1 if (x, y) in oppT else 0
+        # in_opp shouldn't happen for unclaimed, but keep consistent
+        key = d_us * 2 + d_opp + (0 if in_opp else 0) - 10 * adj
+        # Lower key is better; add tiny deterministic tie-break on coordinates
+        scored_targets.append((key, x, y))
+    scored_targets.sort()
+    targets = [(x, y) for _, x, y in scored_targets[:18]]
+
+    candidates = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best_move = (0, 0)
+    best_val = -10**18
+
+    for dx, dy in candidates:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        land = (nx, ny)
+        # Immediate landing value: prioritize capturing opponent-owned, then unclaimed.
+        land_val = 0
+        if land in oppT:
+            land_val += 120  # flipping territory on entry
+        if land not in selfT and land not in oppT:
+            land_val += 90  # claiming unclaimed
+
+        # Frontier pressure: move toward best target, but also keep expanding.
+        best_t = 10**9
+        for (tx, ty) in targets:
+            dt = man(nx, ny, tx, ty)
+            if dt < best_t:
+                best_t = dt
+        expand_bonus = 0
+        if (nx, ny) in selfT:
+            expand_bonus -= 5
+        if (nx, ny) in oppT:
+            expand_bonus += 10
+        if (nx, ny) not in selfT and (nx, ny) not in oppT:
+            # Prefer moving into still-unclaimed territory
+            expand_bonus += 15
+
+        # Small bias toward opponent side to avoid stagnation
+        opp_bias = -man(nx, ny, ox, oy) * 0.5
+
+        val = land_val + expand_bonus + (50 - best_t * 6) + opp_bias
+        # Deterministic tie-break: fixed order already, but ensure stability if equal
+        if val > best_val:
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    w, h = observation.get("grid_width", 1), observation.get("grid_height", 1)
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = observation.get("unclaimed_cells") or []
+    targets = [tuple(c) for c in unclaimed if c is not None]
+    if not targets:
+        resources = observation.get("resources") or []
+        targets = [tuple(c) for c in resources if c is not None]
+    if not targets:
+        return [0, 0]
+
+    ox, oy = observation.get("opponent_position", (sx, sy))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def md(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    best_target = None
+    best_score = None
+    for tx, ty in targets:
+        if not inb(tx, ty):
+            continue
+        # Prefer near us, but also somewhat away from opponent so we don't walk into their threat.
+        score = (md(sx, sy, tx, ty), -md(ox, oy, tx, ty), tx, ty)
+        if best_score is None or score < best_score:
+            best_score, best_target = score, (tx, ty)
+    if best_target is None:
+        return [0, 0]
+    tx, ty = best_target
+
+    moves = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+    best_move = None
+    best_move_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        # Deterministic: minimize distance to chosen target, tie-break by move direction.
+        score = (md(nx, ny, tx, ty), dx, dy)
+        if best_move_score is None or score < best_move_score:
+            best_move_score, best_move = score, (dx, dy)
+    if best_move is None:
+        return [0, 0]
+    return [int(best_move[0]), int(best_move[1])]

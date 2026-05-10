@@ -1,0 +1,147 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                obstacles.add((x, y))
+
+    self_terr = set(tuple(p) for p in observation.get("self_territory") or [])
+    opp_terr = set(tuple(p) for p in observation.get("opponent_territory") or [])
+    unclaimed = set(tuple(p) for p in observation.get("unclaimed_cells") or [])
+
+    moves = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1), (0, 0)]
+    dirs8 = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    dirs4 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+    if not self_terr:
+        # If somehow empty, move toward center deterministically.
+        cx, cy = (w - 1) // 2, (h - 1) // 2
+        best = [0, 0]
+        best_s = -10**9
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inside(nx, ny) or (nx, ny) in obstacles: 
+                continue
+            d = abs(nx - cx) + abs(ny - cy)
+            s = -d
+            if s > best_s:
+                best_s = s
+                best = [dx, dy]
+        return best
+
+    # Prefer expanding near our current boundary; if unclaimed exists, head there.
+    def man(a, b): return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    # Approximate interior bias using terr centroid.
+    sxm = sum(x for x, y in self_terr)
+    sym = sum(y for x, y in self_terr)
+    nT = len(self_terr)
+    tx, ty = sxm // nT, sym // nT
+
+    # Precompute a small set of frontier cells to avoid expensive search.
+    frontier = []
+    seen = set()
+    for x, y in self_terr:
+        for dx, dy in dirs4:
+            nx, ny = x + dx, y + dy
+            if inside(nx, ny) and (nx, ny) not in obstacles and (nx, ny) not in self_terr and (nx, ny) not in seen:
+                seen.add((nx, ny))
+                frontier.append((nx, ny))
+                if len(frontier) >= 18:
+                    break
+        if len(frontier) >= 18:
+            break
+
+    def best_unclaimed_dist(p):
+        if not unclaimed:
+            return 99
+        # Small deterministic sampling: check nearest from frontier first, else from a few unclaimed.
+        cand = []
+        for f in frontier[:10]:
+            cand.append(f)
+        if len(unclaimed) <= 10:
+            cand.extend(list(unclaimed))
+        else:
+            # Deterministic take: sort by (x,y) and take a few.
+            sorted_u = sorted(unclaimed)
+            cand.extend(sorted_u[:8])
+        md = 99
+        for q in cand:
+            md = min(md, man(p, q))
+        return md
+
+    best_move = [0, 0]
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        s = 0
+        # Territory gain signals
+        if (nx, ny) in opp_terr:
+            s += 6
+        elif (nx, ny) in unclaimed:
+            s += 3
+        elif (nx, ny) in self_terr:
+            s += 0
+        else:
+            s -= 1  # stepping to unknown
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0)) or (0, 0)
+    ox, oy = observation.get("opponent_position", (sx, sy)) or (sx, sy)
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+
+    obs = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                obs.add((x, y))
+
+    unclaimed = observation.get("unclaimed_cells") or observation.get("unclaimed") or []
+    un = []
+    for p in unclaimed:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y) and (x, y) not in obs:
+                un.append((x, y))
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    best_mv = (0, 0)
+    best_sc = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obs:
+            continue
+        d_opp = abs(nx - ox) + abs(ny - oy)
+        if un:
+            d_un = 10**9
+            for ux, uy in un:
+                d = abs(nx - ux) + abs(ny - uy)
+                if d < d_un: d_un = d
+            sc = (-d_un * 10) + (d_opp)
+        else:
+            sc = (-abs(nx - (w - 1) // 2) - abs(ny - (h - 1) // 2)) + d_opp // 2
+        if sc > best_sc:
+            best_sc = sc
+            best_mv = (dx, dy)
+
+    if inside(sx, sy) and (sx, sy) not in obs:
+        return [best_mv[0], best_mv[1]]
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if inside(nx, ny) and (nx, ny) not in obs:
+            return [dx, dy]
+    return [0, 0]

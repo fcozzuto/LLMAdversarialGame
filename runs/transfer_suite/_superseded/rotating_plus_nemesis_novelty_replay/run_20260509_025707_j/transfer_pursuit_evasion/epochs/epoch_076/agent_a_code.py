@@ -1,0 +1,62 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    obstacles = set()
+    for t in observation.get("obstacles") or []:
+        if isinstance(t, (list, tuple)) and len(t) >= 2:
+            x, y = int(t[0]), int(t[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+    role = (observation.get("self_role") or "").lower()
+    i_am_evader = ("evader" in role) or ("runner" in role)
+
+    def dist2(x1, y1, x2, y2):
+        dx, dy = x1 - x2, y1 - y2
+        return dx * dx + dy * dy
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    # Predict evader's intention: they head toward a corner far from pursuer (our position if we are pursuer).
+    far_from_ours = max(corners, key=lambda c: dist2(c[0], c[1], sx, sy))
+    far_from_theirs = max(corners, key=lambda c: dist2(c[0], c[1], ox, oy))
+
+    if i_am_evader:
+        # Evader: prioritize moving to far corner while increasing distance from pursuer.
+        target = far_from_theirs
+        favor = 1.0
+    else:
+        # Pursuer: cut off by moving toward the likely evader target corner while also reducing current distance.
+        target = far_from_ours
+        favor = -1.0
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = None
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        d_opp = dist2(nx, ny, ox, oy)
+        d_tgt = dist2(nx, ny, target[0], target[1])
+        d_me_tgt_now = dist2(sx, sy, target[0], target[1])
+        d_opp_now = dist2(sx, sy, ox, oy)
+        # Score: pursuer wants smaller d_opp and smaller d_tgt; evader wants larger d_opp and smaller d_tgt.
+        # Add small momentum term toward target.
+        score = 0.0
+        if i_am_evader:
+            score = (0.9 * d_opp - 0.8 * d_tgt + 0.15 * (d_me_tgt_now - d_tgt) - 0.05 * d_opp_now)
+        else:
+            score = (-0.9 * d_opp - 0.8 * d_tgt + 0.15 * (d_opp_now - d_opp) - 0.05 * d_me_tgt_now)
+        if best is None or score > best_score:
+            best = (dx, dy)
+            best_score = score
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

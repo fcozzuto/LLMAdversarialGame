@@ -1,0 +1,117 @@
+def choose_move(observation):
+    w = observation["grid_width"]; h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    oxp, oyp = observation.get("opponent_position") or (sx, sy)
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def manh(x1, y1, x2, y2): return abs(x1 - x2) + abs(y1 - y2)
+
+    # Candidate targets: unclaimed first, then cells adjacent to opponent territory
+    targets = []
+    for x, y in unclaimed:
+        if (x, y) in obstacles or (x, y) in self_terr:
+            continue
+        d = manh(x, y, oxp, oyp)
+        targets.append((d, -0.1, x, y))
+    if not targets and opp_terr:
+        # adjacency to opp territory is likely flipping-frontier
+        for (px, py) in opp_terr:
+            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(-1,1),(1,1)]:
+                x, y = px + dx, py + dy
+                if not inb(x, y) or (x, y) in obstacles or (x, y) in self_terr:
+                    continue
+                base = 3.5 if (x, y) in unclaimed else 1.2
+                # prefer closer to our position too
+                targets.append((manh(x, y, oxp, oyp), -base, x, y))
+
+    if targets:
+        targets.sort()
+        _, _, tx, ty = targets[0]
+    else:
+        tx, ty = oxp, oyp
+
+    # Choose best move by deterministic local evaluation
+    dirs = [(-1,-1),(0,-1),(1,-1),(-1,0),(0,0),(1,0),(-1,1),(0,1),(1,1)]
+    best = (1e18, None)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        # Encourage moving into opponent territory or unclaimed cells
+        if (nx, ny) in opp_terr:
+            gain = 20.0
+        elif (nx, ny) in unclaimed:
+            gain = 8.0
+        elif (nx, ny) in self_terr:
+            gain = 1.0
+        else:
+            gain = 0.4
+
+        # Prefer reducing distance to target, but also avoid drifting away from opponent
+        dt = manh(nx, ny, tx, ty)
+        do = manh(nx, ny, oxp, oyp)
+        key = (dt * 1.7 + do * 0.35 - gain * 2.0, abs(dx) + abs(dy))
+        if key < best[0:2] or (key == best[0:2] and (dx, dy) < best[1]):
+            best = (key[0], (dx, dy))
+
+    if best[1] is None:
+        return [0, 0]
+    return [int(best[1][0]), int(best[1][1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0) or 0
+    h = observation.get("grid_height", 0) or 0
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (sx, sy))
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells") or []))
+    self_terr = set(map(tuple, observation.get("self_territory") or []))
+    opp_terr = set(map(tuple, observation.get("opponent_territory") or []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+    best = None
+    best_sc = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+
+        sc = 0
+        if (nx, ny) in unclaimed:
+            sc += 1000
+        if (nx, ny) in self_terr:
+            sc -= 5
+        if opp_terr and (nx, ny) in opp_terr:
+            sc -= 50
+
+        # Prefer approaching our target cells and not walking into opponent pressure
+        d_op = abs(nx - ox) + abs(ny - oy)
+        sc += d_op * 2
+
+        # Bonus if near unclaimed / near opponent territory (frontline)
+        for ax, ay in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            tx, ty = nx + ax, ny + ay
+            if inb(tx, ty) and (tx, ty) in unclaimed:
+                sc += 120
+            if inb(tx, ty) and opp_terr and (tx, ty) in opp_terr:
+                sc += 25
+
+        if best is None or sc > best_sc:
+            best_sc = sc
+            best = [dx, dy]
+    if best is None:
+        return [0, 0]
+    return best

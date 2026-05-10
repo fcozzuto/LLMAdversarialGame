@@ -1,0 +1,132 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    resources = [tuple(r) for r in observation.get("resources", [])]
+    obstacles = set(map(tuple, observation.get("obstacles", [])))
+    if not resources:
+        return [0, 0]
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    tr = observation.get("turns_remaining", 0)
+    try:
+        tr = int(tr)
+    except:
+        tr = 0
+    tr = max(tr, 0)
+
+    # Prefer resources we can arrive at no later than opponent; otherwise pick one that maximizes our lead.
+    best = None
+    best_key = (-10**18, -10**18)  # (primary, secondary)
+    for rx, ry in resources:
+        myd = man(sx, sy, rx, ry)
+        opd = man(ox, oy, rx, ry)
+        # Contention increases when fewer turns remain; speed matters more late.
+        speed_w = 0.35 + 0.65 * (tr / 50.0 if tr <= 50 else 1.0)
+        contest_w = 1.7 - 0.7 * speed_w
+
+        # Obstacle proximity penalty (local)
+        adj = 0
+        for ax, ay in ((rx - 1, ry), (rx + 1, ry), (rx, ry - 1), (rx, ry + 1)):
+            if (ax, ay) in obstacles:
+                adj += 1
+        # Primary: strong reward if we can take first; else reward states where we reduce opponent advantage.
+        primary = (5000 if myd <= opd else 0) + (opd - myd) * (120 * contest_w) - adj * 25
+        # Secondary: closer overall to finish before time
+        secondary = -myd * (40 * speed_w) - (abs(rx - w // 2) + abs(ry - h // 2)) * 1e-3
+        key = (primary, secondary)
+        if key > best_key:
+            best_key = key
+            best = (rx, ry, myd, opd)
+
+    rx, ry, myd, opd = best
+
+    # If opponent is closer, try to "deny" by moving toward the resource but also slightly away from opponent direction.
+    dx_to = 0 if rx == sx else (1 if rx > sx else -1)
+    dy_to = 0 if ry == sy else (1 if ry > sy else -1)
+
+    # Choose move among 9 options deterministically with evaluation.
+    options = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                options.append((0, 0))
+            else:
+                options.append((dx, dy))
+    # Remove duplicates is unnecessary since fixed.
+    best_move = (0, 0)
+    best_val = -10**18
+
+    for dx, dy in options:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        # Avoid stepping into obstacles if possible
+        if (nx, ny) in obstacles:
+            continue
+        # Distance to target
+        nd_my = man(nx, ny, rx, ry)
+        # Distance advantage over opponent at next step (estimate, opponent moves unknown -> use current opponent distance as baseline)
+        adv = opd - nd_my  # higher is better
+        # Collision/denial: if opponent is ahead, reduce their ability by approaching from a side.
+        if myd > opd:
+            # Encourage moves that reduce distance to target but do not close directly into opponent.
+            # Penalize moves that reduce our distance to opponent too much.
+            nd_op = man(nx, ny, ox, oy)
+            opp_pen = (8 * man(sx, sy, ox, oy) - 8 * nd_op)  # lower nd_op => worse
+        else:
+            opp_pen = 0
+
+        # Encourage alignment toward target (both axes)
+        align = (1 if dx_to == dx else 0) + (1 if dy_to == dy else 0)
+        # Slightly prefer staying away from target if we're already equal? no; keep grabbing.
+        val = 3000 * (1 if nd_my <= man(ox, oy, rx, ry) else 0) + 80 * adv + 10 * align - opp_pen - nd_my * 2
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    if dx not in (-1, 0, 1) or dy not in (-1, 0, 1):
+        return [0, 0]
+    return [dx, dy]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    if not resources:
+        return [0, 0]
+
+    best_rx, best_ry = None, None
+    best_score = -10**18
+    for r in resources:
+        rx, ry = r[0], r[1]
+        myd = abs(sx - rx) + abs(sy - ry)
+        opd = abs(ox - rx) + abs(oy - ry)
+        # Prefer resources we can reach no later than opponent; otherwise prefer biggest reach gap.
+        score = (opd - myd) * 1000 - myd
+        if myd <= opd:
+            score += 50000
+        if score > best_score:
+            best_score = score
+            best_rx, best_ry = rx, ry
+
+    dx0 = 0
+    dy0 = 0
+    if best_rx > sx:
+        dx0 = 1
+    elif best_rx < sx:
+        dx0 = -1
+    if best_ry > sy:
+        dy0 = 1
+    elif best_ry < sy:
+        dy0 = -1
+
+    if abs(best_rx - sx) >= abs(best_ry - sy):
+        return [dx0, 0] if dx0 != 0 else [0, dy0]
+    else:
+        return [0, dy0] if dy0 != 0 else [dx0, 0]

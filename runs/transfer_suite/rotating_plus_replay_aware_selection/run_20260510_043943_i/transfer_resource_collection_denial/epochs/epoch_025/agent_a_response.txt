@@ -1,0 +1,148 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    turns_remaining = observation.get("turns_remaining", 0)
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def blocked(x, y):
+        return (x, y) in obstacles or not inb(x, y)
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def best_target(fromx, fromy):
+        if not resources:
+            return None
+        # deterministic: choose resource minimizing (dist, x, y)
+        best = None
+        bd = 10**9
+        for (rx, ry) in resources:
+            d = man(fromx, fromy, rx, ry)
+            if d < bd or (d == bd and (rx, ry) < best):
+                bd = d
+                best = (rx, ry)
+        return best
+
+    if not resources:
+        # Evade: maximize min distance to opponent's next reachable cells
+        best_score = -10**9
+        best_move = (0, 0)
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if blocked(nx, ny):
+                continue
+            opp_min = 10**9
+            for odx, ody in deltas:
+                tx, ty = ox + odx, oy + ody
+                if blocked(tx, ty):
+                    continue
+                opp_min = min(opp_min, man(nx, ny, tx, ty))
+            # If opponent is boxed, just maximize distance to its current position
+            if opp_min == 10**9:
+                opp_min = man(nx, ny, ox, oy)
+            # deterministic tie-break by position
+            score = opp_min * 2 + (nx - sx) * 0.01 + (ny - sy) * 0.005
+            if score > best_score or (score == best_score and (nx, ny) < (sx + best_move[0], sy + best_move[1])):
+                best_score = score
+                best_move = (dx, dy)
+        return [int(best_move[0]), int(best_move[1])]
+
+    # Decide whether to race our nearest or to intercept opponent's nearest.
+    myt = best_target(sx, sy)
+    optt = best_target(ox, oy)
+    my_bias = 1.0
+    if turns_remaining is not None and turns_remaining <= 3:
+        my_bias = 1.4  # near end, commit harder to nearest
+    # If opponent is significantly closer, switch to interception more aggressively
+    if optt is not None and myt is not None:
+        d_my = man(sx, sy, myt[0], myt[1])
+        d_op = man(ox, oy, optt[0], optt[1])
+        if d_op + 1 < d_my:
+            my_bias = 0.65
+
+    best_score = -10**9
+    best_move = (0, 0)
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        # Our next-to-target distances
+        myd = man(nx, ny, myt[0], myt[1]) if myt else 0
+        op_int = man(nx, ny, optt[0], optt[1]) if optt else 0
+        # Opponent's next possible closeness to our chosen target
+        opp_near = 10**9
+        for odx, ody in deltas:
+            tx, ty = ox + odx, oy + ody
+            if blocked(tx, ty):
+                continue
+            if myt:
+                opp_near = min(opp_near, man(tx, ty, myt[0], myt[1]))
+            else:
+                opp_near = min(opp_near, man(tx, ty, sx, sy))
+        if opp_near == 10**9:
+            opp_near = man(ox, oy, myt[0], myt[1]) if myt else 0
+
+        # Score: prefer getting closer to our target, but also penalize if opponent can get even closer
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles_raw = observation.get("obstacles", []) or []
+    obstacles = set((p[0], p[1]) for p in obstacles_raw)
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def blocked(x, y):
+        return not inb(x, y) or (x, y) in obstacles
+
+    def man(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx + dy
+
+    def min_dist_to_resources(x, y):
+        md = 10**9
+        for rx, ry in resources:
+            d = man(x, y, rx, ry)
+            if d < md:
+                md = d
+        return md if md != 10**9 else 10**9
+
+    any_resource = len(resources) > 0
+    best = None
+    best_move = [0, 0]
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if blocked(nx, ny):
+            continue
+        dres = min_dist_to_resources(nx, ny) if any_resource else 0
+        dold = man(nx, ny, ox, oy)
+        score1 = (-dres if any_resource else dold)  # bigger is better
+        score2 = dold if any_resource else dold   # maximize distance from opponent
+        key = (score1, score2, -dx, -dy)  # deterministic tie-break
+        if best is None or key > best:
+            best = key
+            best_move = [dx, dy]
+
+    if blocked(sx, sy):
+        return [0, 0]
+    return best_move if best is not None else [0, 0]

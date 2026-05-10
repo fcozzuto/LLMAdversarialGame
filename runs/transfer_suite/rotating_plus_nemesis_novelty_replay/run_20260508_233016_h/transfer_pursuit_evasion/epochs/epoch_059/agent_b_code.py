@@ -1,0 +1,11 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    role = observation.get("self_role", "pursuer")
+    if role == "evader":
+        dx = 0 if ox == sx else (-1 if ox > sx else 1)
+        dy = 0 if oy == sy else (-1 if oy > sy else 1)
+        return [dx, dy]
+    dx = 0 if ox == sx else (1 if ox > sx else -1)
+    dy = 0 if oy == sy else (1 if oy > sy else -1)
+    return [dx, dy]

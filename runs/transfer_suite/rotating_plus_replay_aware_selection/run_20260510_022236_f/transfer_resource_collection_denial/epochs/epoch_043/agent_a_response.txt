@@ -1,0 +1,156 @@
+def choose_move(observation):
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    obs = set((int(x), int(y)) for x, y in obstacles)
+    res = []
+    for x, y in resources:
+        x, y = int(x), int(y)
+        if 0 <= x < w and 0 <= y < h:
+            res.append((x, y))
+    if (sx, sy) in obs or not res:
+        return [0, 0]
+    if (sx, sy) in res:
+        return [0, 0]
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def near_block_pen(x, y):
+        pen = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                if ax == 0 and ay == 0:
+                    continue
+                if (x + ax, y + ay) in obs:
+                    pen += 3
+        return pen
+
+    def obstacle_between(x1, y1, x2, y2):
+        # Quick deterministic "rough ray": sample a few steps along deltas; counts obstacle hits.
+        dx = x2 - x1
+        dy = y2 - y1
+        steps = cheb(x1, y1, x2, y2)
+        if steps == 0:
+            return 0
+        k = 0
+        hit = 0
+        for i in (1, 2, 3, 4):
+            t = i / 4.0
+            nx = int(round(x1 + dx * t))
+            ny = int(round(y1 + dy * t))
+            if (nx, ny) in obs:
+                hit += 1
+            k += 1
+        return hit
+
+    best_target = None
+    best_key = None
+    for tx, ty in res:
+        sd = cheb(sx, sy, tx, ty)
+        od = cheb(ox, oy, tx, ty)
+        # Prefer resources where we are likely earlier, and penalize obstacle congestion.
+        # Tie-break by closer distance to opponent (to deny sweep).
+        ray_pen = obstacle_between(sx, sy, tx, ty) + 0.5 * obstacle_between(ox, oy, tx, ty)
+        key = (od - sd, -sd, ray_pen, tx, ty)
+        if best_key is None or key > best_key:
+            best_key = key
+            best_target = (tx, ty)
+
+    tx, ty = best_target
+    # Move choice: maximize progress vs opponent plus avoid immediate obstacle adjacency.
+    candidates = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in candidates:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obs:
+            continue
+        nds = cheb(nx, ny, tx, ty)
+        nod = cheb(ox, oy, tx, ty)
+        prog = (cheb(sx, sy, tx, ty) - nds)
+        deny = (od - nod)  # mostly constant; keeps deterministic preference
+        score = (prog + (0.6 if nod > nds else -0.6) + deny * 0.01, -nds, -near_block_pen(nx, ny), nx, ny)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    res = [(int(x), int(y)) for (x, y) in resources if 0 <= int(x) < w and 0 <= int(y) < h]
+    obs = set((int(x), int(y)) for (x, y) in obstacles if 0 <= int(x) < w and 0 <= int(y) < h)
+
+    if (sx, sy) in obs or not res:
+        return [0, 0]
+    if (sx, sy) in res:
+        return [0, 0]
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def closest_dist(x, y):
+        dmin = 10**9
+        for rx, ry in res:
+            d = cheb(x, y, rx, ry)
+            if d < dmin:
+                dmin = d
+        return dmin
+
+    def obstacle_pen(x, y):
+        p = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                if (x + dx, y + dy) in obs:
+                    p += 2
+        return p
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    dirs = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+    best = None
+    best_score = -10**18
+    curd = closest_dist(sx, sy)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        d = closest_dist(nx, ny)
+        oppd = cheb(nx, ny, ox, oy)
+        step_gain = curd - d
+        score = 1000 * step_gain + 10 * (oppd) - obstacle_pen(nx, ny)
+        if (nx, ny) in res:
+            score += 5000
+        if best is None or score > best_score:
+            best_score = score
+            best = [dx, dy]
+    if best is None:
+        return [0, 0]
+    return best

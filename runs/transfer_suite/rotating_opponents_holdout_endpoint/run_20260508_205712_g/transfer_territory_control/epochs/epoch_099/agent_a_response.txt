@@ -1,0 +1,159 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or [0, 0]
+    sx, sy = int(sx), int(sy)
+    self_t = set((int(c[0]), int(c[1])) for c in (observation.get("self_territory") or []) if c and len(c) >= 2)
+    opp_t = set((int(c[0]), int(c[1])) for c in (observation.get("opponent_territory") or []) if c and len(c) >= 2)
+    unclaimed = set((int(c[0]), int(c[1])) for c in (observation.get("unclaimed_cells") or []) if c and len(c) >= 2)
+    obstacles = set((int(c[0]), int(c[1])) for c in (observation.get("obstacles") or []) if c and len(c) >= 2)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    inb = lambda x, y: 0 <= x < w and 0 <= y < h
+
+    def adjacent_cells(x, y):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx or dy:
+                    nx, ny = x + dx, y + dy
+                    if inb(nx, ny):
+                        yield nx, ny
+
+    # Determine mode: if we lead, expand; if behind, counterclaim near opponent frontier.
+    lead = (int(observation.get("self_territory_count") or 0) >= int(observation.get("opponent_territory_count") or 0))
+
+    # Opponent frontier: unclaimed cells adjacent to opponent territory, and our cells adjacent to opponent.
+    opp_frontier = set()
+    for (x, y) in opp_t:
+        for nx, ny in adjacent_cells(x, y):
+            if (nx, ny) in unclaimed:
+                opp_frontier.add((nx, ny))
+    our_adj_opp = set()
+    for (x, y) in self_t:
+        for nx, ny in adjacent_cells(x, y):
+            if (nx, ny) in opp_t:
+                our_adj_opp.add((x, y))
+
+    best = None
+    best_val = -10**18
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            nx, ny = sx, sy  # deterministic: avoid invalid targets
+        cell_score = 0.0
+
+        if (nx, ny) in self_t:
+            cell_score += 0.5
+        elif (nx, ny) in unclaimed:
+            # Expansion vs. counterclaim targets
+            if (nx, ny) in opp_frontier and not lead:
+                cell_score += 10.0
+            elif lead:
+                cell_score += 6.0
+            else:
+                cell_score += 4.0
+        elif (nx, ny) in opp_t:
+            # Flipping on entry: valuable especially if it's on/near frontier
+            cell_score += 8.0 if (nx, ny) in opp_frontier else 6.0
+
+        # Frontier capture pressure
+        adj_opp = 0
+        adj_unclaimed = 0
+        adj_self = 0
+        min_to_opp = 10**9
+        for ax, ay in adjacent_cells(nx, ny):
+            if (ax, ay) in opp_t:
+                adj_opp += 1
+            if (ax, ay) in unclaimed:
+                adj_unclaimed += 1
+            if (ax, ay) in self_t:
+                adj_self += 1
+            if opp_t:
+                # coarse distance: only use a couple nearest opponent cells deterministically
+                # (no search explosion)
+                # sample via corners of opp_t bounding box
+                pass
+        if adj_opp:
+            cell_score += (3.0 * adj_opp)
+        if adj_unclaimed:
+            cell_score += (1.2 * adj_unclaimed)
+        cell_score += (0.4 * adj_self)
+
+        # Avoid obstacles by discouraging adjacent blocked cells
+        near_block = 0
+        for ax, ay in adjacent_cells(nx, ny):
+            if (ax, ay) in obstacles:
+                near_block += 1
+        cell_score -= 1.5 * near_block
+
+        # Prefer moving toward
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or [0, 0]
+    ox, oy = observation.get("opponent_position") or [0, 0]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    def to_set(x):
+        s = set()
+        if not x:
+            return s
+        for c in x:
+            if c and len(c) >= 2:
+                s.add((int(c[0]), int(c[1])))
+        return s
+
+    obstacles = to_set(observation.get("obstacles"))
+    resources = to_set(observation.get("resources"))
+    unclaimed = to_set(observation.get("unclaimed_cells"))
+    self_t = to_set(observation.get("self_territory"))
+    opp_t = to_set(observation.get("opponent_territory"))
+
+    lead = int(observation.get("self_territory_count") or 0) >= int(observation.get("opponent_territory_count") or 0)
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def man(a, b, c, d): return abs(a - c) + abs(b - d)
+    def touches_opp(x, y):
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+            if (x + dx, y + dy) in opp_t:
+                return True
+        return False
+
+    if resources:
+        targets = list(resources)
+    elif unclaimed:
+        targets = list(unclaimed)
+    else:
+        targets = [(ox, oy)]
+
+    def nearest_dist(x, y, cells):
+        best = 10**9
+        for tx, ty in cells:
+            d = man(x, y, tx, ty)
+            if d < best:
+                best = d
+        return best
+
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        score = 0
+        if (nx, ny) in resources:
+            score += 100000 - nearest_dist(nx, ny, targets) * 3
+        if (nx, ny) in unclaimed:
+            score += 30000 if lead else 20000
+            if not lead and touches_opp(nx, ny):
+                score += 80000
+        if (nx, ny) in opp_t:
+            score += 60000 if not lead else -20000
+        if lead and (nx

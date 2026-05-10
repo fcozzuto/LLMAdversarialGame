@@ -1,0 +1,138 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    unclaimed = observation.get("unclaimed_cells") or []
+    obstacles = observation.get("obstacles") or []
+    self_territory = observation.get("self_territory") or []
+    opp_pos = observation.get("opponent_position") or [w - 1, h - 1]
+    ox, oy = int(opp_pos[0]), int(opp_pos[1])
+
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            obs.add((x, y))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+
+    def score_cell(x, y):
+        # prefer reachable-ish: move toward cell, avoid close to opponent
+        d = abs(x - sx) + abs(y - sy)
+        dist_opp = abs(x - ox) + abs(y - oy)
+        # prefer expanding from frontier: cells near existing territory are better
+        if self_territory:
+            tset = set()
+            for q in self_territory:
+                if q and len(q) >= 2:
+                    tset.add((int(q[0]), int(q[1])))
+            near = False
+            for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)):
+                if (x + dx, y + dy) in tset:
+                    near = True
+                    break
+            frontier_bonus = 12 if near else 0
+        else:
+            frontier_bonus = 6
+        # bias toward center slightly to avoid dead ends
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        center_bias = -0.08 * (abs(x - cx) + abs(y - cy))
+        # if unclaimed, still good; higher dist_opp reduces chance of easy counter-flip
+        return -d + 0.35 * dist_opp + frontier_bonus + center_bias
+
+    candidates = []
+    if self_territory:
+        for x, y in unclaimed:
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obs:
+                candidates.append((score_cell(int(x), int(y)), int(x), int(y)))
+        candidates.sort(key=lambda t: (-t[0], t[2], t[1]))
+        if candidates:
+            tx, ty = candidates[0][1], candidates[0][2]
+            best = (tx, ty)
+    if best is None:
+        # head to center or toward far unclaimed deterministically
+        tx, ty = int((w - 1) // 2), int((h - 1) // 2)
+        if unclaimed:
+            # choose unclaimed with best score among first few deterministic subset
+            local = []
+            for p in unclaimed[:32]:
+                x, y = int(p[0]), int(p[1])
+                if 0 <= x < w and 0 <= y < h and (x, y) not in obs:
+                    local.append((score_cell(x, y), x, y))
+            if local:
+                local.sort(key=lambda t: (-t[0], t[2], t[1]))
+                tx, ty = local[0][1], local[0][2]
+        best = (tx, ty)
+
+    tx, ty = best[0], best[1]
+    best_move = (0, 0)
+    best_val = -10**18
+
+    # Choose move that makes progress toward target while also increasing distance from opponent slightly.
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obs:
+            continue
+        move_toward = -(abs(nx - tx) + abs(ny - ty))
+        dist_opp = abs(nx - ox) + abs(ny - oy)
+        # discourage staying if a better progress exists
+        stay_pen = -2 if (dx == 0 and dy == 0) else 0
+        val = move_toward + 0.15 * dist_opp + stay_pen
+        if val > best_val or (val == best_val and (dx, dy) < best_move):
+            best_val = val
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    op = observation.get("opponent_position") or [w - 1, h - 1]
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if p and len(p) >= 2:
+            obs.add((int(p[0]), int(p[1])))
+
+    resources = observation.get("resources") or []
+    res = []
+    for p in resources:
+        if p and len(p) >= 2:
+            res.append((int(p[0]), int(p[1])))
+
+    cx, cy = w // 2, h // 2
+    target = (cx, cy)
+    if res:
+        target = min(res, key=lambda r: abs(r[0] - sx) + abs(r[1] - sy))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = (0, 0)
+    best = None
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obs:
+            continue
+        d_t = abs(nx - target[0]) + abs(ny - target[1])
+        d_o = abs(nx - ox) + abs(ny - oy)
+
+        # Prefer moving toward target, and away from opponent; slight preference for survival (staying in bounds)
+        key = (-(d_t), d_o, -abs(nx - cx) - abs(ny - cy), -abs(dx) - abs(dy))
+        if best is None or key > best:
+            best = key
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    return [int(dx), int(dy)]

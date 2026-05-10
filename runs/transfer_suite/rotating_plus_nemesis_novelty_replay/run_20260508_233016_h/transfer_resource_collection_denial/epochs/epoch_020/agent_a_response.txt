@@ -1,0 +1,134 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obs_list = observation.get("obstacles", []) or []
+    obstacles = set((p[0], p[1]) for p in obs_list)
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    if not resources:
+        return [0, 0]
+
+    # Target scoring: prioritize close resources, and deny ones closer to opponent.
+    # Add small tie-break toward resources aligned with opponent to allow earlier interception.
+    best_i = 0
+    best_val = None
+    for i, (rx, ry) in enumerate(resources):
+        sd = man(sx, sy, rx, ry)
+        od = man(ox, oy, rx, ry)
+        # Denial term: if opponent is closer, penalize
+        denial = 2.0 * (od - sd)
+        # Collect urgency: smaller sd better
+        urgency = 1.2 * sd
+        align = 0.0
+        if ry == oy:
+            align += 0.6
+        if rx == ox:
+            align += 0.3
+        # Encourage moving toward resource while moving in opponent's direction when possible
+        val = urgency + denial - align
+        if best_val is None or val < best_val:
+            best_val = val
+            best_i = i
+
+    tx, ty = resources[best_i]
+    # Move direction toward target (diagonal allowed).
+    step_options = [(-1, -1), (0, -1), (1, -1),
+                     (-1, 0), (0, 0), (1, 0),
+                     (-1, 1), (0, 1), (1, 1)]
+    scored_moves = []
+    for mx, my in step_options:
+        nx, ny = sx + mx, sy + my
+        if not in_bounds(nx, ny):
+            continue
+        # Prefer decreasing distance to target and increasing distance to opponent for contesting.
+        nd_t = man(nx, ny, tx, ty)
+        od_here = man(nx, ny, ox, oy)
+        od_next_to_target = man(ox, oy, tx, ty)
+        # If we can reach the target in <= opponent distance, bias heavily.
+        reach_bias = 0.0
+        if od_next_to_target != 0:
+            if nd_t <= od_next_to_target:
+                reach_bias -= 5.0
+            else:
+                reach_bias += 1.0
+        # Small obstacle-avoidance is already via in_bounds; tie-break toward moving closer to target.
+        v = (nd_t * 3.0) - (od_here * 0.15) + reach_bias
+        scored_moves.append((v, nd_t, -mx, -my))
+
+    scored_moves.sort()
+    mv = scored_moves[0]
+    # Recover actual move from sorted tuple indices: mv stored only negatives; infer from step_options order is unsafe.
+    # Instead, redo to get exact chosen vector deterministically by matching v/nd_t and order.
+    target_v, target_nd = scored_moves[0][0], scored_moves[0][1]
+    for mx, my in step_options:
+        nx, ny = sx + mx, sy + my
+        if not in_bounds(nx, ny):
+            continue
+        nd_t = man(nx, ny, tx, ty)
+        od_here = man(nx, ny, ox, oy)
+        od_next_to_target = man(ox, oy, tx, ty)
+        reach_bias = 0.0
+        if od_next_to_target != 0:
+            if nd_t <= od_next_to_target:
+                reach_bias -= 5.0
+            else:
+                reach_bias += 1.0
+        v = (nd_t * 3.0) - (od_here * 0.15) + reach_bias
+        if v == target_v and nd_t == target_nd:
+            return [mx, my]
+
+    # Fallback (should not happen)
+    return [0, 0]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obs_list = observation.get("obstacles", []) or []
+    obstacles = set((p[0], p[1]) for p in obs_list)
+    if not resources:
+        return [0, 0]
+
+    moves = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)]
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def best_for(nx, ny):
+        best_adv = -10**9
+        best_sd = 10**9
+        for rx, ry in resources:
+            sd = dist(nx, ny, rx, ry)
+            od = dist(ox, oy, rx, ry)
+            adv = od - sd
+            if adv > best_adv or (adv == best_adv and sd < best_sd):
+                best_adv = adv
+                best_sd = sd
+        return best_adv, best_sd
+
+    best_move = [0, 0]
+    best_adv, best_sd = best_for(sx, sy)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        adv, sd = best_for(nx, ny)
+        if adv > best_adv or (adv == best_adv and sd < best_sd) or (adv == best_adv and sd == best_sd and (dx, dy) < (best_move[0], best_move[1])):
+            best_adv, best_sd = adv, sd
+            best_move = [dx, dy]
+    return best_move

@@ -1,0 +1,143 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    opp_pos = tuple(observation["opponent_position"])
+    oppx, oppy = opp_pos
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    # Choose a tactical target: either nearest unclaimed, or an unclaimed cell that is near opponent territory
+    # but also not too close to the opponent position (avoid instant contest loss / obstacle hits).
+    best_target = None
+    best_tscore = -10**18
+
+    opp_near = set()
+    for (x, y) in opp_terr:
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                nx, ny = x + dx, y + dy
+                if inb(nx, ny) and (nx, ny) not in opp_terr:
+                    opp_near.add((nx, ny))
+
+    # Deterministic limited candidate evaluation
+    un_list = list(unclaimed)
+    # Prefer edge/near-unclaimed if available; else center.
+    prefer_edges = [c for c in un_list if c[0] in (0, w - 1) or c[1] in (0, h - 1)]
+    candidates = (prefer_edges[:12] if prefer_edges else un_list[:20])
+    if not candidates:
+        candidates = [(w // 2, h // 2)]
+
+    for tx, ty in candidates:
+        t = (tx, ty)
+        d = dist((sx, sy), t)
+        dopp = dist((oppx, oppy), t)
+        near_opp = 1.0 if t in opp_near else 0.0
+        on_self = 1.0 if t in self_terr else 0.0
+        # Heuristic: maximize progress (unclaimed) + block near-opp cells, but keep separation from opponent position.
+        tscore = (5.0 / (1 + d)) + (2.0 * near_opp) + (-1.0 / (1 + dopp)) - (0.8 * on_self)
+        # Slight deterministic bias toward center to reduce dithering
+        center_bias = -0.05 * (abs(tx - w // 2) + abs(ty - h // 2))
+        tscore += center_bias
+        if tscore > best_tscore or (tscore == best_tscore and (tx, ty) < (best_target[0], best_target[1]) if best_target else False):
+            best_tscore = tscore
+            best_target = t
+
+    # Score each immediate move by (claimed gain) and by direction toward target, with a strong penalty for moving next to opponent.
+    best_move = (0, 0)
+    best_score = -10**18
+    tx, ty = best_target
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            nx, ny, dx, dy = sx, sy, 0, 0
+        cell = (nx, ny)
+
+        # Base: reward taking unclaimed and maintaining/increasing territory control.
+        gain = 0.0
+        if cell in unclaimed:
+            gain += 4.2
+        if cell in self_terr:
+            gain += 0.4
+        if cell in opp_terr:
+            # Flipping on entry: often good to disrupt, but avoid if it places us adjacent to their sweeper.
+            gain += 2.8
+
+        # Move-to-target: use Chebyshev/diagonal-friendly distance approximation
+        step_dist = max(abs(nx - tx), abs(ny - ty))
+        dir_score = 2.0 / (1 + step_dist)
+
+        # Safety: avoid cells adjacent to opponent position (they can sweep back).
+        dopp = dist((oppx, oppy), cell)
+        adj_pen = 0.0
+        if dipp := (1 if dopp <= 2 else 0):
+            adj_pen = 3.0 * dipp
+
+        # Bonus for taking territory frontier near opponent territory (but not too close to opponent position)
+        near_opp = 1.0 if cell in
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = set(map(tuple, observation.get("obstacles") or []))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells") or []))
+    opp_terr = set(map(tuple, observation.get("opponent_territory") or []))
+    oppx, oppy = observation["opponent_position"]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    best = None
+    best_score = -10**18
+
+    # Precompute nearest-unclaimed distance from current position (manhattan), if any.
+    if unclaimed:
+        md0 = min(abs(x - sx) + abs(y - sy) for (x, y) in unclaimed if inb(x, y) and (x, y) not in obstacles)
+    else:
+        md0 = 10**9
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        # Avoid stepping into opponent territory unless it directly helps capturing unclaimed.
+        near_opp = abs(nx - oppx) + abs(ny - oppy)
+        is_unclaimed = (nx, ny) in unclaimed
+        is_bad = (nx, ny) in opp_terr
+
+        if unclaimed:
+            md = min(abs(x - nx) + abs(y - ny) for (x, y) in unclaimed if inb(x, y) and (x, y) not in obstacles)
+        else:
+            md = md0
+
+        score = 0
+        if is_unclaimed:
+            score += 2000
+        score += 50 * (md0 - md)  # move toward closer unclaimed
+        score += 5 * (w + h - near_opp)  # prefer farther from opponent overall
+        if is_bad:
+            score -= 800 if not is_unclaimed else 200
+
+        # Small deterministic tie-breaker: prefer lexicographically smaller moves.
+        if best is None or score > best_score or (score == best_score and (dx, dy) < best):
+            best_score = score
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[0], best[1]]

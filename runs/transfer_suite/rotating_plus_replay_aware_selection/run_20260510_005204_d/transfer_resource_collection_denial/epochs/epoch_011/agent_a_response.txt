@@ -1,0 +1,167 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obs_list = observation.get("obstacles", []) or []
+    obstacles = set((p[0], p[1]) for p in obs_list)
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cd(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    if not resources:
+        # Drift toward center while respecting obstacles
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        best = [0, 0]
+        bestd = None
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inside(nx, ny) or (nx, ny) in obstacles:
+                continue
+            d = -(abs(nx - cx) + abs(ny - cy))
+            if bestd is None or d > bestd:
+                bestd, best = d, [dx, dy]
+        return best
+
+    # One-ply: choose move maximizing expected "win margin" for best resource,
+    # strongly favoring resources we can reach strictly earlier.
+    best_move = [0, 0]
+    best_score = None
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        myd_best = 10**9
+        opd_best = 10**9
+        safe_margin_best = -10**9
+        center_best = 10**9
+        tie_penalty = 0
+
+        for rx, ry in resources:
+            if (rx, ry) in obstacles:
+                continue
+            myd = cd(nx, ny, rx, ry)
+            opd = cd(ox, oy, rx, ry)
+            # Prefer strictly earlier pickups; if not possible, prefer closest still.
+            if myd < opd:
+                margin = (opd - myd)
+                if margin > safe_margin_best:
+                    safe_margin_best = margin
+                    myd_best, opd_best = myd, opd
+                    center_best = abs(rx - cx) + abs(ry - cy)
+                    tie_penalty = -rx - ry
+                elif margin == safe_margin_best:
+                    c = abs(rx - cx) + abs(ry - cy)
+                    if c < center_best:
+                        myd_best, opd_best = myd, opd
+                        center_best = c
+                        tie_penalty = -rx - ry
+            else:
+                # Not safe: only consider if no safe options exist later; score mildly.
+                # We'll incorporate this by updating tie_penalty based on proximity.
+                pass
+
+        if safe_margin_best > -10**8:
+            score = (1000 * safe_margin_best) - myd_best - center_best + tie_penalty
+        else:
+            # No strictly earlier resource: minimize our distance while maximizing opponent disadvantage.
+            # Use best over all resources deterministically.
+            best_local = None
+            for rx, ry in resources:
+                if (rx, ry) in obstacles:
+                    continue
+                myd = cd(nx, ny, rx, ry)
+                opd = cd(ox, oy, rx, ry)
+                if myd < 10**9:
+                    margin = opd - myd
+                    c = abs(rx - cx) + abs(ry - cy)
+                    key = (myd, -margin, c, rx, ry)
+                    if best_local is None or key < best_local:
+                        best_local = key
+            # best_local: smaller myd, larger margin, smaller center
+            _, neg_margin, c, rx, ry = best_local
+           
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", None) or []
+    obstacles_in = observation.get("obstacles", None) or []
+    obstacles = set()
+    for p in obstacles_in:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obstacles.add((p[0], p[1]))
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(a, b, c, d):
+        x = a - c
+        if x < 0:
+            x = -x
+        y = b - d
+        if y < 0:
+            y = -y
+        return x + y
+
+    best_move = (0, 0)
+    best_val = None
+
+    if resources:
+        best_tx, best_ty = None, None
+        best_self = None
+        for r in resources:
+            if isinstance(r, (list, tuple)) and len(r) >= 2:
+                tx, ty = r[0], r[1]
+                d = man(sx, sy, tx, ty)
+                if best_self is None or d < best_self:
+                    best_self, best_tx, best_ty = d, tx, ty
+        tx, ty = best_tx, best_ty
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inside(nx, ny) or (nx, ny) in obstacles:
+                continue
+            sdist = man(nx, ny, tx, ty)
+            odist = man(ox, oy, tx, ty)
+            val = -sdist
+            if sdist < odist:
+                val += 1000 - sdist
+            if sdist == odist:
+                val -= 10
+            val -= 2 * man(nx, ny, ox, oy)
+            if best_val is None or val > best_val or (val == best_val and (dx, dy) < best_move):
+                best_val, best_move = val, (dx, dy)
+        if best_val is not None:
+            return [best_move[0], best_move[1]]
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    best_val = None
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        val = -(abs(nx - cx) + abs(ny - cy))
+        val -= 2 * man(nx, ny, ox, oy)
+        if best_val is None or val > best_val or (val == best_val and (dx, dy) < best_move):
+            best_val, best_move = val, (dx, dy)
+    return [best_move[0], best_move[1]]

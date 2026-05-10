@@ -1,0 +1,154 @@
+def choose_move(observation):
+    x, y = observation.get("self_position", [0, 0])
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    obstacles = observation.get("obstacles", []) or []
+    obs = set((p[0], p[1]) for p in obstacles)
+    opp_t = observation.get("opponent_territory", []) or []
+    opp = set((p[0], p[1]) for p in opp_t)
+    unclaimed_list = observation.get("unclaimed_cells", []) or []
+    unclaimed = set((p[0], p[1]) for p in unclaimed_list)
+    selft = set((p[0], p[1]) for p in (observation.get("self_territory", []) or []))
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    def neighbors(nx, ny):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                ax, ay = nx + dx, ny + dy
+                if inb(ax, ay):
+                    yield ax, ay
+
+    # Build a small deterministic frontier list: unclaimed cells adjacent to our territory or to opponent territory.
+    frontier = []
+    for cx, cy in unclaimed:
+        adj_self = False
+        adj_opp = False
+        for nx, ny in neighbors(cx, cy):
+            if (nx, ny) in selft:
+                adj_self = True
+                break
+        if not adj_self:
+            for nx, ny in neighbors(cx, cy):
+                if (nx, ny) in opp:
+                    adj_opp = True
+                    break
+        if adj_self or adj_opp:
+            # Prefer cells closer to us; second key prefers adjacency to opponent.
+            d = abs(cx - x) + abs(cy - y)
+            frontier.append((d, 0 if adj_self else 1, cx, cy))
+    if frontier:
+        frontier.sort()
+        frontier_targets = [(a, b) for _, _, a, b in frontier[:12]]
+    else:
+        # Fallback: top few closest unclaimed cells
+        tmp = [(abs(cx - x) + abs(cy - y), cx, cy) for cx, cy in unclaimed]
+        tmp.sort()
+        frontier_targets = [(cx, cy) for _, cx, cy in tmp[:8]]
+
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        # Evaluate move: capture opponent, claim unclaimed, and move toward frontier.
+        if (nx, ny) in opp:
+            score = 200.0  # strong pull to flip.
+        elif (nx, ny) in unclaimed:
+            score = 60.0  # claim potential.
+        elif (nx, ny) in selft:
+            score = 10.0  # maintain control.
+        else:
+            score = 0.0
+
+        # Add distance-based shaping toward frontier targets.
+        if frontier_targets:
+            dmin = 10**9
+            for tx, ty in frontier_targets:
+                d = abs(tx - nx) + abs(ty - ny)
+                if d < dmin:
+                    dmin = d
+            score += (20.0 - min(20.0, float(dmin)))  # closer is better
+
+        # Avoid stepping into a move that is "isolated" from our territory while losing toward opponent.
+        # (Prefer moves adjacent to either our territory or opponent territory.)
+        adj_partner = False
+        for ax, ay in neighbors(nx, ny):
+            if (ax, ay) in selft or (ax, ay) in opp:
+                adj_partner = True
+                break
+        if not adj_partner:
+            score -= 8.0
+
+        # Deterministic tie-break: prefer moves with smaller (dx,dy) lexicographically.
+        if score > best_score or (score == best_score and (dx, dy) < best_move):
+            best_score = score
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    if not (-1 <= dx <= 1 and -1 <= dy <= 1):
+        return [0,
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    selft = set(tuple(p) for p in (observation.get("self_territory", []) or []))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells", []) or []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def neigh8(x, y):
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx or dy:
+                    nx, ny = x + dx, y + dy
+                    if inb(nx, ny):
+                        yield nx, ny
+
+    # Pick a deterministic target unclaimed cell: closest to our territory (or our position).
+    target = None
+    best = 10**9
+    if unclaimed:
+        base = selft if selft else {(sx, sy)}
+        for ux, uy in sorted(unclaimed):
+            d = min(abs(ux - bx) + abs(uy - by) for bx, by in base)
+            if d < best:
+                best = d
+                target = (ux, uy)
+
+    candidates = []
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            if dx == 0 and dy == 0:
+                continue
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            score = 0
+            if (nx, ny) in unclaimed:
+                score += 10
+            # Bonus if move expands near our territory.
+            if any((px, py) in selft for px, py in neigh8(nx, ny)):
+                score += 3
+            # Goal direction: closer to target unclaimed (if any), otherwise toward unclaimed.
+            if target:
+                score += - (abs(target[0] - nx) + abs(target[1] - ny))
+            else:
+                score += - (abs(ox - nx) + abs(oy - ny))
+            # Deterministic tie-break.
+            candidates.append((-(score), dx, dy))
+    if candidates:
+        candidates.sort()
+        return [candidates[0][1], candidates[0][2]]
+    return [0, 0]

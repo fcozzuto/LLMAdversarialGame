@@ -1,0 +1,145 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = observation.get("obstacles") or []
+    blocked = set()
+    for b in obstacles:
+        if isinstance(b, (list, tuple)) and len(b) >= 2:
+            bx, by = int(b[0]), int(b[1])
+            if 0 <= bx < w and 0 <= by < h:
+                blocked.add((bx, by))
+
+    role = str(observation.get("self_role") or "")
+    evader = "evader" in role.lower()
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def wall_dist(x, y):
+        return min(x, y, w - 1 - x, h - 1 - y)
+
+    # Biases: corner pressure for pursuer; corner avoidance for evader.
+    # (Pursuer tries to push opponent toward nearest corner by moving to decrease its wall distance.)
+    opp_wall = wall_dist(ox, oy)
+    corner_dx = 0
+    if ox <= w // 2:
+        corner_dx = 1
+    else:
+        corner_dx = -1
+    corner_dy = 0
+    if oy <= h // 2:
+        corner_dy = 1
+    else:
+        corner_dy = -1
+
+    # If opponent already near a wall, strengthen axis pressure.
+    wall_strength = 0
+    if ox <= 1 or ox >= w - 2:
+        wall_strength += 2
+    if oy <= 1 or oy >= h - 2:
+        wall_strength += 2
+
+    best_move = [0, 0]
+    best_val = None
+
+    def clamp01(v):
+        return 1 if v > 0 else (-1 if v < 0 else 0)
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in blocked:
+            continue
+
+        # Chebyshev distance for capture_radius 0 (still a good proxy).
+        dist = max(abs(nx - ox), abs(ny - oy))
+
+        # Encourage pursuer to align/press toward corner; evader to escape wall.
+        if evader:
+            # Want to increase distance and also move toward larger wall distance.
+            val = dist * 1000
+            val += wall_dist(nx, ny) * 5
+            # Softly discourage moving toward the quadrant that aims at the corner.
+            # Use dot with corner direction: higher dot means more toward corner -> bad for evader.
+            align = (clamp01(nx - ox) * corner_dx) + (clamp01(ny - oy) * corner_dy)
+            val -= align * (4 + wall_strength)
+        else:
+            # Want to decrease distance and also reduce opponent wall distance (corner it).
+            val = -dist * 1000
+            # Approximate how our move might force opponent: bias by positioning toward its corner.
+            # We don't know opponent move, so we bias our position to be in the direction that would reduce its wall distance.
+            my_to_corner_x = 1 if ox < w // 2 else -1
+            my_to_corner_y = 1 if oy < h // 2 else -1
+            pos_align = (clamp01(nx - ox) * my_to_corner_x) + (clamp01(ny - oy) * my_to_corner_y)
+            val += pos_align * (4 + wall_strength)
+            # Also prefer moves that increase our own wall safety less (pursuer can risk it a bit),
+            # but keep it stable by slight preference for being not too close to our own wall.
+            val += wall_dist(nx, ny) * 1
+
+        if best_val is None:
+            best_val = val
+            best_move = [dx, dy]
+        else:
+            # Deterministic tie-break: prefer lexicographic smaller (dx,dy) after reaching equal score.
+            if val > best_val:
+                best_val = val
+                best_move = [dx, dy]
+            elif val == best_val:
+                if (dx, dy) < (best_move[0], best_move[1]):
+                    best_move = [dx, dy]
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    blocked = set()
+    for b in observation.get("obstacles", []) or []:
+        if isinstance(b, (list, tuple)) and len(b) >= 2:
+            bx, by = int(b[0]), int(b[1])
+            if 0 <= bx < w and 0 <= by < h:
+                blocked.add((bx, by))
+
+    role = str(observation.get("self_role", "") or "").lower()
+    evader = "evader" in role
+
+    moves = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1), (0, 0)]
+    best = None
+    best_score = None
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in blocked
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not in_bounds(nx, ny):
+            continue
+        dist = abs(nx - ox) + abs(ny - oy)
+        score = dist if evader else -dist
+        if best is None or score > best_score:
+            best = [dx, dy]
+            best_score = score
+
+    if best is not None:
+        return best
+
+    # If all are blocked, stay if possible else move to first valid neighbor.
+    if in_bounds(sx, sy):
+        return [0, 0]
+    for dx, dy in moves[:-1]:
+        nx, ny = sx + dx, sy + dy
+        if in_bounds(nx, ny):
+            return [dx, dy]
+    return [0, 0]

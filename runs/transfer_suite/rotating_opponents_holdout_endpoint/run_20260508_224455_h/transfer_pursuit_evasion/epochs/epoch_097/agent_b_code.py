@@ -1,0 +1,13 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    corners = [
+        [0, 0],
+        [0, observation["grid_height"] - 1],
+        [observation["grid_width"] - 1, 0],
+        [observation["grid_width"] - 1, observation["grid_height"] - 1],
+    ]
+    target = max(corners, key=lambda item: abs(item[0] - ox) + abs(item[1] - oy))
+    dx = 0 if target[0] == sx else (1 if target[0] > sx else -1)
+    dy = 0 if target[1] == sy else (1 if target[1] > sy else -1)
+    return [dx, dy]

@@ -1,0 +1,138 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    self_role = str(observation.get("self_role", "")).lower()
+    opponent_role = str(observation.get("opponent_role", "")).lower()
+    self_is_evader = ("evad" in self_role) or (self_role == "evader") or ("purs" in opponent_role)
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def valid(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist2(x1, y1, x2, y2):
+        dx, dy = x1 - x2, y1 - y2
+        return dx * dx + dy * dy
+
+    # Prefer avoiding moving adjacent to obstacles when possible (deterministic, local).
+    nbr_obs = [(i, j) for i in (-1, 0, 1) for j in (-1, 0, 1) if not (i == 0 and j == 0)]
+    def obstacle_density(x, y):
+        c = 0
+        for i, j in nbr_obs:
+            nx, ny = x + i, y + j
+            if (nx, ny) in obstacles:
+                c += 1
+        return c
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    # If evader: flee from opponent; otherwise chase opponent.
+    my_to_opp = dist2(sx, sy, ox, oy)
+    close = my_to_opp <= 16  # within 4 steps
+
+    if self_is_evader:
+        # Choose primary target: farthest corner, but if close, flee immediately from opponent.
+        tx, ty = max(corners, key=lambda c: dist2(c[0], c[1], ox, oy))
+        if close:
+            tx, ty = (sx + (sx - ox), sy + (sy - oy))
+        # Clamp target into grid for stable deterministic scoring.
+        tx = 0 if tx < 0 else (w - 1 if tx >= w else tx)
+        ty = 0 if ty < 0 else (h - 1 if ty >= h else ty)
+
+        best = None  # score, nx, ny
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            d_opp = dist2(nx, ny, ox, oy)
+            # Maximize opponent distance; also drift toward chosen corner target when not super close.
+            score = d_opp * (4 if close else 1) - dist2(nx, ny, tx, ty)
+            score -= obstacle_density(nx, ny) * (10 if close else 4)
+            if best is None or score > best[0] or (score == best[0] and (nx, ny) < (best[1], best[2])):
+                best = (score, nx, ny)
+        _, nx, ny = best if best else (None, sx, sy)
+        return [nx - sx, ny - sy]
+
+    # Pursuer: minimize distance to opponent; if blocked, bias toward moves that reduce distance and avoid obstacles.
+    tx, ty = ox, oy
+    best = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        d_opp = dist2(nx, ny, tx, ty)
+        # Additional bias:
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obs = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obs
+
+    resources = observation.get("resources") or []
+    tgt = None
+    if resources:
+        best = None
+        for r in resources:
+            if isinstance(r, (list, tuple)) and len(r) >= 2:
+                rx, ry = int(r[0]), int(r[1])
+                if valid(rx, ry):
+                    d = (sx - rx) * (sx - rx) + (sy - ry) * (sy - ry)
+                    if best is None or d < best[0]:
+                        best = (d, rx, ry)
+        if best is not None:
+            tgt = (best[1], best[2])
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    if tgt is None:
+        tgt = (ox, oy)
+
+    def obs_density(x, y):
+        c = 0
+        for i in (-1, 0, 1):
+            for j in (-1, 0, 1):
+                if i == 0 and j == 0:
+                    continue
+                if (x + i, y + j) in obs:
+                    c += 1
+        return c
+
+    best_move = None
+    best_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        dist_to_t = (nx - tgt[0]) * (nx - tgt[0]) + (ny - tgt[1]) * (ny - tgt[1])
+        dist_from_op = (nx - ox) * (nx - ox) + (ny - oy) * (ny - oy)
+        s = -dist_to_t + 0.05 * dist_from_op - 0.3 * obs_density(nx, ny)
+        if best_score is None or s > best_score:
+            best_score = s
+            best_move = (dx, dy)
+
+    if best_move is None:
+        return [0, 0]
+    return [int(best_move[0]), int(best_move[1])]

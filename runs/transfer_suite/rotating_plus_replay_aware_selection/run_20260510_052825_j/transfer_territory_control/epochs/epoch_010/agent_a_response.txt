@@ -1,0 +1,145 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    x, y = observation["self_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    selfT = set(tuple(p) for p in (observation.get("self_territory") or []))
+    oppT = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    if not oppT and unclaimed:
+        # Early: grab closest unclaimed, avoiding immediate adjacency to opponent territory if any exists (none here).
+        targets = list(unclaimed)
+        tx, ty = min(targets, key=lambda p: (man(x, y, p[0], p[1]), p[1], p[0]))
+        dx = 0 if tx == x else (1 if tx > x else -1)
+        dy = 0 if ty == y else (1 if ty > y else -1)
+        return [dx, dy]
+
+    # Build frontier targets: unclaimed cells adjacent to opponent territory.
+    frontier = []
+    if oppT and unclaimed:
+        for ux, uy in unclaimed:
+            ok = False
+            for ddx, ddy in dirs:
+                if ddx == 0 and ddy == 0:
+                    continue
+                nx, ny = ux + ddx, uy + ddy
+                if (nx, ny) in oppT:
+                    ok = True
+                    break
+            if ok:
+                frontier.append((ux, uy))
+
+    opp_focus = None
+    if oppT:
+        # Use a deterministic proxy: closest opponent territory cell to us.
+        ox, oy = min(oppT, key=lambda p: (man(x, y, p[0], p[1]), p[1], p[0]))
+        opp_focus = (ox, oy)
+
+    def cell_score(nx, ny):
+        s = 0.0
+        if (nx, ny) in oppT:
+            s += 18.0  # direct flip pressure
+        if (nx, ny) in selfT:
+            s += 3.0  # consolidation
+        if (nx, ny) in unclaimed:
+            s += 2.5  # expand
+        # Risk/pressure: count adjacent opponent territory
+        adj_opp = 0
+        for ddx, ddy in dirs:
+            if ddx == 0 and ddy == 0:
+                continue
+            ax, ay = nx + ddx, ny + ddy
+            if (ax, ay) in oppT:
+                adj_opp += 1
+        s += 1.0 * adj_opp  # approaching their border is good for center-claim archetype
+        # Encourage frontier targeting; otherwise approach closest opponent territory
+        if frontier and (nx, ny) not in obstacles:
+            if frontier:
+                # choose best frontier cell deterministically by distance from candidate
+                fx, fy = min(frontier, key=lambda p: (man(nx, ny, p[0], p[1]), p[1], p[0]))
+                s += 6.0 / (1.0 + man(nx, ny, fx, fy))
+        elif opp_focus:
+            fx, fy = opp_focus
+            s += 4.0 / (1.0 + man(nx, ny, fx, fy))
+        # Slight penalty if stepping into opponent territory from too deep (encourage breaking their cluster, not suicide)
+        if oppT and (nx, ny) in oppT:
+            # penalize if too many adjacent opponent cells (likely surrounded)
+            s -= 0.8 * adj_opp
+        return s
+
+    best = [0, 0]
+    best_s = -10**18
+    # Deterministic tie-break: prefer moves with smaller (dx, dy) lexicographically after score.
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny):
+            continue
+        s = cell_score(nx, ny)
+        if s > best_s or (s == best_s and (dx, dy) < (best[0], best[1])):
+            best_s = s
+            best = [dx, dy]
+
+    return best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    if w <= 0 or h <= 0:
+        return [0, 0]
+    x, y = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (x, y))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = observation.get("unclaimed_cells") or observation.get("unclaimed") or []
+    unclaimed = [tuple(p) for p in unclaimed]
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 0)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def dist(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    if unclaimed:
+        tx, ty = min(unclaimed, key=lambda p: (dist(x, y, p[0], p[1]), p[1], p[0]))
+    else:
+        tx, ty = ox, oy
+
+    best = (10**18, 10**18)
+    best_move = (0, 0)
+    for dx, dy in dirs:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny):
+            continue
+        d = dist(nx, ny, tx, ty)
+        score = d + (0 if unclaimed else dist(nx, ny, ox, oy) // 2)
+        # Tie-break deterministically by direction order (dirs iteration) and then position.
+        if (score, ny, nx) < best:
+            best = (score, ny * w + nx)
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    if dx not in (-1, 0, 1) or dy not in (-1, 0, 1):
+        return [0, 0]
+    return [dx, dy]

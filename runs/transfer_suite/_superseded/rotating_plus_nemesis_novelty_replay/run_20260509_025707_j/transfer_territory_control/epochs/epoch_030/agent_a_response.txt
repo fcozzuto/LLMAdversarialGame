@@ -1,0 +1,150 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+
+    obstacles = {(p[0], p[1]) for p in (observation.get("obstacles") or [])}
+    self_cells = {(p[0], p[1]) for p in (observation.get("self_territory") or [])}
+    opp_cells = {(p[0], p[1]) for p in (observation.get("opponent_territory") or [])}
+    unclaimed = [(p[0], p[1]) for p in (observation.get("unclaimed_cells") or [])]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    myc = observation.get("self_territory_count", len(self_cells))
+    opc = observation.get("opponent_territory_count", len(opp_cells))
+    behind = myc < opc
+
+    # If opponent is very close, prioritize escape / deny landing near them
+    opp_dx, opp_dy = abs(ox - sx), abs(oy - sy)
+    opp_close = (max(opp_dx, opp_dy) <= 2)
+
+    # Find a good target deterministically: prefer unclaimed adjacent to our territory
+    target = None
+    best_key = 10**18
+    if unclaimed:
+        for tx, ty in unclaimed:
+            if abs(tx - sx) <= 1 and abs(ty - sy) <= 1:
+                pass
+            # adjacent to our territory?
+            adj_my = False
+            for ddx in (-1, 0, 1):
+                for ddy in (-1, 0, 1):
+                    if ddx == 0 and ddy == 0:
+                        continue
+                    if (tx + ddx, ty + ddy) in self_cells:
+                        adj_my = True
+                        break
+                if adj_my:
+                    break
+            dist = abs(tx - sx) + abs(ty - sy)
+            # In front of us, also try to cut off opponent sweep direction: reduce distance to opponent's position from target
+            dist_opp = abs(tx - ox) + abs(ty - oy)
+            key = (0 if adj_my else 1, dist - (0.15 if behind else -0.15) * dist_opp, dist)
+            if key < best_key:
+                best_key = key
+                target = (tx, ty)
+
+    def eval_pos(nx, ny):
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            return -10**9
+        # estimate value of landing cell
+        if (nx, ny) in self_cells:
+            own = 3
+        else:
+            own = 0
+        if (nx, ny) in opp_cells:
+            opp = 6 if observation.get("turn_index", 0) >= 0 else 6
+        else:
+            opp = 0
+        if (nx, ny) not in self_cells and (nx, ny) not in opp_cells:
+            # unclaimed: good for territory expansion
+            un = 5
+        else:
+            un = 0
+
+        # avoid obstacles by staying near safer squares (simple proxy: count free neighbors)
+        free_n = 0
+        for ddx in (-1, 0, 1):
+            for ddy in (-1, 0, 1):
+                if ddx == 0 and ddy == 0:
+                    continue
+                xx, yy = nx + ddx, ny + ddy
+                if inb(xx, yy) and (xx, yy) not in obstacles:
+                    free_n += 1
+
+        # move objective: go toward target; if opponent close, increase distance from opponent
+        if target is not None:
+            tx, ty = target
+            goal = -(abs(tx - nx) + abs(ty - ny))
+        else:
+            goal = -(abs(ox - nx) + abs(oy - ny)) if behind else -(abs(ox - nx) + abs(oy - ny)) * 0.5
+
+        # deny opponent: if close, prefer larger separation
+        sep = abs(ox - nx) + abs(oy - ny)
+        danger = -(9 - sep) if opp_close and sep < 9 else 0
+
+        # small bias to not oscillate
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        try:
+            obstacles.add((p[0], p[1]))
+        except Exception:
+            continue
+
+    self_cells = set(observation.get("self_territory") or [])
+    opp_cells = set(observation.get("opponent_territory") or [])
+    myc = observation.get("self_territory_count", len(self_cells))
+    opc = observation.get("opponent_territory_count", len(opp_cells))
+    behind = myc < opc
+
+    unclaimed = set(observation.get("unclaimed_cells") or [])
+    resources = set(observation.get("resources") or [])
+    rem_res = observation.get("remaining_resource_count", None)
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def manhattan(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    best = None
+    best_sc = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+
+        sc = 0
+        d_opp = manhattan(nx, ny, ox, oy)
+        if behind:
+            sc += 50 - 5 * d_opp
+        else:
+            sc += 5 * d_opp - 10
+
+        if (nx, ny) in unclaimed:
+            sc += 40
+        if (nx, ny) in resources:
+            sc += 25
+
+        if (nx, ny) in opp_cells:
+            sc -= 30
+
+        if best is None or sc > best_sc or (sc == best_sc and (dx, dy) < best):
+            best_sc = sc
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[0], best[1]]

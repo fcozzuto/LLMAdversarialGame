@@ -1,0 +1,144 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    res = observation.get("resources", []) or []
+    obs_raw = observation.get("obstacles", []) or []
+    obstacles = {(p[0], p[1]) for p in obs_raw if p and len(p) >= 2}
+    resources = [(p[0], p[1]) for p in res if p and len(p) >= 2]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def near_obst(x, y):
+        c = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                if (x + dx, y + dy) in obstacles:
+                    c += 1
+        return c
+
+    moves = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+    if not resources:
+        # Keep moving to reduce being cornered; prefer moving toward midline relative to opponent
+        mx = w // 2
+        my = h // 2
+        best = None
+        bestv = -10**9
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny) or (nx, ny) in obstacles:
+                continue
+            v = -(abs(nx - mx) + abs(ny - my)) - 0.3 * near_obst(nx, ny)
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+        return list(best if best is not None else (0, 0))
+
+    # Pick a target that we can reach earlier than opponent (with obstacle-aware slight bias)
+    def dist(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def target_value(tx, ty, px, py):
+        ds = dist(px, py, tx, ty)
+        do = dist(ox, oy, tx, ty)
+        # Favor resources we are closer to; if tie, prefer those farther from opponent and closer to us.
+        return (do - ds, -ds)
+
+    # Deterministic: choose best target based on current positions.
+    best_t = None
+    best_tv = None
+    for tx, ty in resources:
+        tv = target_value(tx, ty, sx, sy)
+        if best_t is None or tv > best_tv:
+            best_t = (tx, ty)
+            best_tv = tv
+
+    tx, ty = best_t
+
+    # Evaluate each possible move by progress toward chosen target, plus ability to deny opponent.
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        ds_next = dist(nx, ny, tx, ty)
+        ds_now = dist(sx, sy, tx, ty)
+        do = dist(ox, oy, tx, ty)
+        # If opponent is already closer, switch pressure toward resources that reduce our lead less;
+        # this helps against sweep-like behavior by preventing being chased into a losing lane.
+        lead_now = do - ds_now
+        lead_next = do - ds_next
+        opp_escape = 0
+        # Encourage moves that also increase distance to opponent a bit (lane denial).
+        opp_escape = -0.15 * dist(nx, ny, ox, oy)
+
+        progress = (ds_now - ds_next)  # positive if closer
+        # Prefer not to get stuck near obstacles.
+        obst_pen = 0.8 * near_obst(nx, ny) + (1.2 if (nx, ny) in obstacles else 0)
+        # If we're behind, focus on minimizing ds_next; otherwise maximize progress.
+        if lead_now <= 0:
+            v = (-ds_next, lead_next, progress, opp_escape)
+        else:
+            v = (progress, lead_next, -ds_next, opp_escape)
+        score = (v[0] * 1000 + v[1] * 10 + v[2] + v[3]) - obst_pen
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation["grid_width"])
+    h = int(observation["grid_height"])
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles_raw = observation.get("obstacles", []) or []
+    obstacles = set()
+    for p in obstacles_raw:
+        if p and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    resources_raw = observation.get("resources", []) or []
+    resources = []
+    for p in resources_raw:
+        if p and len(p) >= 2:
+            resources.append((int(p[0]), int(p[1])))
+
+    moves = [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def score_cell(nx, ny):
+        if (nx, ny) in obstacles:
+            return -10**9
+        if resources:
+            bestd = 10**9
+            for rx, ry in resources:
+                d = abs(nx - rx) + abs(ny - ry)
+                if d < bestd:
+                    bestd = d
+            res_score = -bestd
+        else:
+            cx, cy = w // 2, h // 2
+            res_score = -(abs(nx - cx) + abs(ny - cy))
+        opp_d = abs(nx - ox) + abs(ny - oy)
+        return 10 * res_score + 0.5 * opp_d
+
+    best = (0, 0)
+    bestv = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny):
+            v = score_cell(nx, ny)
+            if v > bestv:
+                bestv = v
+                best = (dx, dy)
+    return [int(best[0]), int(best[1])]

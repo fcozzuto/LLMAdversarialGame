@@ -1,0 +1,171 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for a in observation.get("obstacles") or []:
+        if isinstance(a, (list, tuple)) and len(a) >= 2:
+            x, y = int(a[0]), int(a[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    sr = str(observation.get("self_role", "")).lower()
+    orr = str(observation.get("opponent_role", "")).lower()
+    env = str(observation.get("environment_name", "")).lower()
+    self_is_pursuer = ("pursuer" in sr) or ("pred" in sr) or ("catch" in sr) or (env == "pursuit_evasion" and "pursuer" in orr)
+    if env == "pursuit_evasion" and ("evader" in sr):
+        self_is_pursuer = False
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def clamp(x, y):
+        if x < 0: x = 0
+        elif x >= w: x = w - 1
+        if y < 0: y = 0
+        elif y >= h: y = h - 1
+        return x, y
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def obs_penalty(x, y):
+        p = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = x + dx, y + dy
+                if (nx, ny) in obstacles:
+                    p += 1
+        return p
+
+    best = None
+    best_score = None
+    if self_is_pursuer:
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+            if (nx, ny) in obstacles:
+                continue
+            score = -man(nx, ny, ox, oy) * 10 - obs_penalty(nx, ny)
+            if best is None or score > best_score:
+                best = (dx, dy)
+                best_score = score
+    else:
+        # Evader: maximize distance, but also avoid moving into "tight" squares that let pursuer immediately surround.
+        # Deterministic zig-zag breaker: prefer moves that change parity when distances tie.
+        cur_d = man(sx, sy, ox, oy)
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+            if (nx, ny) in obstacles:
+                continue
+            d = man(nx, ny, ox, oy)
+            # Estimate pursuer next-step ability (one-step greedy): count how many neighbor cells (not blocked) are closer to us.
+            closer = 0
+            for pdx, pdy in moves:
+                px, py = ox + pdx, oy + pdy
+                px, py = clamp(px, py)
+                if (px, py) in obstacles:
+                    continue
+                if man(px, py, nx, ny) < man(ox, oy, nx, ny):
+                    closer += 1
+            tight_pen = closer * 2 + obs_penalty(nx, ny)
+            parity_bonus = 1 if ((nx + ny) & 1) != ((sx + sy) & 1) else 0
+            score = d * 10 - tight_pen * 3 + parity_bonus
+            if best is None or score > best_score or (score == best_score and d > man(sx, sy, ox, oy)):
+                best = (dx, dy)
+                best_score = score
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for a in observation.get("obstacles") or []:
+        if isinstance(a, (list, tuple)) and len(a) >= 2:
+            x, y = int(a[0]), int(a[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    resources = []
+    for r in observation.get("resources") or []:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            x, y = int(r[0]), int(r[1])
+            if 0 <= x < w and 0 <= y < h:
+                resources.append((x, y))
+        elif isinstance(r, dict):
+            x = r.get("x", r.get("X", None))
+            y = r.get("y", r.get("Y", None))
+            if x is not None and y is not None:
+                x, y = int(x), int(y)
+                if 0 <= x < w and 0 <= y < h:
+                    resources.append((x, y))
+
+    sr = str(observation.get("self_role", "")).lower()
+    self_is_pursuer = ("pursuer" in sr) or ("pred" in sr) or ("catch" in sr)
+    if "evader" in sr:
+        self_is_pursuer = False
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = (-(10**18), 0, 0)
+    any_free = False
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        any_free = True
+
+        do = man(nx, ny, ox, oy)
+        if resources:
+            dr = min(man(nx, ny, rx, ry) for rx, ry in resources)
+        else:
+            dr = 0
+
+        if self_is_pursuer:
+            score = (-dr) * 2 + (-do)
+        else:
+            score = (-do) * (-1) + (-dr) * 0.5  # maximize distance from opponent
+
+        if score > best[0]:
+            best = (score, dx, dy)
+
+    if any_free:
+        return [best[1], best[2]]
+
+    # All moves blocked: stay deterministic, try in-bounds non-obstacle preference, else stay.
+    if (sx, sy) not in obstacles:
+        return [0, 0]
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny):
+            return [dx, dy]
+    return [0, 0]

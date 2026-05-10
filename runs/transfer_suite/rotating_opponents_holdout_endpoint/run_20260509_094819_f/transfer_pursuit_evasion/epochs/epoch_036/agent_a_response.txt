@@ -1,0 +1,145 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    blocked = set()
+    for o in observation.get("obstacles", []) or []:
+        if isinstance(o, (list, tuple)) and len(o) >= 2:
+            blocked.add((int(o[0]), int(o[1])))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1),
+             (0, -1), (0, 0), (0, 1),
+             (1, -1), (1, 0), (1, 1)]
+
+    role = ((observation.get("self_role", "") or "") + " " + (observation.get("environment_name", "") or "")).lower()
+    is_evader = ("evad" in role) or ("runner" in role) or ("escape" in role) or ("evasion" in role) or ("pursuit_evasion" in role and "evad" in (observation.get("self_role", "") or "").lower())
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in blocked
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0: dx = -dx
+        dy = y1 - y2
+        if dy < 0: dy = -dy
+        return dx if dx > dy else dy
+
+    def predict_opponent(nx, ny):
+        # opponent is assumed to pursue directly: choose move that minimizes distance to our predicted position
+        best = None
+        for dx, dy in moves:
+            tx, ty = ox + dx, oy + dy
+            if not inb(tx, ty):
+                continue
+            d = cheb(tx, ty, nx, ny)
+            # deterministic tie-break: prefer larger dx then larger dy, then lexicographic
+            key = (d, -(dx), -(dy), tx, ty)
+            if best is None or key < best[0]:
+                best = (key, (tx, ty))
+        if best is None:
+            return (ox, oy)
+        return best[1]
+
+    def step_score(nx, ny):
+        d = cheb(nx, ny, ox, oy)
+        if is_evader:
+            po = predict_opponent(nx, ny)
+            capture_risk = 1 if po[0] == nx and po[1] == ny else 0
+            # Prefer increasing distance, also reduce risk, and avoid being boxed by low mobility
+            mob = 0
+            for dx, dy in moves:
+                tx, ty = nx + dx, ny + dy
+                if inb(tx, ty):
+                    mob += 1
+            return (d - 2.0 * capture_risk) + 0.03 * mob
+        else:
+            # pursuer: chase our predicted position; also avoid obstacles
+            mob = 0
+            for dx, dy in moves:
+                tx, ty = nx + dx, ny + dy
+                if inb(tx, ty):
+                    mob += 1
+            return -d + 0.01 * mob
+
+    best_move = (0, 0)
+    best_key = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        sc = step_score(nx, ny)
+        # Deterministic tie-break: higher score, then prefer moves that keep away from staying still? (evader) / approach? (pursuer)
+        stay_pen = 0.0
+        if dx == 0 and dy == 0:
+            stay_pen = -0.01 if is_evader else -0.005
+        key = (-(sc + stay_pen), -dx, -dy, nx, ny) if is_evader else (sc + stay_pen, dx, dy, nx, ny
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    obstacles = observation.get("obstacles", []) or []
+    blocked = set()
+    for o in obstacles:
+        if isinstance(o, (list, tuple)) and len(o) >= 2:
+            blocked.add((int(o[0]), int(o[1])))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    role = ((observation.get("self_role", "") or "") + " " + (observation.get("environment_name", "") or "")).lower()
+    is_evader = ("evad" in role) or ("escape" in role) or ("runner" in role) or ("evasion" in role)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in blocked
+
+    def score_xy(x, y):
+        dx = x - ox
+        dy = y - oy
+        dist = dx * dx + dy * dy
+        if is_evader:
+            best = dist
+        else:
+            best = -dist
+        best = best - (x * 0 + y * 0)
+        res = observation.get("resources", []) or []
+        rc = observation.get("remaining_resource_count", None)
+        if res and (rc is None or (isinstance(rc, int) and rc > 0)):
+            for r in res:
+                if isinstance(r, dict):
+                    rx, ry = r.get("x", None), r.get("y", None)
+                else:
+                    rx, ry = (r[0], r[1]) if isinstance(r, (list, tuple)) and len(r) >= 2 else (None, None)
+                if rx is None or ry is None:
+                    continue
+                rx, ry = int(rx), int(ry)
+                if (rx, ry) in blocked:
+                    continue
+                tdx = x - rx
+                tdy = y - ry
+                rdist = tdx * tdx + tdy * tdy
+                if is_evader:
+                    best = best + (-rdist * 0.01)
+                else:
+                    best = best + (-rdist * 0.01)
+        return best
+
+    best_move = (0, 0)
+    best_val = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        v = score_xy(nx, ny)
+        if best_val is None or (v > best_val) or (v == best_val and (dx, dy) < best_move):
+            best_val = v
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    return [int(dx), int(dy)]

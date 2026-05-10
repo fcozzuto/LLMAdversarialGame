@@ -1,0 +1,165 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    obs_set = set((x, y) for x, y in obstacles)
+    def valid(x, y):
+        return inb(x, y) and (x, y) not in obs_set
+
+    def man(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    def nearest_dist(px, py):
+        if not resources:
+            return None
+        best = None
+        for rx, ry in resources:
+            d = man(rx, ry, px, py)
+            cand = (d, rx, ry)
+            if best is None or cand < best:
+                best = cand
+        return best[0]
+
+    def nearest_target(px, py):
+        best = None
+        for rx, ry in resources:
+            d = man(rx, ry, px, py)
+            cand = (d, rx, ry)
+            if best is None or cand < best:
+                best = cand
+        return (best[1], best[2])
+
+    # If resources are not visible, move to a deterministic corner-ish based on opponent.
+    if not resources:
+        tx = w - 1 if ox < w / 2 else 0
+        ty = h - 1 if oy < h / 2 else 0
+        dx = 0 if tx == sx else (1 if tx > sx else -1)
+        dy = 0 if ty == sy else (1 if ty > sy else -1)
+        return [dx, dy]
+
+    my_nd = nearest_dist(sx, sy)
+    opp_nd = nearest_dist(ox, oy)
+    mt = nearest_target(sx, sy)
+    nx = mt[0] - sx
+    ny = mt[1] - sy
+    hint_dx = 0 if nx == 0 else (1 if nx > 0 else -1)
+    hint_dy = 0 if ny == 0 else (1 if ny > 0 else -1)
+
+    best_move = None  # (score1, score2, dx, dy, nx, ny)
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            tx = sx + dx
+            ty = sy + dy
+            if not valid(tx, ty):
+                continue
+
+            # Own progress to closest resource
+            new_my = nearest_dist(tx, ty)
+            # Opponent pressure: how much we can increase its distance to its nearest resource
+            new_opp = nearest_dist(ox, oy)  # opponent doesn't move; we approximate via our position relative to its nearest resource
+            # Better estimate: choose our move target among resources and see if it blocks "doorway":
+            # use distance difference to opponent's nearest resource
+            opp_target = nearest_target(ox, oy)
+            if opp_target is None:
+                opp_diff = 0
+            else:
+                opp_res_x, opp_res_y = opp_target
+                opp_to_res_now = man(ox, oy, opp_res_x, opp_res_y)
+                opp_to_res_after = man(ox, oy, opp_res_x, opp_res_y)
+                # distance unchanged, so we use our proximity to that resource as denial signal
+                my_to_opp_res = man(tx, ty, opp_res_x, opp_res_y)
+                my_to_opp_res_now = man(sx, sy, opp_res_x, opp_res_y)
+                opp_diff = (my_to_opp_res_now - my_to_opp_res)  # positive means we get closer to their target
+
+            # Resource collection bonus if landing on a resource
+            on_res = 1 if (tx, ty) in set((r[0], r[1]) for r in resources) else 0
+
+            # Compose deterministic score: prioritize collecting/own distance, then deny opponent.
+            if new_my is None:
+                continue
+            own_score = -new_my  # higher is better
+            # If closer to our target than before, reward more
+            prog = (my_nd - new_my) if my_nd is not None else 0
+            deny_score = opp_diff
+            # Encourage directionality toward our immediate nearest resource
+            align = 1 if (dx == hint_dx and dy == hint_dy) else 0
+            score = (on_res * 1000 + prog * 5 + own_score + deny_score * 2 + align)
+
+            cand = (score, -abs(dx) - abs(dy), dx, dy)
+            if best_move is None or cand > best_move[:4]:
+                best_move = (cand[0], cand[1], dx, dy)
+
+    if best_move is None:
+        # Fallback: direct toward nearest resource with simple tie-break
+        tx, ty = mt
+        dx = 0 if tx == sx else (1 if tx > sx else -1)
+        dy = 0 if ty
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources") or []
+    obstacles = observation.get("obstacles") or []
+    obs = set(obstacles)
+    moves = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def valid(x, y):
+        return inb(x, y) and (x, y) not in obs
+
+    def md(x1, y1, x2, y2):
+        d = x1 - x2
+        if d < 0:
+            d = -d
+        e = y1 - y2
+        if e < 0:
+            e = -e
+        return d + e
+
+    if not resources:
+        tx = w - 1 if ox < w / 2 else 0
+        ty = h - 1 if oy < h / 2 else 0
+        best = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not valid(nx, ny):
+                continue
+            d = md(nx, ny, tx, ty)
+            key = (d, md(nx, ny, ox, oy), dx, dy)
+            if best is None or key < best:
+                best = key
+        if best is None:
+            return [0, 0]
+        return [best[2], best[3]]
+
+    best = None
+    risk = 1 if observation.get("scores", [0, 0])[0] >= observation.get("scores", [0, 0])[1] else 2
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        dmin = 10**9
+        for rx, ry in resources:
+            d = md(nx, ny, rx, ry)
+            if d < dmin:
+                dmin = d
+        do = md(nx, ny, ox, oy)
+        key = (dmin, -do * risk, dx, dy)
+        if best is None or key < best:
+            best = key
+    if best is None:
+        return [0, 0]
+    return [best[2], best[3]]

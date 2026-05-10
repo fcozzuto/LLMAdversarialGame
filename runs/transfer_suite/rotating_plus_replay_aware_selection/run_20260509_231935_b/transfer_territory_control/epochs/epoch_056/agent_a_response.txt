@@ -1,0 +1,127 @@
+def choose_move(observation):
+    w = int(observation["grid_width"])
+    h = int(observation["grid_height"])
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = list(observation.get("unclaimed_cells") or [])
+
+    if not (0 <= sx < w and 0 <= sy < h):
+        return [0, 0]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    # Build deterministic preference order for directions
+    t = int(observation.get("turn_index", 0))
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    dirs = dirs[t % 9:] + dirs[:t % 9]
+
+    centerx, centery = (w - 1) // 2, (h - 1) // 2
+
+    # Choose a target cell: unclaimed first, then opponent territory (to flip)
+    candidates = []
+    for p in unclaimed[:64]:
+        candidates.append((p, 1.0))  # unclaimed preferred
+    for p in (observation.get("opponent_territory") or [])[:64]:
+        if tuple(p) not in opp_terr:
+            continue
+        candidates.append((p, 2.0))  # opponent cells even higher
+
+    if not candidates:
+        # Fallback: drift to center
+        tx, ty = centerx, centery
+    else:
+        best = None
+        bx = by = 0
+        bestv = None
+        for (px, py), kindw in candidates:
+            ds = man(sx, sy, px, py)
+            do = man(ox, oy, px, py)
+            # Lower is better: prefer advantage (ds-do), then closeness, then centering
+            v = (ds - do) - kindw * 0.75 + 0.001 * (man(centerx, centery, px, py))
+            if bestv is None or v < bestv or (v == bestv and (px < bx or (px == bx and py < by))):
+                bestv = v
+                bx, by = px, py
+                best = (px, py)
+        tx, ty = bx, by
+
+    # Pick best move among 9, avoiding obstacles when possible
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        cell = (nx, ny)
+        # Weight cell type for territory expansion / flipping
+        if cell in opp_terr:
+            type_score = 5.0
+        elif cell in unclaimed:
+            type_score = 3.5
+        elif cell in self_terr:
+            type_score = 1.5
+        else:
+            type_score = 1.0
+        # Encourage moving toward target
+        dist_now = man(nx, ny, tx, ty)
+        dist_cur = man(sx, sy, tx, ty)
+        toward = dist_cur - dist_now  # positive if getting closer
+        # Mild preference for staying safe-ish: not stepping onto opponent if another unclaimed exists
+        opp_adj_pen = 0.0
+        for ax, ay in ((nx-1, ny), (nx+1, ny), (nx, ny-1), (nx, ny+1)):
+            if (ax, ay) in opp_terr:
+                opp_adj_pen = 0.15
+                break
+        score = type_score + 1.2
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 0))
+    h = int(observation.get("grid_height", 0))
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = observation.get("unclaimed_cells") or []
+    targets = []
+    if unclaimed:
+        targets = [tuple(p) for p in unclaimed[:30]]
+    # pick a deterministic direction preference biased by opponent
+    dirs = [(-1, 0), (0, -1), (1, 0), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 0)]
+    dx_to_opp = 0 if ox == sx else (1 if ox > sx else -1)
+    dy_to_opp = 0 if oy == sy else (1 if oy > sy else -1)
+    preferred = (dx_to_opp, dy_to_opp)
+    if preferred in dirs:
+        dirs = [preferred] + [d for d in dirs if d != preferred]
+    if w <= 0 or h <= 0:
+        return [0, 0]
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+    def man(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        # main goal: approach opponent
+        score = -man(nx, ny, ox, oy)
+        # secondary goal: approach an unclaimed cell if any
+        if targets:
+            score += 0.15 * (-min(man(nx, ny, tx, ty) for tx, ty in targets))
+        # slight bias to avoid staying still
+        if dx == 0 and dy == 0:
+            score -= 0.05
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+    return [int(best_move[0]), int(best_move[1])]

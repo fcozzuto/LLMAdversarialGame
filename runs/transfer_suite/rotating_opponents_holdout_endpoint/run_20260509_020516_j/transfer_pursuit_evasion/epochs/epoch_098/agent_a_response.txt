@@ -1,0 +1,169 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    role = str(observation.get("self_role", "")).lower()
+    is_evader = ("evader" in role) and ("pursuer" not in role)
+
+    obstacles = set()
+    for it in observation.get("obstacles") or []:
+        try:
+            if isinstance(it, dict):
+                x, y = it.get("x"), it.get("y")
+            else:
+                x, y = it[0], it[1]
+            x, y = int(x), int(y)
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+        except Exception:
+            pass
+
+    def blocked(x, y):
+        return (x, y) in obstacles
+
+    def clamp(x, y):
+        if x < 0: x = 0
+        elif x >= w: x = w - 1
+        if y < 0: y = 0
+        elif y >= h: y = h - 1
+        return x, y
+
+    def neighbors(x, y):
+        out = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    out.append((x, y, dx, dy))
+                else:
+                    nx, ny = x + dx, y + dy
+                    nx, ny = clamp(nx, ny)
+                    out.append((nx, ny, nx - x, ny - y))
+        # ensure exact deltas in {-1,0,1} by recomputing after clamp
+        out2 = []
+        for nx, ny, _, _ in out:
+            out2.append((nx, ny, nx - x, ny - y))
+        return out2
+
+    moves = []
+    for nx, ny, dx, dy in neighbors(sx, sy):
+        if -1 <= dx <= 1 and -1 <= dy <= 1 and 0 <= nx < w and 0 <= ny < h and not blocked(nx, ny):
+            moves.append((nx, ny, dx, dy))
+
+    if not moves:
+        return [0, 0]
+
+    def score_evader(nx, ny):
+        # maximize distance; prefer sticking to walls (wall-run) unless it would trap into obstacles
+        dx = abs(nx - ox)
+        dy = abs(ny - oy)
+        dist = dx + dy
+        wall = int(nx == 0 or nx == w - 1 or ny == 0 or ny == h - 1)
+        # avoid moving into corners if close enough that the pursuer can reach in one
+        close = 1 if (dist <= 2) else 0
+        return dist + 0.7 * wall - 2.0 * close
+
+    def score_pursuer(nx, ny):
+        # minimize distance; also avoid aiming through obstacles by penalizing candidate that increases local obstacle density
+        dist = abs(nx - ox) + abs(ny - oy)
+        # local crowding penalty
+        adj = 0
+        for ax in (-1, 0, 1):
+            for ay in (-1, 0, 1):
+                tx, ty = nx + ax, ny + ay
+                if 0 <= tx < w and 0 <= ty < h and blocked(tx, ty):
+                    adj += 1
+        return -dist - 0.05 * adj
+
+    if is_evader:
+        best = None
+        best_sc = None
+        # deterministic tie-break: prefer larger dist then more wall then lexicographically smaller move delta
+        for nx, ny, dx, dy in moves:
+            sc = score_evader(nx, ny)
+            cand = (sc, int(nx == 0 or nx == w - 1 or ny == 0 or ny == h - 1), -dx, -dy, nx, ny)
+            if best is None or cand > best_sc:
+                best, best_sc = (dx, dy), cand
+        return [int(best[0]), int(best[1])]
+    else:
+        best = None
+       
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for it in observation.get("obstacles") or []:
+        try:
+            if isinstance(it, dict):
+                x, y = it.get("x"), it.get("y")
+            else:
+                x, y = it[0], it[1]
+            x, y = int(x), int(y)
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+        except Exception:
+            pass
+
+    res_list = observation.get("resources") or []
+    resources = []
+    for r in res_list:
+        try:
+            if isinstance(r, dict):
+                x, y = r.get("x"), r.get("y")
+            else:
+                x, y = r[0], r[1]
+            x, y = int(x), int(y)
+            if 0 <= x < w and 0 <= y < h:
+                resources.append((x, y))
+        except Exception:
+            pass
+
+    def clamp(x, y):
+        if x < 0:
+            x = 0
+        elif x >= w:
+            x = w - 1
+        if y < 0:
+            y = 0
+        elif y >= h:
+            y = h - 1
+        return x, y
+
+    def dist2(x1, y1, x2, y2):
+        dx, dy = x1 - x2, y1 - y2
+        return dx * dx + dy * dy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = None
+    best_score = None
+
+    for dx, dy in moves:
+        nx, ny = clamp(sx + dx, sy + dy)
+        if (nx, ny) in obstacles:
+            continue
+        opp_d = dist2(nx, ny, ox, oy)
+        if resources:
+            mind = 10**18
+            for rx, ry in resources:
+                d = dist2(nx, ny, rx, ry)
+                if d < mind:
+                    mind = d
+            score = (-mind, opp_d)
+        else:
+            score = (0, opp_d)
+        if best is None or score > best_score:
+            best_score = score
+            best = (dx, dy)
+
+    return [best[0], best[1]] if best is not None else [0, 0]

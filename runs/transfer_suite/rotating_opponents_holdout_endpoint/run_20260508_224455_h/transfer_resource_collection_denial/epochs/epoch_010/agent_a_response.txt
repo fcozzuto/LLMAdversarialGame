@@ -1,0 +1,176 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    moves = [(-1, -1), (0, -1), (1, -1),
+             (-1, 0),  (0, 0), (1, 0),
+             (-1, 1),  (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def bfs_dist(start):
+        INF = 10**9
+        dist = [[INF] * h for _ in range(w)]
+        sx0, sy0 = start
+        if not inb(sx0, sy0):
+            return dist
+        dist[sx0][sy0] = 0
+        qx, qy = [sx0], [sy0]
+        qi = 0
+        while qi < len(qx):
+            x, y = qx[qi], qy[qi]
+            qi += 1
+            nd = dist[x][y] + 1
+            for dx, dy in moves:
+                nx, ny = x + dx, y + dy
+                if inb(nx, ny) and nd < dist[nx][ny]:
+                    dist[nx][ny] = nd
+                    qx.append(nx)
+                    qy.append(ny)
+        return dist
+
+    def man(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    if not resources:
+        return [0, 0]
+
+    myd0 = bfs_dist((sx, sy))
+    opd0 = bfs_dist((ox, oy))
+    INF = 10**9
+
+    best = None
+    for rx, ry in resources:
+        d1 = myd0[rx][ry]
+        d2 = opd0[rx][ry]
+        if d1 >= INF and d2 >= INF:
+            continue
+        if d1 >= INF:
+            # only reachable by opponent: avoid unless all are unreachable
+            key = (2_000_000 - (d2 - d1), d1, rx, ry)
+        else:
+            adv = d2 - d1
+            # also prefer closer contest points (break ties toward smaller my distance)
+            key = (-adv, d1, man(ox, oy, rx, ry), rx, ry)
+        if best is None or key < best[0]:
+            best = (key, rx, ry)
+
+    if best is None:
+        return [0, 0]
+
+    tx, ty = best[1], best[2]
+
+    if (sx, sy) == (tx, ty):
+        return [0, 0]
+
+    # Step toward target along our shortest-path distances
+    curd = myd0[sx][sy]
+    best_step = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if myd0[nx][ny] < curd:
+            # shouldn't happen, but ignore
+            pass
+        nd = myd0[nx][ny]
+        if nd < INF and nd == curd + 1:
+            # among increasing-by-1 moves, pick best by distance to target then deterministic tie-break
+            tie = (nd, abs(nx - tx) + abs(ny - ty), dx, dy)
+            if best_step is None or tie < best_step[0]:
+                best_step = (tie, dx, dy)
+
+    if best_step is None:
+        # Fallback: pick neighbor minimizing our BFS distance to target
+        best_step = None
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+            nd = myd0[nx][ny]
+            if nd >= INF:
+                continue
+            # estimate via man to ensure deterministic preference even if dist table is flat
+            tie = (abs(nx - tx) + abs(ny - ty), dx, dy)
+            if best_step is None or tie < best_step[0]:
+                best_step = (tie, dx, dy)
+
+    return [int(best_step[1]), int(best_step[2])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    resources = observation.get("resources", []) or []
+
+    moves = [(-1, -1), (0, -1), (1, -1),
+             (-1, 0),  (0, 0), (1, 0),
+             (-1, 1),  (0, 1), (1, 1)]
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    if not resources:
+        # hold position if nothing to do
+        for dx, dy in moves:
+            if dx == 0 and dy == 0 and valid(sx, sy):
+                return [0, 0]
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if valid(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    def md(a, b, c, d):
+        v = a - c
+        if v < 0: v = -v
+        u = b - d
+        if u < 0: u = -u
+        return v + u
+
+    # pick target resource deterministically: minimize our distance; break ties by position
+    best_r = None
+    best_d = None
+    for rx, ry in resources:
+        d = md(sx, sy, rx, ry)
+        if best_d is None or d < best_d or (d == best_d and (rx, ry) < best_r):
+            best_d = d
+            best_r = (rx, ry)
+    rx, ry = best_r
+
+    # score each immediate move: prefer progress to target, and prevent opponent from being much closer
+    best_move = None
+    best_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        my = md(nx, ny, rx, ry)
+        op = md(ox, oy, rx, ry)
+        # higher is better
+        score = -my
+        # if opponent is closer than us, slightly penalize
+        if op < my:
+            score -= 5
+        # avoid moves that wander away from both
+        score += 0 if md(nx, ny, ox, oy) == 0 else 0
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+        elif score == best_score:
+            # deterministic tie-break: smaller (dx,dy) lexicographically
+            if (dx, dy) < best_move:
+                best_move = (dx, dy)
+
+    if best_move is None:
+        return [0, 0]
+    return [int(best_move[0]), int(best_move[1])]

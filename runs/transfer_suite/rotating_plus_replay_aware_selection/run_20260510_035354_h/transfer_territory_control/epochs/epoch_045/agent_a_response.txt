@@ -1,0 +1,114 @@
+def choose_move(observation):
+    ax, ay = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    obs_list = observation.get("obstacles") or []
+    obst = set((p[0], p[1]) for p in obs_list if inb(p[0], p[1]))
+
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    candidates = [p for p in unclaimed if inb(p[0], p[1])]
+    if not candidates:
+        candidates = [p for p in opp_terr if inb(p[0], p[1])]
+    if not candidates:
+        return [0, 0]
+
+    ox, oy = observation["opponent_position"]
+
+    def md(a, b, c, d):
+        dx = a - c
+        dy = b - d
+        return (dx if dx >= 0 else -dx) + (dy if dy >= 0 else -dy)
+
+    # Deterministic truncation of candidate set for speed
+    candidates.sort(key=lambda p: (md(ax, ay, p[0], p[1]) - (md(ox, oy, p[0], p[1]) // 2), p[0], p[1]))
+    candidates = candidates[:20]
+
+    def objective(x, y):
+        best = 10**9
+        for (tx, ty) in candidates:
+            d = md(x, y, tx, ty)
+            # Prefer unclaimed; also prefer targets far from opponent (to reduce immediate sweep risk)
+            is_unclaimed = (tx, ty) in unclaimed
+            weight = 1 if is_unclaimed else 2
+            risk = md(ox, oy, tx, ty)
+            score = d * weight - (risk // 3)
+            if score < best:
+                best = score
+        # Add small penalty for staying in place and for getting too close to opponent
+        return best + (0 if (x, y) in self_terr else 0) + (md(x, y, ox, oy) // 6)
+
+    cur_obj = objective(ax, ay)
+    best_move = (0, 0)
+    best_val = cur_obj
+
+    for dx, dy in moves:
+        nx, ny = ax + dx, ay + dy
+        if not inb(nx, ny) or (nx, ny) in obst:
+            continue
+        val = objective(nx, ny)
+        # Prefer strictly better; tie-break deterministically toward diagonal expansion then right/down then stay
+        if val < best_val:
+            best_val = val
+            best_move = (dx, dy)
+        elif val == best_val:
+            # tie-break: prioritize moves that change both coords, then that reduce distance to opponent
+            tie1 = (-(dx != 0 and dy != 0), md(nx, ny, ox, oy), dx, dy)
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w, h = observation.get("grid_width", 0), observation.get("grid_height", 0)
+    ax, ay = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    unclaimed = observation.get("unclaimed_cells") or []
+    uset = set((p[0], p[1]) for p in unclaimed if isinstance(p, (list, tuple)) and len(p) >= 2)
+
+    obstacles = observation.get("obstacles") or []
+    oset = set((p[0], p[1]) for p in obstacles if isinstance(p, (list, tuple)) and len(p) >= 2)
+
+    opp_terr = observation.get("opponent_territory") or []
+    opset = set((p[0], p[1]) for p in opp_terr if isinstance(p, (list, tuple)) and len(p) >= 2)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(a, b, c, d):
+        dx = a - c
+        if dx < 0:
+            dx = -dx
+        dy = b - d
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_score = -10**18
+    best_move = [0, 0]
+
+    for dx, dy in moves:
+        nx, ny = ax + dx, ay + dy
+        if not inb(nx, ny) or (nx, ny) in oset:
+            continue
+        d_self_to_opp = man(nx, ny, ox, oy)
+        score = 0
+        if (nx, ny) in uset:
+            score += 10000 // (man(nx, ny, ax, ay) + 1)
+        if (nx, ny) in opset:
+            score -= 5000
+        score += 50 // (d_self_to_opp + 1)
+        score -= 5 * man(nx, ny, ox, oy)
+        if score > best_score or (score == best_score and (dx, dy) < (best_move[0], best_move[1])):
+            best_score = score
+            best_move = [dx, dy]
+
+    if best_score == -10**18:
+        return [0, 0]
+    return best_move

@@ -1,0 +1,150 @@
+def choose_move(observation):
+    ax, ay = observation["self_position"]
+    bx, by = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for x, y in obstacles:
+        if 0 <= x < w and 0 <= y < h:
+            obs.add((x, y))
+
+    self_terr = observation.get("self_territory") or []
+    opp_terr = observation.get("opponent_territory") or []
+    self_set = set((x, y) for x, y in self_terr if 0 <= x < w and 0 <= y < h)
+    opp_set = set((x, y) for x, y in opp_terr if 0 <= x < w and 0 <= y < h)
+    uc = observation.get("unclaimed_cells") or []
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best = (0, 0)
+    best_score = -10**18
+
+    # Deterministic targets: prioritize nearest unclaimed, otherwise attack opponent
+    attack_mode = (observation["turn_index"] % 4) >= 2
+    target = (bx, by)
+    if uc:
+        tx, ty = target
+        bestd = 10**9
+        for x, y in uc:
+            if (x, y) in obs:
+                continue
+            d = (x - ax) * (x - ax) + (y - ay) * (y - ay)
+            # slight bias toward points closer to opponent to enable cutting off center
+            db = abs(x - bx) + abs(y - by)
+            key = (d, db, y, x)
+            if key < (bestd, 10**9, 0, 0):
+                pass
+        # do manual deterministic min with proper tracking
+        best_key = None
+        for x, y in uc:
+            if (x, y) in obs:
+                continue
+            d = abs(x - ax) + abs(y - ay)
+            db = abs(x - bx) + abs(y - by)
+            key = (d, db, y, x)
+            if best_key is None or key < best_key:
+                best_key = key
+                tx, ty = x, y
+        target = (tx, ty)
+
+    def cell_value(nx, ny):
+        if (nx, ny) in obs:
+            return -10**12
+        if (nx, ny) in opp_set:
+            return 20000 if attack_mode else 12000
+        if (nx, ny) in self_set:
+            return -50
+        # prefer expanding into unclaimed/neutral
+        if (nx, ny) not in self_set and (nx, ny) not in opp_set:
+            return 800 if attack_mode else 500
+        return 0
+
+    # Precompute few nearest unclaimed for local influence (no full search)
+    near_uc = []
+    if uc:
+        scored = []
+        for x, y in uc:
+            if (x, y) in obs:
+                continue
+            d = abs(x - ax) + abs(y - ay)
+            scored.append((d, x, y))
+        scored.sort()
+        near_uc = [(x, y) for _, x, y in scored[:10]]
+
+    for dx, dy in moves:
+        nx, ny = ax + dx, ay + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obs:
+            continue
+
+        d_t = abs(target[0] - nx) + abs(target[1] - ny)
+        base = 0
+        base += cell_value(nx, ny)
+        base += -2 * d_t
+
+        # local expansion: reduce distance to many nearby unclaimed
+        if near_uc:
+            influence = 0
+            for x, y in near_uc:
+                influence += max(0, 6 - (abs(x - nx) + abs(y - ny)))
+            base += 40 * influence
+
+        # deterministic tie-breaker: prefer toward opponent when attacking, else toward target
+        if attack_mode:
+            base += -0.5 * (abs(nx - bx) + abs(ny - by))
+        else:
+            base += -0.5 * (abs(nx - target[0]) + abs(ny - target[1]))
+
+        # If stepping into opponent cell, prioritize immediate flip
+        if (nx, ny) == (bx, by):
+            base += 10**7
+
+        # If move is effectively "staying", penalize slightly to avoid stalling
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    ax, ay = observation["self_position"]
+    bx, by = observation["opponent_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        x, y = p
+        if 0 <= x < w and 0 <= y < h:
+            obs.add((x, y))
+
+    uc = observation.get("unclaimed_cells") or []
+    targets = []
+    for p in uc:
+        x, y = p
+        if 0 <= x < w and 0 <= y < h and (x, y) not in obs:
+            targets.append((x, y))
+        if len(targets) >= 30:
+            break
+    if not targets:
+        targets = [(bx, by)]
+
+    attack = (observation.get("turn_index", 0) % 4) >= 2
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    best_mv = (0, 0)
+    best_key = None
+    for dx, dy in moves:
+        nx, ny = ax + dx, ay + dy
+        if not (0 <= nx < w and 0 <= ny < h) or (nx, ny) in obs:
+            continue
+        md = 10**9
+        for tx, ty in targets:
+            d = abs(tx - nx) + abs(ty - ny)
+            if d < md:
+                md = d
+        op = abs(bx - nx) + abs(by - ny)
+        score = -md - (0.15 * op if attack else 0.0)
+        key = (score, -op, ny, nx, dx, dy)
+        if best_key is None or key > best_key:
+            best_key = key
+            best_mv = (dx, dy)
+
+    dx, dy = best_mv
+    return [int(dx), int(dy)]

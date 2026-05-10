@@ -1,0 +1,139 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    role = observation.get("self_role", "pursuer")
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def dist2(ax, ay, bx, by):
+        dx, dy = ax - bx, ay - by
+        return dx * dx + dy * dy
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+    tx, ty = max(corners, key=lambda c: dist2(c[0], c[1], ox, oy))
+
+    # simple evader/pursuer "intercept": predict opponent next step by gradient
+    def greedy_step(px, py, tx2, ty2):
+        best = (0, 0)
+        bestd = None
+        for dx, dy in deltas:
+            nx, ny = px + dx, py + dy
+            if not inb(nx, ny):
+                continue
+            d = dist2(nx, ny, tx2, ty2)
+            if bestd is None or d < bestd:
+                bestd, best = d, (dx, dy)
+        return best
+
+    if role == "evader":
+        # run to far corner while increasing distance from pursuer
+        best_move = [0, 0]
+        best_score = None
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+            d_escape = dist2(nx, ny, tx, ty)  # prefer farther from chosen corner
+            d_threat = dist2(nx, ny, ox, oy)  # prefer farther from opponent
+            corner_bias = -0.01 * ((nx - tx) * (nx - tx) + (ny - ty) * (ny - ty))
+            # Slightly prefer moves that "fit" direction away from opponent to counter zigzags
+            awayx = 0 if ox == nx else (1 if ox < nx else -1)
+            awayy = 0 if oy == ny else (1 if oy < ny else -1)
+            away_align = 0.05 * (dx * awayx + dy * awayy)
+            score = d_threat + 0.35 * d_escape + away_align + corner_bias
+            if best_score is None or score > best_score:
+                best_score, best_move = score, [dx, dy]
+        return best_move
+
+    # pursuer: chase while limiting overshoot; avoid obstacles naturally via inb()
+    best_move = [0, 0]
+    best_score = None
+    # predict opponent tendency: evader tends to move away from us toward farthest corner
+    # so approximate by moving away from (sx,sy) and toward (tx,ty)
+    # We'll blend two greedy steps to form a predicted target.
+    ax1, ay1 = greedy_step(ox, oy, sx, sy)  # step that would reduce distance to us (actually avoid; invert later)
+    # Instead, predict step that increases distance: use greedy_step from us to opponent? easiest: take away direction by minimizing dist2 to us's negative step
+    # We'll just predict next opponent position by taking the move from current that maximizes distance from us and aligns toward (tx,ty).
+    best_next = (ox, oy)
+    best_next_score = None
+    for dx, dy in deltas:
+        nx, ny = ox + dx, oy + dy
+        if not inb(nx, ny):
+            continue
+        s = dist2(nx, ny, sx, sy) + 0.2 * dist2(nx, ny, tx, ty)
+        if best_next_score is None or s > best_next_score:
+            best_next_score, best_next = s, (nx, ny)
+
+    px, py = best_next
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        d_now = dist2(nx, ny, ox, oy)
+        d_pred = dist2(nx, ny, px, py)
+        # also reduce distance to the midpoint between current and predicted to catch zigzags
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    role = observation.get("self_role", "pursuer")
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def dist2(ax, ay, bx, by):
+        dx = ax - bx
+        dy = ay - by
+        return dx * dx + dy * dy
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    corners = [(0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)]
+
+    if role == "evader":
+        tx, ty = max(corners, key=lambda c: dist2(c[0], c[1], ox, oy))
+        target = (tx, ty)
+        want = -1  # minimize distance to target while maximizing distance from opponent
+        best_move = (0, 0)
+        best_score = None
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+            d_t = dist2(nx, ny, target[0], target[1])
+            d_o = dist2(nx, ny, ox, oy)
+            score = (d_o, -d_t)
+            if best_score is None or score > best_score:
+                best_score, best_move = score, (dx, dy)
+        return [best_move[0], best_move[1]]
+    else:
+        target = (ox, oy)
+        best_move = (0, 0)
+        best_score = None
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if not inb(nx, ny):
+                continue
+            d = dist2(nx, ny, target[0], target[1])
+            score = (-d, -dist2(nx, ny, sx, sy))
+            if best_score is None or score > best_score:
+                best_score, best_move = score, (dx, dy)
+        return [best_move[0], best_move[1]]

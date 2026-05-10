@@ -1,0 +1,141 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    ox, oy = observation["opponent_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = [tuple(c) for c in (observation.get("unclaimed_cells") or [])]
+    selfT = set(tuple(p) for p in (observation.get("self_territory") or []))
+    oppT = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def neigh4(x, y):
+        return [(x+1,y),(x-1,y),(x,y+1),(x,y-1)]
+
+    candidates = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    dirs = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,0),(0,1),(1,-1),(1,0),(1,1)]
+
+    best_targets = []
+    if unclaimed:
+        best_targets = []
+        for (x, y) in unclaimed:
+            if (x, y) in obstacles:
+                continue
+            adj_opp = any((nx, ny) in oppT for nx, ny in neigh4(x, y))
+            adj_self = any((nx, ny) in selfT for nx, ny in neigh4(x, y))
+            # prioritize contested unclaimed adjacent to opponent; otherwise expand adj-self; then reduce distance
+            score = (1000 if adj_opp else 0) + (200 if adj_self else 0) - (abs(x - sx) + abs(y - sy)) - 0.25 * (abs(x - ox) + abs(y - oy))
+            best_targets.append((score, (x, y)))
+        best_targets.sort(key=lambda t: (-t[0], t[1][0], t[1][1]))
+        best_targets = [p for _, p in best_targets[:10]]
+    else:
+        center = (w // 2, h // 2)
+        best_targets = [center, (0, h//2), (w-1, h//2), (w//2, 0), (w//2, h-1), (ox, oy)]
+
+    def target_value(x, y):
+        if (x, y) in obstacles or not inb(x, y):
+            return -10**12
+        in_opp = (x, y) in oppT
+        in_self = (x, y) in selfT
+        # moving into opponent territory gives immediate flip opportunity
+        base = 0
+        if in_opp:
+            base += 600
+        if in_self:
+            base -= 30
+        adj_opp = any((nx, ny) in oppT for nx, ny in neigh4(x, y))
+        adj_unclaimed = (x, y) in unclaimed
+        if adj_opp:
+            base += 120
+        if adj_unclaimed:
+            base += 180
+        # keep pressure toward best target while not suiciding into dense obstacles
+        bt = best_targets[0] if best_targets else (w//2, h//2)
+        base += - (abs(x - bt[0]) + abs(y - bt[1]))
+        base += -0.05 * (abs(x - ox) + abs(y - oy))
+        return base
+
+    def obstacle_penalty(x, y):
+        # slight penalty if next to many obstacles to reduce getting stuck
+        cnt = 0
+        for nx, ny in neigh4(x, y):
+            if not inb(nx, ny):
+                continue
+            if (nx, ny) in obstacles:
+                cnt += 1
+        return -20 * cnt
+
+    # Evaluate immediate moves deterministically
+    best_move = (0, 0)
+    best_val = -10**18
+    tie_x = tie_y = 0
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obstacles:
+            continue
+        val = target_value(nx, ny) + obstacle_penalty(nx, ny)
+        # deterministic tie-break: prefer moves closer to opponent pressure
+        if val > best_val:
+            best_val, best_move = val, (dx, dy)
+            tie_x, tie_y = nx, ny
+        elif val == best_val:
+            dcur = abs(nx - ox) + abs(ny - oy)
+            dbest = abs(tie_x - ox) + abs(tie_y - oy)
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        try:
+            obstacles.add((p[0], p[1]))
+        except:
+            pass
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    resources = observation.get("resources") or []
+    best_resource = None
+    best_rd = 10**9
+    for p in resources:
+        x, y = p[0], p[1]
+        if not inb(x, y) or (x, y) in obstacles:
+            continue
+        d = dist(sx, sy, x, y)
+        if d < best_rd:
+            best_rd = d
+            best_resource = (x, y)
+
+    target = best_resource if (best_resource is not None and (observation.get("remaining_resource_count", 1) or 0) > 0) else (ox, oy)
+
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        d_to_target = dist(nx, ny, target[0], target[1])
+        d_to_opp = dist(nx, ny, ox, oy)
+        score = -d_to_target + 0.2 * d_to_opp
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    if dx < -1 or dx > 1 or dy < -1 or dy > 1:
+        return [0, 0]
+    return [int(dx), int(dy)]

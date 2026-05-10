@@ -1,0 +1,125 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    obstacles = set(map(tuple, observation.get("obstacles", [])))
+    unclaimed = observation.get("unclaimed_cells", []) or []
+    self_terr = observation.get("self_territory", []) or []
+    opp_terr = observation.get("opponent_territory", []) or []
+    inb = lambda x, y: 0 <= x < w and 0 <= y < h
+
+    def man(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    def neighbor_step(tx, ty):
+        best = None
+        # deterministic ordering of candidate moves
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    nx, ny = sx, sy
+                else:
+                    nx, ny = sx + dx, sy + dy
+                if not inb(nx, ny) or (nx, ny) in obstacles:
+                    continue
+                d = man(nx, ny, tx, ty)
+                # prefer reducing distance, then closer to center, then toward opponent (to steal)
+                cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+                center_bias = abs(nx - cx) + abs(ny - cy)
+                steal_bias = -man(nx, ny, ox, oy)
+                key = (d, center_bias, steal_bias, dx, dy)
+                if best is None or key < best[0]:
+                    best = (key, dx, dy)
+        if best is None:
+            return [0, 0]
+        return [int(best[1]), int(best[2])]
+
+    # targets: unclaimed first; then steal near opponent territory
+    if unclaimed:
+        tx, ty = None, None
+        best = None
+        for x, y in unclaimed:
+            if not inb(x, y) or (x, y) in obstacles:
+                continue
+            ds = man(sx, sy, x, y)
+            do = man(ox, oy, x, y)
+            cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+            cd = abs(x - cx) + abs(y - cy)
+            # prioritize quick claim, then center, and avoid giving opponent too-fast access
+            key = (ds, cd, -(do))
+            if best is None or key < best[0]:
+                best = (key, x, y)
+        tx, ty = best[1], best[2]
+        return neighbor_step(tx, ty)
+
+    if opp_terr:
+        # steal by heading to closest opponent-owned cell
+        tx, ty = None, None
+        best = None
+        for x, y in opp_terr:
+            if not inb(x, y) or (x, y) in obstacles:
+                continue
+            ds = man(sx, sy, x, y)
+            do = man(ox, oy, x, y)
+            # if opponent is already far from that cell, we have advantage
+            key = (ds, do)
+            if best is None or key < best[0]:
+                best = (key, x, y)
+        tx, ty = best[1], best[2]
+        return neighbor_step(tx, ty)
+
+    # fallback: move toward center while avoiding obstacles (and not aimlessly staying)
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    tx, ty = int(round(cx)), int(round(cy))
+    if not inb(tx, ty) or (tx, ty) in obstacles:
+        # choose nearest valid center-ish cell deterministically
+        best = None
+        for x in range(w):
+            for y in range(h):
+                if inb(x, y) and (x, y) not in obstacles and (x, y) != (sx, sy):
+                    key = (abs(x - cx) + abs(y - cy), man(sx, sy, x, y))
+                    if best is None or key < best[0]:
+                        best = (key, x, y)
+        if best is None:
+            return [0, 0]
+        tx, ty = best[1], best[2]
+    return neighbor_step(tx, ty)
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", (0, 0))
+    tx, ty = observation.get("opponent_position", (w - 1, h - 1))
+
+    obstacles = set(map(tuple, observation.get("obstacles", []) or []))
+    res = observation.get("resources", []) or []
+    if res:
+        best = None
+        for p in res:
+            x, y = p
+            d = abs(sx - x) + abs(sy - y)
+            if best is None or d < best[0]:
+                best = (d, x, y)
+        _, tx, ty = best
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 0)]
+    best_move = [0, 0]
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        d_t = abs(nx - tx) + abs(ny - ty)
+        d_o = abs(nx - observation.get("opponent_position", (tx, ty))[0]) + abs(ny - observation.get("opponent_position", (tx, ty))[1])
+        center = abs(nx - (w - 1) / 2.0) + abs(ny - (h - 1) / 2.0)
+        score = (-(d_t), d_o, -center)
+        if best_score is None or score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+    return best_move

@@ -1,0 +1,191 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((int(p[0]), int(p[1])))
+
+    selfT = set((int(x), int(y)) for x, y in (observation.get("self_territory") or []))
+    opT = set((int(x), int(y)) for x, y in (observation.get("opponent_territory") or []))
+    unT = set((int(x), int(y)) for x, y in (observation.get("unclaimed_cells") or []))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def neigh(x, y):
+        out = []
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if inside(nx, ny) and (nx, ny) not in obs:
+                out.append((nx, ny))
+        return out
+
+    # Prefer: unclaimed cells adjacent to opponent territory (edge pressure).
+    best = None
+    best_sc = -10**18
+    candidates = list(unT) if unT else []
+
+    # Expand target set with cells adjacent to opponent territory (even if currently unlisted).
+    # (We can still move into them if unclaimed; if not unclaimed, scoring will naturally reduce.)
+    if opT:
+        for px, py in list(opT)[:64]:
+            for nx, ny in neigh(px, py):
+                if (nx, ny) not in selfT and (nx, ny) not in obs and (nx, ny) not in opT:
+                    if (nx, ny) in unT:
+                        candidates.append((nx, ny))
+        if not candidates and unT:
+            candidates = list(unT)
+
+    if not candidates:
+        # Fallback: move toward nearest unclaimed cell; avoid obstacles by considering immediate moves only.
+        candidates = list(unT) if unT else [(sx, sy)]
+
+    seen = set()
+    candidates2 = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            candidates2.append(c)
+        if len(candidates2) > 25:
+            break
+    candidates = candidates2
+
+    # Score: closeness to target, and prefer targets that are "farther" from self (break away) but "near" to opponent.
+    # Also, if opponent territory exists adjacent to target, it increases pressure.
+    for tx, ty in candidates:
+        if (tx, ty) in obs:
+            continue
+        d_me = abs(tx - sx) + abs(ty - sy)
+        d_op = abs(tx - ox) + abs(ty - oy)
+        adj_op = 0
+        for nx, ny in neigh(tx, ty):
+            if (nx, ny) in opT:
+                adj_op += 1
+        # Strongly prefer edge targets; slight bias to not collide with opponent directly.
+        sc = 4 * adj_op - 1.2 * d_me + 0.35 * d_op
+        if sc > best_sc or (sc == best_sc and (tx, ty) < best):
+            best_sc = sc
+            best = (tx, ty)
+
+    if best is None:
+        return [0, 0]
+
+    # Choose immediate move that reduces distance to best, with obstacle/territory safety via deterministic tie-break.
+    bx, by = best
+    best_move = [0, 0]
+    best_ms = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obs:
+            continue
+        d = abs(nx - bx) + abs(ny - by)
+        # If we step into opponent territory, it's beneficial (flips on entry), so reward that.
+        into_op = 1 if (nx, ny) in opT else 0
+        # Slightly penalize stepping into self territory (to avoid wasting on already owned cells).
+        into_self = 1 if (nx, ny) in selfT else 0
+        ms = -d + 5.0 * into_op - 0.8 * into_self
+        if ms > best_ms or (ms == best_ms and [dx, dy] < best_move):
+            best_ms = ms
+            best_move = [dx, dy]
+
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((int(p[0]), int(p[1])))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(a, b, c, d):
+        dx = a - c
+        if dx < 0:
+            dx = -dx
+        dy = b - d
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    resources = observation.get("resources") or []
+    res = []
+    for p in resources:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            rx, ry = int(p[0]), int(p[1])
+            if inside(rx, ry) and (rx, ry) not in obs:
+                res.append((rx, ry))
+
+    unT = observation.get("unclaimed_cells") or []
+    un = set()
+    for p in unT:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if inside(x, y) and (x, y) not in obs:
+                un.add((x, y))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = (0, 0)
+    best_sc = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obs:
+            continue
+        sc = 0
+
+        if res:
+            md = 10**9
+            for rx, ry in res:
+                d = dist(nx, ny, rx, ry)
+                if d < md:
+                    md = d
+            sc += 1000 - md
+
+        if un:
+            if (nx, ny) in un:
+                sc += 500
+            else:
+                md = 10**9
+                for x, y in un:
+                    d = dist(nx, ny, x, y)
+                    if d < md:
+                        md = d
+                sc += 200 - md
+
+        sc += dist(ox, oy, sx, sy) - dist(ox, oy, nx, ny)  # pressure by approaching opponent
+        sc += -2 * dist(ox, oy, nx, ny) * (1 if observation.get("remaining_resource_count", 1) else 1)
+
+        if sc > best_sc:
+            best_sc = sc
+            best_move = (dx, dy)
+
+    dx, dy = best_move
+    if not isinstance(dx, int) or not isinstance(dy, int):
+        dx, dy = 0, 0
+    if dx < -1:
+        dx = -1
+    if dx > 1:
+        dx = 1
+    if dy < -1:
+        dy = -1
+    if dy > 1:
+        dy = 1
+    return [dx, dy]

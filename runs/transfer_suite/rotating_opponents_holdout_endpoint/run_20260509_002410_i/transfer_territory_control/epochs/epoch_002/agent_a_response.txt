@@ -1,0 +1,144 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = observation.get("obstacles", []) or []
+    obs = set((x, y) for x, y in obstacles)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    self_cells = observation.get("self_territory", []) or []
+    opp_cells = observation.get("opponent_territory", []) or []
+    self_set = set((x, y) for x, y in self_cells)
+    opp_set = set((x, y) for x, y in opp_cells)
+    unclaimed = observation.get("unclaimed_cells", []) or []
+    if not unclaimed:
+        unclaimed = [(x, y) for x in range(w) for y in range(h) if (x, y) not in self_set and (x, y) not in opp_set and (x, y) not in obs]
+
+    resources = observation.get("resources", []) or []
+    has_res = len(resources) > 0
+    res_set = set((x, y) for x, y in resources)
+
+    def man(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    def get_scores():
+        sc = observation.get("scores", {}) or {}
+        return sc.get("self", sc.get("me", 0)), sc.get("opponent", sc.get("them", 0))
+
+    score_self, score_opp = get_scores()
+    behind = score_self <= score_opp
+
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    candidates = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = (-(10**18), 0, 0)
+
+    for dx, dy in candidates:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+
+        # Heuristic target: prefer unclaimed that are:
+        # - closer to us than to opponent
+        # - closer to corners (avoid opponent_center_claim pressure)
+        # - reachable soon (one-step move + next distance)
+        val = 0.0
+
+        # Capturing opponent territory if beneficial
+        if (nx, ny) in opp_set:
+            val += 12.0
+            val += (man(nx, ny, ox, oy) - man(sx, sy, ox, oy)) * 0.5
+
+        # Avoid giving opponent easy steals: if moving into an area adjacent to many opp cells, lower val
+        # (cheap proxy: count opp neighbors)
+        neigh = 0
+        for tx, ty in [(nx-1, ny), (nx+1, ny), (nx, ny-1), (nx, ny+1), (nx-1, ny-1), (nx+1, ny+1), (nx-1, ny+1), (nx+1, ny-1)]:
+            if (tx, ty) in opp_set:
+                neigh += 1
+        val -= neigh * 0.9
+
+        # Resource incentive (slight)
+        if (nx, ny) in res_set:
+            val += 2.5
+        if has_res:
+            best_r = min(resources, key=lambda r: abs(r[0]-nx) + abs(r[1]-ny))
+            val += max(0.0, 3.0 - (abs(best_r[0]-nx) + abs(best_r[1]-ny))) * 0.7
+
+        # Target unclaimed scoring
+        # Evaluate only a few nearest unclaimed to keep deterministic and fast
+        dlist = sorted(unclaimed, key=lambda p: man(nx, ny, p[0], p[1]))[:min(12, len(unclaimed))]
+        local = -10**18
+        for tx, ty in dlist:
+            du = man(nx, ny, tx, ty)
+            dop = man(ox, oy, tx, ty)
+            # Corner bias (avoid center)
+            corner_bias = - (abs(tx - 0) + abs(ty - 0) + abs(tx - (w-1)) + abs(ty - (h-1))) * 0.02
+            if (tx, ty) == (nx, ny):
+                corner_bias += 0.3
+            # If behind, be more willing to contest closer
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    obstacles = observation.get("obstacles", []) or []
+    obs = set(obstacles)
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    resources = observation.get("resources", []) or []
+    res = resources[0] if resources else None
+    if resources:
+        best_r = None
+        best_d = 10**18
+        for rx, ry in resources:
+            d = abs(rx - sx) + abs(ry - sy)
+            if d < best_d or (d == best_d and (rx, ry) < best_r):
+                best_d = d
+                best_r = (rx, ry)
+        res = best_r
+
+    scores = observation.get("scores", {}) or {}
+    self_score = scores.get("self", scores.get("me", 0))
+    opp_score = scores.get("opponent", scores.get("them", 0))
+    behind = self_score <= opp_score
+
+    def eval_move(nx, ny):
+        d_to_opp = abs(ox - nx) + abs(oy - ny)
+        if behind:
+            if res is not None:
+                d_to_res = abs(res[0] - nx) + abs(res[1] - ny)
+                return -d_to_res + 0.01 * d_to_opp
+            return 0.01 * d_to_opp
+        return d_to_opp
+
+    best = None
+    best_val = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if (nx, ny) in obs:
+            continue
+        val = eval_move(nx, ny)
+        if val > best_val or (val == best_val and (dx, dy) < best):
+            best_val = val
+            best = (dx, dy)
+
+    if best is None:
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny) and (nx, ny) not in obs:
+                return [dx, dy]
+        return [0, 0]
+    return [best[0], best[1]]

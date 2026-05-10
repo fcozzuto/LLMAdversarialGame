@@ -1,0 +1,150 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+    if not resources:
+        return [0, 0]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def ok(x, y):
+        return inb(x, y) and (x, y) not in obstacles
+
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        dy = ay - by
+        if dx < 0:
+            dx = -dx
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    def step_score(nx, ny):
+        # Higher is better
+        best = -10**18
+        for rx, ry in resources:
+            sd = man(nx, ny, rx, ry)
+            od = man(ox, oy, rx, ry)
+            # Reachability vs opponent
+            gap = od - sd
+            # If we are soon to deny/steal, value increases sharply
+            reach_bias = 0
+            if gap >= 2:
+                reach_bias = 10000
+            elif gap >= 1:
+                reach_bias = 5000
+            elif gap >= 0:
+                reach_bias = 1500
+            # If opponent is much closer, deprioritize but still consider nearest options
+            block_bias = 0
+            if gap < 0:
+                block_bias = -2000 * (-gap)
+            # Encourage shorter path and also a bit of direction away from opponent to avoid immediate contest
+            dist_center = (rx + ry) % 2  # tiny deterministic tie-break signal
+            val = reach_bias + block_bias
+            val += gap * 120 - sd * 6
+            val += (dist_center - ((nx + ny) % 2)) * 2
+            if val > best:
+                best = val
+        # Obstacle proximity penalty to avoid getting stuck in tight regions
+        adj_pen = 0
+        for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (1, 1), (-1, 1), (1, -1)]:
+            tx, ty = nx + dx, ny + dy
+            if inb(tx, ty) and (tx, ty) in obstacles:
+                adj_pen += 7
+        return best - adj_pen
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = [0, 0]
+    best_val = -10**18
+
+    # If we can already guarantee a lead on some resource, prioritize that set
+    # Otherwise, fall back to minimizing our distance while still accounting for opponent.
+    any_lead = False
+    for rx, ry in resources:
+        if man(sx, sy, rx, ry) <= man(ox, oy, rx, ry) - 1:
+            any_lead = True
+            break
+    lead_threshold = 1 if any_lead else 0
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            nx, ny = sx, sy
+        val = step_score(nx, ny)
+
+        # Extra deterministic bias to move toward resources where we have a lead by at least threshold
+        if lead_threshold > 0:
+            lead_best = -10**9
+            for rx, ry in resources:
+                sd = man(nx, ny, rx, ry)
+                od = man(ox, oy, rx, ry)
+                lead_best = max(lead_best, od - sd)
+            if lead_best < lead_threshold:
+                val -= 800
+
+        # Deterministic tie-break: prefer moves that reduce manhattan to opponent and keep parity stable
+        tie = -man(nx, ny, ox, oy) * 0.05 - ((nx + ny) & 1) * 0.01
+        val += tie
+
+        if val > best_val:
+            best_val = val
+            best_move = [nx - sx, ny - sy]
+
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    obs = set(tuple(p) for p in obstacles)
+    if not resources:
+        return [0, 0]
+
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = [0, 0]
+    best_val = -10**18
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obs:
+            continue
+        best_res = -10**18
+        for rx, ry in resources:
+            sd = man(nx, ny, rx, ry)
+            od = man(ox, oy, rx, ry)
+            gap = od - sd  # positive means we are closer
+            val = gap * 200 - sd  # prefer taking/approaching winning resources
+            if gap >= 2:
+                val += 10000
+            elif gap >= 1:
+                val += 3000
+            elif gap < 0:
+                val -= 1500
+            if val > best_res:
+                best_res = val
+        if best_res > best_val or (best_res == best_val and (dx, dy) < tuple(best_move)):
+            best_val = best_res
+            best_move = [dx, dy]
+
+    return best_move

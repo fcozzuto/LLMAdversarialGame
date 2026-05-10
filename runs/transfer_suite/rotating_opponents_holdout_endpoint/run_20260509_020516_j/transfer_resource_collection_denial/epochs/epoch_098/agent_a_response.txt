@@ -1,0 +1,159 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+
+    def to_xy(v):
+        return int(v[0]), int(v[1])
+
+    sx, sy = to_xy(observation.get("self_position", [0, 0]))
+    ox, oy = to_xy(observation.get("opponent_position", [w - 1, h - 1]))
+
+    obstacles = set()
+    for t in observation.get("obstacles") or []:
+        try:
+            x, y = to_xy(t)
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+        except:
+            pass
+
+    resources = []
+    for t in observation.get("resources") or []:
+        try:
+            x, y = to_xy(t)
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                resources.append((x, y))
+        except:
+            pass
+
+    if not resources:
+        return [0, 0]
+
+    def md(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    def score_target(rx, ry):
+        sd = md(sx, sy, rx, ry)
+        od = md(ox, oy, rx, ry)
+        # Higher is better. Prefer being closer, then shorter travel, then more "central" targets.
+        center = - (abs(rx - (w - 1) / 2.0) + abs(ry - (h - 1) / 2.0))
+        return (od - sd) * 1000 - sd * 3 + center * 0.5
+
+    # Pick a target that we are (ideally) closer to than opponent; otherwise maximize advantage score.
+    best = None
+    best_val = -10**18
+    for rx, ry in resources:
+        sd = md(sx, sy, rx, ry)
+        od = md(ox, oy, rx, ry)
+        val = score_target(rx, ry)
+        if od > sd:
+            # Ensure we strongly prefer resources where we can reach sooner.
+            val += 50000
+        if val > best_val:
+            best_val = val
+            best = (rx, ry)
+
+    tx, ty = best
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    # Preferred direction towards target
+    pref_dx = 0 if tx == sx else (1 if tx > sx else -1)
+    pref_dy = 0 if ty == sy else (1 if ty > sy else -1)
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    # Choose best move among valid ones by heuristic after move.
+    best_move = [0, 0]
+    best_move_val = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        # If we are stepping onto the target (or adjacent), this is naturally rewarded.
+        d_to_t = md(nx, ny, tx, ty)
+        d_opp = md(ox, oy, tx, ty)
+        # Opportunistic: if we can't win immediately, at least reduce opponent access by moving toward contested spots.
+        val = -d_to_t * 10 + (d_opp - d_to_t) * 0.2
+        # Obey preference direction deterministically.
+        if dx == pref_dx and dy == pref_dy:
+            val += 100
+        # Small bias away from being stuck near obstacles: penalize moves that reduce available neighbors.
+        neigh = 0
+        for ddx, ddy in moves:
+            ax, ay = nx + ddx, ny + ddy
+            if valid(ax, ay):
+                neigh += 1
+        val += neigh * 0.05
+        if val > best_move_val:
+            best_move_val = val
+            best_move = [dx, dy]
+
+    # If somehow all moves invalid, stay.
+    if best_move is None:
+        return [0, 0]
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [w - 1, h - 1])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obs_set = set()
+    for t in observation.get("obstacles") or []:
+        try:
+            x, y = int(t[0]), int(t[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs_set.add((x, y))
+        except:
+            pass
+
+    resources = []
+    for t in observation.get("resources") or []:
+        try:
+            x, y = int(t[0]), int(t[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obs_set:
+                resources.append((x, y))
+        except:
+            pass
+    if not resources:
+        return [0, 0]
+
+    moves = [(dx, dy) for dy in (-1, 0, 1) for dx in (-1, 0, 1)]
+    def md(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    resources = resources[:12]
+    best_move = (0, 0)
+    best_val = -10**18
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obs_set:
+            continue
+
+        # Evaluate by best target among a small subset.
+        cur_best = -10**18
+        for rx, ry in resources:
+            sd = md(nx, ny, rx, ry)
+            od = md(ox, oy, rx, ry)
+            if sd == 0:
+                val = 10**9
+            else:
+                center = -(abs(rx - (w - 1) / 2.0) + abs(ry - (h - 1) / 2.0))
+                val = (od - sd) * 1000 - sd * 3 + center
+            if val > cur_best:
+                cur_best = val
+
+        # Deterministic tie-break: prefer smaller dx, then smaller dy, then larger cur_best already.
+        if cur_best > best_val or (cur_best == best_val and (dx, dy) < best_move):
+            best_val = cur_best
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

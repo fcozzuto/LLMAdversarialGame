@@ -1,0 +1,149 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obs_set = set()
+    for p in observation.get("obstacles", []) or []:
+        try:
+            x, y = p
+            obs_set.add((int(x), int(y)))
+        except:
+            pass
+
+    sr = str(observation.get("self_role", "")).lower()
+    orr = str(observation.get("opponent_role", "")).lower()
+    self_is_evader = ("evad" in sr) and ("evad" not in orr)
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def in_bounds(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def mobility(x, y):
+        seen = {(x, y)}
+        frontier = [(x, y)]
+        for _ in range(2):
+            nxt = []
+            for cx, cy in frontier:
+                for dx, dy in deltas:
+                    nx, ny = cx + dx, cy + dy
+                    if in_bounds(nx, ny) and (nx, ny) not in obs_set and (nx, ny) not in seen:
+                        seen.add((nx, ny))
+                        nxt.append((nx, ny))
+            frontier = nxt
+            if not frontier:
+                break
+        return len(seen)
+
+    def dist2(a, b, c, d):
+        dx = a - c
+        dy = b - d
+        return dx * dx + dy * dy
+
+    # Prefer corners deterministically as a secondary objective
+    corners = [(0, 0), (w - 1, 0), (w - 1, h - 1), (0, h - 1)]
+    # Choose the corner farthest from opponent (evader) or closest to opponent (pursuer)
+    if self_is_evader:
+        corner = max(corners, key=lambda t: dist2(ox, oy, t[0], t[1]))
+    else:
+        corner = min(corners, key=lambda t: dist2(ox, oy, t[0], t[1]))
+    # If that corner is blocked, fall back to extreme opposite to avoid dead logic
+    if corner in obs_set:
+        corner = max(corners, key=lambda t: (t not in obs_set) and dist2(sx, sy, t[0], t[1]))
+
+    best_move = [0, 0]
+    best_val = None
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not in_bounds(nx, ny) or (nx, ny) in obs_set:
+            continue
+
+        d2 = dist2(nx, ny, ox, oy)
+        mob = mobility(nx, ny)
+
+        # Corner pressure: evader heads to far corner; pursuer tries to align toward a useful corner
+        corner_d2 = dist2(nx, ny, corner[0], corner[1])
+
+        # Small deterministic tie-breaker: lexicographic order by (dx,dy) via comparing sum
+        tie = -(abs(dx) + abs(dy))  # prefer staying/less movement when scores equal
+
+        if self_is_evader:
+            val = d2 + 0.12 * mob - 0.02 * corner_d2 + 1e-6 * tie
+            better = (best_val is None) or (val > best_val)
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or [0, 0]
+    ox, oy = observation.get("opponent_position") or [0, 0]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        try:
+            x, y = p
+            obs.add((int(x), int(y)))
+        except:
+            pass
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    sr = str(observation.get("self_role") or "").lower()
+    orr = str(observation.get("opponent_role") or "").lower()
+    evader = ("evad" in sr) and ("evad" not in orr)
+
+    resources = observation.get("resources") or []
+    res_list = []
+    for p in resources:
+        try:
+            x, y = p
+            res_list.append((int(x), int(y)))
+        except:
+            pass
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def d2(ax, ay, bx, by):
+        dx = ax - bx
+        dy = ay - by
+        return dx * dx + dy * dy
+
+    def best_resource_score(nx, ny):
+        if not res_list:
+            return None
+        best = 10**18
+        for rx, ry in res_list:
+            if inb(rx, ry) and (rx, ry) not in obs:
+                best = min(best, d2(nx, ny, rx, ry))
+        return best if best < 10**18 else None
+
+    best_move = (0, 0)
+    best_val = None
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        opp_dist = d2(nx, ny, ox, oy)
+        val = (-opp_dist) if evader else opp_dist
+
+        rbest = best_resource_score(nx, ny)
+        if rbest is not None:
+            # prefer getting closer to resources (or just use it as tie-break)
+            val += (-rbest if not evader else (rbest // 2))
+
+        if best_val is None or val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    if best_val is None:
+        return [0, 0]
+    return [int(best_move[0]), int(best_move[1])]

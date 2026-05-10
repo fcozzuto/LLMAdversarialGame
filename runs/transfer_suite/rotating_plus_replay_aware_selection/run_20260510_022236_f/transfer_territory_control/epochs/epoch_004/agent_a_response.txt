@@ -1,0 +1,162 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    def to_set(x):
+        s = set()
+        if not x:
+            return s
+        for p in x:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                try:
+                    s.add((int(p[0]), int(p[1])))
+                except:
+                    pass
+        return s
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    obs = to_set(observation.get("obstacles", []))
+    self_t = to_set(observation.get("self_territory", []))
+    opp_t = to_set(observation.get("opponent_territory", []))
+    un = to_set(observation.get("unclaimed_cells", observation.get("unclaimed", [])))
+    res = to_set(observation.get("resources", []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    neighbors = lambda x, y: [(x + dx, y + dy) for dx in (-1, 0, 1) for dy in (-1, 0, 1)]
+
+    # Build deterministic target set: prefer unclaimed adjacent to our territory; else resource; else unclaimed; else opponent cells.
+    frontier = set()
+    if self_t:
+        for (x, y) in self_t:
+            for nx, ny in neighbors(x, y):
+                if inb(nx, ny) and (nx, ny) in un:
+                    frontier.add((nx, ny))
+    if frontier:
+        targets = list(frontier)
+    elif res:
+        targets = list(res)
+    elif un:
+        targets = list(un)
+    elif opp_t:
+        targets = list(opp_t)
+    else:
+        targets = [(ox, oy)]
+
+    # Also include opponent-locked frontier targets (cells adjacent to opponent territory) to enable fast flipping when near.
+    extra = set()
+    if opp_t:
+        for (x, y) in opp_t:
+            for nx, ny in neighbors(x, y):
+                if inb(nx, ny) and (nx, ny) in un:
+                    extra.add((nx, ny))
+    if extra:
+        for t in list(extra)[:10]:
+            targets.append(t)
+
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    best = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+
+        s = 0
+        if (nx, ny) in self_t:
+            s += 8
+        if (nx, ny) in un:
+            s += 55
+        if (nx, ny) in opp_t:
+            s += 220  # entering opponent territory is a strong swing
+
+        # distance to nearest target (frontier/claims)
+        dmin = 10**9
+        for tx, ty in targets:
+            d = man((nx, ny), (tx, ty))
+            if d < dmin:
+                dmin = d
+        if dmin < 10**9:
+            s += 70 - 10 * dmin
+
+        # mild pressure towards opponent to keep territory contested
+        s += -0.8 * man((nx, ny), (ox, oy))
+
+        # deterministic tie-break preference: stay still last
+        s += -0.01
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    def to_xy_set(v):
+        s = set()
+        if not v:
+            return s
+        for p in v:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                try:
+                    s.add((int(p[0]), int(p[1])))
+                except:
+                    pass
+        return s
+
+    obs = to_xy_set(observation.get("obstacles"))
+    res = to_xy_set(observation.get("resources"))
+    un = to_xy_set(observation.get("unclaimed_cells", observation.get("unclaimed")))
+    st = to_xy_set(observation.get("self_territory"))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def mindist(x, y, S):
+        d = 10**9
+        for a, b in S:
+            dd = abs(a - x) + abs(b - y)
+            if dd < d:
+                d = dd
+        return d if d != 10**9 else 0
+
+    best = None
+    best_sc = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        sc = 0
+        if (nx, ny) in res:
+            sc += 1000
+        elif (nx, ny) in un:
+            sc += 80
+        elif (nx, ny) in st:
+            sc += 20
+        dres = mindist(nx, ny, res) if res else 0
+        if res:
+            sc += -2 * dres
+        dun = mindist(nx, ny, un) if un else 0
+        if un:
+            sc += -0.5 * dun
+        dop = abs(nx - ox) + abs(ny - oy)
+        sc += min(40, dop)
+        if dop <= 2:
+            sc -= 100
+        if best is None or sc > best_sc:
+            best_sc = sc
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

@@ -1,0 +1,140 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    sx, sy = int(sx), int(sy)
+    self_terr = set((int(x), int(y)) for x, y in (observation.get("self_territory", []) or []))
+    opp_terr = set((int(x), int(y)) for x, y in (observation.get("opponent_territory", []) or []))
+    unclaimed = set((int(x), int(y)) for x, y in (observation.get("unclaimed_cells", []) or []))
+    obstacles = set((int(x), int(y)) for x, y in (observation.get("obstacles", []) or []))
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    ox, oy = int(ox), int(oy)
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    dirs4 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+    def dist(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    opp_centroid = None
+    if opp_terr:
+        xs = [p[0] for p in opp_terr]
+        ys = [p[1] for p in opp_terr]
+        opp_centroid = (sum(xs) / len(xs), sum(ys) / len(ys))
+    elif unclaimed:
+        # fallback to their position
+        opp_centroid = (ox, oy)
+    else:
+        opp_centroid = (ox, oy)
+
+    def adj_to_self(x, y):
+        c = 0
+        for dx, dy in dirs4:
+            if (x + dx, y + dy) in self_terr:
+                c += 1
+        return c
+
+    def min_dist_to_set(x, y, S):
+        if not S:
+            return 10**9
+        best = 10**9
+        for px, py in S:
+            d = abs(px - x) + abs(py - y)
+            if d < best: best = d
+        return best
+
+    # Prefer moving onto opponent territory if it increases control (flip enabled).
+    # Otherwise, expand to the nearest unclaimed that is closer to opp than we are,
+    # while avoiding getting too deep into their zone unless we're about to flip.
+    cur_d_opp = dist(sx, sy, sx, sy) + dist(sx, sy, ox, oy)
+    best = (-10**18, 0, 0)
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        on_opp = (nx, ny) in opp_terr
+        on_un = (nx, ny) in unclaimed or (nx, ny) not in self_terr and (nx, ny) not in opp_terr
+        a_self = adj_to_self(nx, ny)
+
+        d_to_opp = dist(nx, ny, ox, oy)
+        d_to_opp_cent = abs(nx - opp_centroid[0]) + abs(ny - opp_centroid[1]) if opp_centroid else d_to_opp
+
+        # proximity targets: nearest unclaimed and nearest opponent cell
+        d_un = min_dist_to_set(nx, ny, unclaimed if unclaimed else opp_terr)
+        d_opp_cells = min_dist_to_set(nx, ny, opp_terr)
+
+        # Heuristic score
+        score = 0
+        score += 3.2 * a_self
+        score += 0.7 * (1 if on_un else 0)
+        score += (18 if on_opp else 0)  # direct flip
+        score += (6 / (1 + d_opp_cells))  # being near opponent territory
+        # Don’t drift away from conflict once ahead; otherwise gently approach.
+        score += (0.9 if d_to_opp < cur_d_opp else -0.6)
+        # Avoid marching into far-away open areas; focus where they are.
+        score += 1.2 * (1 / (1 + d_to_opp_cent))
+        # Small bias to reduce risk of hitting obstacles repeatedly: prefer not to move "outward
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set((int(x), int(y)) for x, y in (observation.get("obstacles", []) or []))
+    resources = observation.get("resources", []) or []
+    res_cells = []
+    for p in resources:
+        try:
+            x, y = p
+            x, y = int(x), int(y)
+            if 0 <= x < w and 0 <= y < h:
+                res_cells.append((x, y))
+        except:
+            pass
+
+    moves = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def man(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    candidates = []
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if inside(nx, ny):
+            candidates.append((dx, dy, nx, ny))
+
+    if not candidates:
+        for dx, dy in moves:
+            nx, ny = sx + dx, sy + dy
+            if 0 <= nx < w and 0 <= ny < h:
+                return [dx, dy]
+        return [0, 0]
+
+    target = None
+    best = None
+    for rx, ry in res_cells:
+        d = man(sx, sy, rx, ry)
+        if best is None or d < best:
+            best = d
+            target = (rx, ry)
+
+    best_score = None
+    best_move = (0, 0)
+    for dx, dy, nx, ny in candidates:
+        d_opp = man(nx, ny, ox, oy)
+        d_res = man(nx, ny, target[0], target[1]) if target else 0
+        score = 2 * d_opp - (d_res if target else 0)
+        if best_score is None or score > best_score or (score == best_score and (dx, dy) < best_move):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

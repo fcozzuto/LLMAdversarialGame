@@ -1,0 +1,45 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    res = observation.get("resources") or []
+    targets = []
+    for r in res:
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            targets.append((r[0], r[1]))
+
+    if targets:
+        tx, ty = min(targets, key=lambda p: (abs(p[0] - sx) + abs(p[1] - sy), p[0], p[1]))
+    else:
+        tx, ty = ox, oy
+
+    deltas = [(0, 0), (0, -1), (1, 0), (0, 1), (-1, 0), (1, -1), (1, 1), (-1, 1), (-1, -1)]
+    best = None
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+        dist = abs(nx - tx) + abs(ny - ty)
+        score = (dist, abs((sx + dx) - ox) + abs((sy + dy) - oy), dx, dy)
+        if best is None or score < best[0]:
+            best = (score, dx, dy)
+
+    if best is None:
+        for dx, dy in deltas:
+            nx, ny = sx + dx, sy + dy
+            if inside(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+
+    return [best[1], best[2]]

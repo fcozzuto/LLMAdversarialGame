@@ -1,0 +1,138 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = {(p[0], p[1]) for p in (observation.get("obstacles") or [])}
+    self_set = {(p[0], p[1]) for p in (observation.get("self_territory") or [])}
+    opp_set = {(p[0], p[1]) for p in (observation.get("opponent_territory") or [])}
+    unclaimed = {(p[0], p[1]) for p in (observation.get("unclaimed_cells") or [])}
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def inb(x, y):
+        return inside(x, y)
+
+    def dist(a, b):
+        dx = a[0] - b[0]
+        dy = a[1] - b[1]
+        return dx * dx + dy * dy
+
+    # Build a deterministic "attack front": unclaimed cells adjacent to opponent territory; if none, use opp territory cells.
+    attack_targets = []
+    for (ox, oy) in opp_set:
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                nx, ny = ox + dx, oy + dy
+                if (nx, ny) in unclaimed and inb(nx, ny):
+                    attack_targets.append((nx, ny))
+    if not attack_targets:
+        attack_targets = [p for p in opp_set if inb(p[0], p[1]]]
+
+    # Tie-break preference: prefer closer to attack target; otherwise prefer immediate flips/capture.
+    best = None
+    best_score = -10**18
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        cell_score = 0
+        if (nx, ny) in opp_set:
+            cell_score += 30  # immediate counterclaim/flip
+        elif (nx, ny) in unclaimed:
+            cell_score += 10  # expand into neutral
+        elif (nx, ny) in self_set:
+            cell_score -= 2   # discourage looping on own territory
+
+        # Distance component to the best deterministic target
+        if attack_targets:
+            # deterministic min over targets
+            # slight bias to reduce swapping by sorting by coords once
+            # (sorted list creation is deterministic and bounded)
+            if len(attack_targets) > 1:
+                # avoid sorting every move; keep it minimal by using one-time local copy
+                pass
+        # Compute min dist without sorting: deterministic iteration
+        mind = 10**18
+        for t in attack_targets:
+            d = dist((nx, ny), t)
+            if d < mind:
+                mind = d
+        # Convert squared-distance to a score; smaller is better
+        if mind < 10**18:
+            cell_score += 1000 // (1 + mind)
+
+        # Mild obstacle/edge discouragement via bounds already in inb; add preference for advancing toward top-left in case of ties
+        cell_score += (-nx - ny) * 0.001
+
+        if cell_score > best_score:
+            best_score = cell_score
+            best = (dx, dy)
+        elif cell_score == best_score and best is not None:
+            # deterministic tie-break: smaller (dx,dy) lexicographically
+            if (dx, dy) < best:
+                best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return [best[0], best[1]]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    ox, oy = observation.get("opponent_position", (sx, sy))
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    resources = observation.get("resources") or []
+    res = []
+    for p in resources:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            res.append((p[0], p[1]))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def dsq(a, b):
+        dx = a[0] - b[0]
+        dy = a[1] - b[1]
+        return dx * dx + dy * dy
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    target = None
+    if res:
+        target = min(res, key=lambda p: dsq((sx, sy), p))
+
+    best = None
+    best_score = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+        if target is not None:
+            score = -dsq((nx, ny), target) + 0.05 * dsq((nx, ny), (ox, oy))
+        else:
+            score = dsq((nx, ny), (ox, oy))
+        if score > best_score or (score == best_score and (dx, dy) < best):
+            best_score = score
+            best = (dx, dy)
+
+    if best is not None:
+        return [best[0], best[1]]
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if inside(nx, ny):
+            return [dx, dy]
+    return [0, 0]

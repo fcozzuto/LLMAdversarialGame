@@ -1,0 +1,85 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or [0, 0]
+    ox, oy = observation.get("opponent_position") or [0, 0]
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    self_role = (observation.get("self_role") or "").lower()
+    opp_role = (observation.get("opponent_role") or "").lower()
+    def pursuer(r): return ("pursuer" in r) or ("chaser" in r) or ("hunter" in r) or ("catcher" in r)
+    self_p, opp_p = pursuer(self_role), pursuer(opp_role)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    # deterministic tie-breaking: smaller dx, then smaller dy
+    moves.sort(key=lambda d: (d[0], d[1]))
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def dist2(x1, y1, x2, y2):
+        dx, dy = x1 - x2, y1 - y2
+        return dx * dx + dy * dy
+
+    best_res = None
+    res = observation.get("resources") or []
+    if isinstance(res, dict):
+        res_iter = list(res.values())
+    else:
+        res_iter = res
+    nearest = None
+    bestd = 10**18
+    for r in res_iter:
+        if isinstance(r, dict) and "position" in r:
+            p = r["position"]
+        else:
+            p = r
+        if p and isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                d = dist2(sx, sy, x, y)
+                if d < bestd:
+                    bestd = d
+                    nearest = (x, y)
+    if nearest:
+        best_res = nearest
+
+    if self_p and not opp_p:
+        target_is_opponent = True
+    elif opp_p and not self_p:
+        target_is_opponent = False
+    else:
+        target_is_opponent = True if best_res is None else False
+
+    # score candidates
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        if best_res is not None and not target_is_opponent:
+            # move toward nearest resource
+            tdx, tdy = best_res
+            sc = -dist2(nx, ny, tdx, tdy)
+        else:
+            # move relative to opponent
+            dcur = dist2(sx, sy, ox, oy)
+            dnew = dist2(nx, ny, ox, oy)
+            if self_p:
+                sc = (dcur - dnew) * 1000 - dist2(nx, ny, ox, oy)
+            else:
+                sc = (dnew - dcur) * 1000 + dist2(nx, ny, ox, oy)
+        # deterministic maximize
+        if best_score is None or sc > best_score or (sc == best_score and (dx, dy) < best_move):
+            best_score = sc
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

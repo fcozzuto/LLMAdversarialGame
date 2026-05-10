@@ -1,0 +1,147 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", (0, 0))
+    sx, sy = int(sx), int(sy)
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    ox, oy = int(ox), int(oy)
+
+    self_terr = set((int(x), int(y)) for x, y in (observation.get("self_territory", []) or []))
+    opp_terr = set((int(x), int(y)) for x, y in (observation.get("opponent_territory", []) or []))
+    unclaimed = set((int(x), int(y)) for x, y in (observation.get("unclaimed_cells", []) or []))
+    obstacles = set((int(x), int(y)) for x, y in (observation.get("obstacles", []) or []))
+
+    dirs8 = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    dirs4 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def manhattan(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    # Opponent "pressure": nearest opponent cell that has an adjacent unclaimed cell (i.e., likely frontier)
+    best_target = None
+    best_d = 10**9
+    if opp_terr and unclaimed:
+        for px, py in opp_terr:
+            for dx, dy in dirs4:
+                ux, uy = px + dx, py + dy
+                if (ux, uy) in unclaimed:
+                    d = manhattan(sx, sy, px, py)
+                    if d < best_d:
+                        best_d = d
+                        best_target = (px, py)
+                    break
+
+    # Fallback: nearest opponent cell
+    if best_target is None and opp_terr:
+        px, py = min(opp_terr, key=lambda p: (manhattan(sx, sy, p[0], p[1]), p[1], p[0]))
+        best_target = (px, py)
+
+    # If nothing else, grab unclaimed
+    if best_target is None and unclaimed:
+        ux, uy = min(unclaimed, key=lambda p: (manhattan(sx, sy, p[0], p[1]), p[1], p[0]))
+        best_target = (ux, uy)
+
+    tx, ty = best_target if best_target is not None else (sx, sy)
+
+    def score_cell(x, y):
+        # Prefer expansion into unclaimed; punish stepping into opponent territory unless it reduces distance
+        if (x, y) in obstacles:
+            return -10**6
+        cell = 1 if (x, y) in self_terr else (-1 if (x, y) in opp_terr else 0)
+        adj_unclaimed = 0
+        adj_opp = 0
+        adj_self = 0
+        for dx, dy in dirs4:
+            nx, ny = x + dx, y + dy
+            if not inb(nx, ny):
+                continue
+            if (nx, ny) in unclaimed:
+                adj_unclaimed += 1
+            elif (nx, ny) in opp_terr:
+                adj_opp += 1
+            elif (nx, ny) in self_terr:
+                adj_self += 1
+        dist = manhattan(x, y, tx, ty)
+        # Main heuristic: expansion potential + controlled approach to pressure target
+        s = 3.5 * adj_unclaimed + 1.0 * adj_self - 2.2 * adj_opp
+        # Direct cell bonus/penalty
+        if (x, y) in opp_terr:
+            s -= 4.0
+            if dist < manhattan(sx, sy, tx, ty):
+                s += 3.0  # allow conquest when it gets us closer
+        if (x, y) in unclaimed:
+            s
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (w - 1, h - 1))
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obs = observation.get("obstacles", []) or []
+    obst = set((int(x), int(y)) for x, y in obs)
+
+    resources = observation.get("resources", []) or []
+    res = [(int(x), int(y)) for x, y in resources]
+
+    unclaimed = observation.get("unclaimed_cells", []) or []
+    uc = set((int(x), int(y)) for x, y in unclaimed)
+
+    s_terr = set((int(x), int(y)) for x, y in (observation.get("self_territory", []) or []))
+    o_terr = set((int(x), int(y)) for x, y in (observation.get("opponent_territory", []) or []))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def ok(nx, ny):
+        return inb(nx, ny) and (nx, ny) not in obst
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+    best = (10**9, 0, (0, 0))
+
+    # Prefer expanding to unclaimed adjacent to our territory; otherwise near resources; otherwise toward center.
+    targets = []
+    if s_terr and uc:
+        for x, y in s_terr:
+            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                t = (x + dx, y + dy)
+                if t in uc:
+                    targets.append(t)
+    if not targets and res:
+        targets = res
+    if not targets:
+        targets = [(w // 2, h // 2)]
+
+    # If opponent is close, slightly bias away.
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+        # Distance to best target
+        md = 10**9
+        for tx, ty in targets:
+            d = abs(nx - tx) + abs(ny - ty)
+            if d < md:
+                md = d
+        # Penalty for moving near opponent territory/cell if available
+        opp_pen = 0
+        if o_terr:
+            for px, py in o_terr:
+                d2 = abs(nx - px) + abs(ny - py)
+                if d2 <= 2:
+                    opp_pen += (3 - d2)
+        d_op = abs(nx - ox) + abs(ny - oy)
+        opp_pen += (0 if d_op >= 4 else (4 - d_op))
+
+        # Prefer smaller md, then smaller opp_pen, then deterministic tie-break on dx,dy
+        key = (md, opp_pen, dx, dy)
+        if key < best:
+            best = key
+
+    return [best[2], best[3]]

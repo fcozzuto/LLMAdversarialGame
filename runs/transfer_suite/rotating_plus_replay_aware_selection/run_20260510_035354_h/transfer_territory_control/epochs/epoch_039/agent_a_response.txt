@@ -1,0 +1,126 @@
+def choose_move(observation):
+    ax, ay = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    obstacles = observation.get("obstacles") or []
+    obs = set((x, y) for x, y in obstacles if inb(x, y))
+    my_set = set(tuple(p) for p in (observation.get("self_territory") or []) if inb(p[0], p[1]))
+    op_set = set(tuple(p) for p in (observation.get("opponent_territory") or []) if inb(p[0], p[1]))
+    un_set = set(tuple(p) for p in (observation.get("unclaimed_cells") or []) if inb(p[0], p[1]))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    def dist_cheb(p, q):
+        dx = abs(p[0] - q[0]); dy = abs(p[1] - q[1])
+        return dx if dx > dy else dy
+
+    # Precompute nearest distances from current position (cheap, deterministic).
+    un_list = list(un_set)
+    op_list = list(op_set)
+    if not un_list: un_list = [(ax, ay)]
+    if not op_list: op_list = [(ax, ay)]
+
+    best = None
+    bestv = None
+    # Evaluate each move with a small lookahead scoring (no randomness).
+    for dx, dy in moves:
+        nx, ny = ax + dx, ay + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            nx, ny = ax, ay
+            dx, dy = 0, 0
+
+        target_un = 10**9
+        for tx, ty in un_list[:40]:
+            d = dist_cheb((nx, ny), (tx, ty))
+            if d < target_un: target_un = d
+
+        target_op = 10**9
+        for ox, oy in op_list[:40]:
+            d = dist_cheb((nx, ny), (ox, oy))
+            if d < target_op: target_op = d
+
+        # Immediate payoff: capturing/expanding territory.
+        imm = 0
+        if (nx, ny) in un_set: imm += 12
+        elif (nx, ny) in op_set: imm += 8
+        elif (nx, ny) in my_set: imm += 3
+
+        # Strategic bias: expand toward unclaimed while not getting trapped right next to opponent.
+        # (Counterclaimers often contest borders; staying slightly away can improve overall spread.)
+        spread = -2 * target_un
+        border = 2 if target_op >= 3 else -3 * (3 - target_op)
+
+        # Tiny deterministic lookahead: consider one more step in best direction for unclaimed.
+        nx2, ny2 = nx, ny
+        best_dir = (0, 0)
+        for ddx, ddy in moves:
+            tx2, ty2 = nx + ddx, ny + ddy
+            if not inb(tx2, ty2) or (tx2, ty2) in obs:
+                continue
+            d2 = dist_cheb((tx2, ty2), (un_list[0][0], un_list[0][1]))
+            # Use nearest-unclaimed heuristic: pick move minimizing distance to the closest unclaimed overall.
+            # Approx: compare to current target_un by sampling a few unclaimed points.
+            d2_best = dist_cheb((tx2, ty2), un_list[0])
+            for ux, uy in un_list[1:8]:
+                dd = dist_cheb((tx2, ty2), (ux, uy))
+                if dd < d2_best: d2_best = dd
+            if d2_best < target_un:
+                nx2, ny2 = tx2, ty2
+                best_dir = (ddx, ddy)
+                target_un = d2_best
+        la = -target_un
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    ax, ay = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for o in obstacles:
+        try:
+            x, y = o
+            if inb(x, y): obs.add((x, y))
+        except: 
+            pass
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2; dx = -dx if dx < 0 else dx
+        dy = y1 - y2; dy = -dy if dy < 0 else dy
+        return dx if dx > dy else dy
+
+    un_list = observation.get("unclaimed_cells") or []
+    un = []
+    for p in un_list:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if inb(x, y) and (x, y) not in obs:
+                un.append((x, y))
+    if not un:
+        un = [observation.get("opponent_position", (ax, ay))]
+
+    opx, opy = observation.get("opponent_position", (ax, ay))
+    best = (0, 0)
+    bestv = -10**18
+
+    for dx, dy in moves:
+        nx, ny = ax + dx, ay + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            nx, ny = ax, ay
+            dx, dy = 0, 0
+        d_un = min(cheb(nx, ny, x, y) for x, y in un[:25])
+        d_op = cheb(nx, ny, opx, opy)
+        v = -d_un * 3 - d_op
+        if observation.get("scores") is not None:
+            my = 0
+            try: my = observation["scores"].get("self", 0) or observation["scores"].get(0, 0)
+            except: my = 0
+            v += my * 0
+        if v > bestv:
+            bestv = v
+            best = (dx, dy)
+
+    return [best[0], best[1]]

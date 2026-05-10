@@ -1,0 +1,142 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = {(p[0], p[1]) for p in (observation.get("obstacles") or [])}
+    self_territory = {(p[0], p[1]) for p in (observation.get("self_territory") or [])}
+    opp_territory = {(p[0], p[1]) for p in (observation.get("opponent_territory") or [])}
+    unclaimed = [(p[0], p[1]) for p in (observation.get("unclaimed_cells") or [])]
+    myc = observation.get("self_territory_count", len(self_territory))
+    opc = observation.get("opponent_territory_count", len(opp_territory))
+    behind = myc < opc
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def cheb(a, b):
+        ax, ay = a; bx, by = b
+        dx, dy = ax - bx, ay - by
+        return dx * dx + dy * dy
+
+    targets = unclaimed if unclaimed else list(opp_territory) if opp_territory else [(sx, sy)]
+    opp_list = list(opp_territory)
+    un_list = targets
+
+    # quick nearest distances from current position
+    best_un = 10**9
+    for p in un_list:
+        d = cheb((sx, sy), p)
+        if d < best_un:
+            best_un = d
+    best_opp = 10**9
+    for p in opp_list:
+        d = cheb((sx, sy), p)
+        if d < best_opp:
+            best_opp = d
+
+    # choose move via deterministic local scoring
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best_move = (0, 0)
+    best_score = -10**18
+
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        cell = (nx, ny)
+        in_opp = cell in opp_territory
+        in_self = cell in self_territory
+        # distance to nearest unclaimed/opp (un_list already set)
+        d_un = min(cheb(cell, p) for p in un_list) if un_list else 0
+        d_opp = min((cheb(cell, p) for p in opp_list), default=best_opp)
+
+        # frontier bias: prefer leaving own territory only when it improves unclaimed progress
+        leaving = (not in_self)
+        adj_opp = False
+        for adx in (-1, 0, 1):
+            for ady in (-1, 0, 1):
+                if adx == 0 and ady == 0:
+                    continue
+                if (nx + adx, ny + ady) in opp_territory:
+                    adj_opp = True
+                    break
+            if adj_opp:
+                break
+
+        score = 0.0
+        # primary objective: get closer to unclaimed
+        score += -1.2 * d_un
+        # avoid opponent unless we are behind (then allow controlled incursions)
+        if in_opp:
+            score += (-9000.0 if not behind else -450.0)
+        else:
+            score += 0.35 * d_opp  # keep distance from their territory when possible
+        # staying in own territory is usually safe
+        score += (18.0 if in_self else 0.0)
+        # but don't be too static; if behind, encourage crossing into adjacent opp to expand
+        score += (30.0 if (behind and (adj_opp or in_opp)) else 0.0)
+        # slight preference to move toward board center to reduce being cornered
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        score += -0.02 * cheb(cell, (cx, cy))
+        # small penalty for leaving unclaimed distance worsening
+        if best_un < 10**9:
+            cur_un_est = best_un
+            # compare squared distances from current to unclaimed
+            score += (-10.0 if d_un > cur_un_est else 0.0)
+        # deterministic tie-break: fixed move order already
+        if score > best_score:
+            best_score = score
+            best_move = (dx, dy)
+
+
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation.get("self_position", (0, 0))
+    w = observation.get("grid_width", 0)
+    h = observation.get("grid_height", 0)
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if p is not None and len(p) >= 2:
+            obs.add((p[0], p[1]))
+
+    resources = observation.get("resources") or []
+    targets = []
+    for p in resources:
+        if p is not None and len(p) >= 2:
+            targets.append((p[0], p[1]))
+
+    if not targets:
+        op = observation.get("opponent_position")
+        if op is not None and len(op) >= 2:
+            targets = [(op[0], op[1])]
+        else:
+            targets = [(sx, sy)]
+
+    def best_score(x, y):
+        best = None
+        for tx, ty in targets:
+            d = (x - tx) * (x - tx) + (y - ty) * (y - ty)
+            if best is None or d < best:
+                best = d
+        if best is None:
+            return 0
+        return -best
+
+    deltas = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = -10**18
+    best_mv = (0, 0)
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not (0 <= nx < w and 0 <= ny < h):
+            continue
+        if (nx, ny) in obs:
+            continue
+        sc = best_score(nx, ny)
+        if sc > best:
+            best = sc
+            best_mv = (dx, dy)
+
+    return [best_mv[0], best_mv[1]]

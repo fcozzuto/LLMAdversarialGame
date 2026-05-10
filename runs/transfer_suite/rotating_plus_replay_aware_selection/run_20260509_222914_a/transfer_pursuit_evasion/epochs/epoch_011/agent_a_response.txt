@@ -1,0 +1,148 @@
+def choose_move(observation):
+    w = int(observation["grid_width"]); h = int(observation["grid_height"])
+    x, y = observation["self_position"]; ox, oy = observation["opponent_position"]
+    self_role = (observation.get("self_role") or "").lower()
+    opponent_role = (observation.get("opponent_role") or "").lower()
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def cheb(ax, ay, bx, by):
+        dx = ax - bx; dy = ay - by
+        return abs(dx) if abs(dx) > abs(dy) else abs(dy)
+
+    def in_bounds(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def obst_pen(nx, ny):
+        pen = 0
+        for (px, py) in obstacles:
+            d = cheb(nx, ny, px, py)
+            if d == 0: pen += 1000
+            elif d == 1: pen += 8
+            elif d == 2: pen += 2
+        return pen
+
+    def best_opponent_response(tnx, tny):
+        best = None
+        bestd = None
+        opp_is_pursuer = "pursuer" in opponent_role or ("evader" not in opponent_role and "pursuer" in (observation.get("environment_name") or "").lower())
+        if not opp_is_pursuer:
+            # If opponent isn't a pursuer, just assume they try to maximize distance (deterministic fallback).
+            bestd = -1
+        else:
+            bestd = 10**9
+        for ddx, ddy in moves:
+            nox = ox + ddx; noy = oy + ddy
+            if not in_bounds(nox, noy):
+                continue
+            d = cheb(nox, noy, tnx, tny)
+            if opp_is_pursuer:
+                if d < bestd:
+                    bestd = d; best = (ddx, ddy)
+            else:
+                if d > bestd:
+                    bestd = d; best = (ddx, ddy)
+        if best is None:
+            return [0, 0]
+        return list(best)
+
+    is_evader = "evader" in self_role
+    best_move = None
+
+    if not is_evader:
+        # Pursuer: minimize distance; avoid obstacles; break ties deterministically toward decreasing x then y.
+        best_score = None
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if not in_bounds(nx, ny):
+                continue
+            d = cheb(nx, ny, ox, oy)
+            score = (d, obst_pen(nx, ny), nx, ny)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_move = [dx, dy]
+    else:
+        # Evader: maximize predicted distance after opponent's likely response; avoid obstacles.
+        best_score = None
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if not in_bounds(nx, ny):
+                continue
+            # Predict opponent response deterministically based on opponent_role.
+            odx, ody = best_opponent_response(nx, ny)
+            nox, noy = ox + odx, oy + ody
+            d_after = cheb(nox, noy, nx, ny)
+            score = (-d_after, obst_pen(nx, ny), -nx, -ny)  # maximize distance; then stay away from obstacles
+            if best_score is None or score < best_score:
+                best_score = score
+                best_move = [dx, dy]
+
+    if best_move is None:
+        return
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation["grid_width"])
+    h = int(observation["grid_height"])
+    x, y = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            obstacles.add((int(p[0]), int(p[1])))
+
+    resources = observation.get("resources") or []
+    res = []
+    for r in resources:
+        if r and len(r) >= 2:
+            rx, ry = int(r[0]), int(r[1])
+            if 0 <= rx < w and 0 <= ry < h and (rx, ry) not in obstacles:
+                res.append((rx, ry))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def step_free(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def dist_cheb(a, b, c, d):
+        dx = a - c
+        dy = b - d
+        return abs(dx) if abs(dx) > abs(dy) else abs(dy)
+
+    opp_toward = True
+    scores = observation.get("scores") or {}
+    if "opponent_score" in scores and "self_score" in scores:
+        try:
+            opp_toward = scores["opponent_score"] <= scores["self_score"]
+        except:
+            opp_toward = True
+
+    best = (0, 0)
+    best_val = None
+
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if not step_free(nx, ny):
+            continue
+
+        if res:
+            # Go to nearest resource (slightly prefer those far from opponent)
+            dres = min(dist_cheb(nx, ny, rx, ry) for rx, ry in res)
+            dop = dist_cheb(nx, ny, ox, oy)
+            val = dres * 10 - dop * 2
+        else:
+            # No visible resources: either approach or keep distance deterministically
+            dop = dist_cheb(nx, ny, ox, oy)
+            val = dop if opp_toward else -dop
+
+        if best_val is None or val < best_val:
+            best_val = val
+            best = [dx, dy]
+
+    return [int(best[0]), int(best[1])]

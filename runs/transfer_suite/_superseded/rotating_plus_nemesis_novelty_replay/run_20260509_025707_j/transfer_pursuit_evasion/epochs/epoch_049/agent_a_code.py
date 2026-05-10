@@ -1,0 +1,50 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for o in observation.get("obstacles") or []:
+        if isinstance(o, (list, tuple)) and len(o) >= 2:
+            x, y = int(o[0]), int(o[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    role = (observation.get("self_role") or "").lower()
+    evade = ("evader" in role) or ("runner" in role) or ("evasion" in role) or ("evasive" in role)
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def man(x1, y1, x2, y2):
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    best = None
+    best_val = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            continue
+        d = man(nx, ny, ox, oy)
+        diag = 1 if (dx != 0 and dy != 0) else 0
+        stay = 1 if (dx == 0 and dy == 0) else 0
+        # Deterministic tie-break: prefer diagonal, then not-stay, then lexicographic by dirs order.
+        if evade:
+            val = (d, diag, -stay)
+            if best is None or val > best_val:
+                best = (dx, dy)
+                best_val = val
+        else:
+            val = (-d, diag, -stay)
+            if best is None or val > best_val:
+                best = (dx, dy)
+                best_val = val
+
+    if best is None:
+        return [0, 0]
+    return [int(best[0]), int(best[1])]

@@ -1,0 +1,129 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (w - 1, h - 1)
+
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2 and isinstance(p[0], int) and isinstance(p[1], int):
+            if inside(p[0], p[1]):
+                obstacles.add((p[0], p[1]))
+
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    dirs4 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+    # Build quick frontier targets from our territory edges and unclaimed cells nearby.
+    target_edges = set()
+    for x, y in self_terr:
+        for dx, dy in dirs4:
+            nx, ny = x + dx, y + dy
+            if inside(nx, ny) and (nx, ny) not in obstacles:
+                if (nx, ny) not in self_terr:
+                    target_edges.add((nx, ny))
+    if not target_edges:
+        # Fallback: pick some unclaimed near us
+        if unclaimed:
+            ux, uy = sx, sy
+            best = None
+            for px, py in unclaimed:
+                if not inside(px, py) or (px, py) in obstacles:
+                    continue
+                d = abs(px - ux) + abs(py - uy)
+                score = d + 0.01 * (px + py)
+                if best is None or score < best[0]:
+                    best = (score, px, py)
+            target = (best[1], best[2]) if best else (sx, sy)
+        else:
+            target = (ox, oy)
+    else:
+        # Prefer attacking opponent-owned border if close; otherwise expand into unclaimed.
+        opp_border = [p for p in target_edges if p in opp_terr]
+        if opp_border:
+            # choose closest border cell to opponent (likely flip on reach)
+            target = min(opp_border, key=lambda p: (abs(p[0] - ox) + abs(p[1] - oy), abs(p[0] - sx) + abs(p[1] - sy), p[1], p[0]))
+        else:
+            # choose closest unclaimed edge; if none, any edge cell
+            un = [p for p in target_edges if p in unclaimed]
+            if un:
+                target = min(un, key=lambda p: (abs(p[0] - sx) + abs(p[1] - sy), abs(p[0] - ox) + abs(p[1] - oy), p[1], p[0]))
+            else:
+                target = min(target_edges, key=lambda p: (abs(p[0] - sx) + abs(p[1] - sy), abs(p[0] - ox) + abs(p[1] - oy), p[1], p[0]))
+
+    def eval_cell(nx, ny):
+        if (nx, ny) in obstacles or not inside(nx, ny):
+            return -10**9
+        score = 0
+        if (nx, ny) in opp_terr:
+            score += 40  # direct counterclaim potential
+        if (nx, ny) in unclaimed:
+            score += 18  # expansion
+        if (nx, ny) in self_terr:
+            score += 6   # reinforce/keep
+        # Distance shaping: move toward target
+        score += - (abs(nx - target[0]) + abs(ny - target[1])) * 2
+        # Avoid getting too close to opponent unless attacking border
+        d_opp = abs(nx - ox) + abs(ny - oy)
+        if target in opp_terr:
+            score += -d_opp * 0.5
+        else:
+            score += -max(0, 4 - d_opp) * 1.5
+        # Small bias toward center to reduce wall-sticking
+        score += - (abs(nx - (w - 1) / 2) + abs(ny - (h - 1) / 2)) * 0
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (w - 1, h - 1)
+
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2 and isinstance(p[0], int) and isinstance(p[1], int):
+            if inside(p[0], p[1]): obstacles.add((p[0], p[1]))
+
+    dirs = [(-1, 0), (0, -1), (0, 0), (1, 0), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+    unclaimed = observation.get("unclaimed_cells") or []
+    resources = observation.get("resources") or []
+
+    def manhattan(x, y, a, b): return abs(x - a) + abs(y - b)
+
+    def score_cell(x, y):
+        s = 0
+        if (x, y) in obstacles: return -10**9
+        s -= manhattan(x, y, ox, oy) * 3
+        if (x, y) in unclaimed: s += 10
+        if resources:
+            bestr = min((manhattan(x, y, int(r[0]), int(r[1])) for r in resources
+                         if isinstance(r, (list, tuple)) and len(r) >= 2
+                         and isinstance(r[0], int) and isinstance(r[1], int)), default=10**9)
+            s += max(0, 8 - bestr)
+        return s
+
+    best = None
+    best_s = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            continue
+        s = score_cell(nx, ny)
+        if s > best_s:
+            best_s, best = s, [dx, dy]
+    if best is not None:
+        return best
+
+    for dx, dy in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)]:
+        nx, ny = sx + dx, sy + dy
+        if inside(nx, ny) and (nx, ny) not in obstacles:
+            return [dx, dy]
+    return [0, 0]

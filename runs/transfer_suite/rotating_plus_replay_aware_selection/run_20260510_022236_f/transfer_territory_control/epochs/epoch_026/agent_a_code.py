@@ -1,0 +1,52 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or (0, 0)
+    op = observation.get("opponent_position") or (0, 0)
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, 0), (0, -1), (1, 0), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1), (0, 0)]
+    unclaimed = []
+    for p in observation.get("unclaimed_cells") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if inb(x, y) and (x, y) not in obstacles:
+                unclaimed.append((x, y))
+
+    center = (w // 2, h // 2)
+    target = unclaimed[0] if unclaimed else center
+    best = None
+    opp_terr = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+    self_terr = set(tuple(p) for p in (observation.get("self_territory") or []))
+
+    def score_cell(x, y):
+        if (x, y) in obstacles or not inb(x, y):
+            return -10**9
+        d = max(abs(x - target[0]), abs(y - target[1]))
+        gain = 2 if (x, y) in opp_terr else 0
+        stay = 1 if (x, y) in self_terr else 0
+        return gain * 5 + stay + (-d)
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        sc = score_cell(nx, ny)
+        if best is None or sc > best[0] or (sc == best[0] and (dx, dy) < best[1]):
+            best = (sc, (dx, dy))
+
+    if best is None:
+        return [0, 0]
+    dx, dy = best[1]
+    nx, ny = sx + dx, sy + dy
+    if not inb(nx, ny) or (nx, ny) in obstacles:
+        return [0, 0]
+    return [int(dx), int(dy)]

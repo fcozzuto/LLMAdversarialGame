@@ -1,0 +1,61 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    resources = observation.get("resources", []) or []
+    obstacles = set(tuple(p) for p in (observation.get("obstacles", []) or []))
+
+    def cheb(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx if dx > dy else dy
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    if not resources:
+        return [0, 0]
+
+    # Pick target resource where opponent is closest relative to us
+    best_t = None
+    for rx, ry in resources:
+        myd = cheb(sx, sy, rx, ry)
+        opd = cheb(ox, oy, rx, ry)
+        key = (opd - myd, -myd, rx, ry)
+        if best_t is None or key > best_t[0]:
+            best_t = (key, (rx, ry))
+    tx, ty = best_t[1]
+
+    # One-step look: maximize immediate win pressure on target plus safety/terrain
+    best_move = (0, 0)
+    best_val = None
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+
+        myd2 = cheb(nx, ny, tx, ty)
+        opd2 = cheb(ox, oy, tx, ty)
+        # Prefer moves that (a) bring us closer, (b) worsen opponent's race, (c) keep distance from opponent
+        race = (opd2 - myd2)
+        oppd = cheb(nx, ny, ox, oy)
+
+        # Small tie-break: reduce distance to nearest resource in case target changes
+        mind = None
+        for rx, ry in resources:
+            d = cheb(nx, ny, rx, ry)
+            if mind is None or d < mind:
+                mind = d
+
+        val = race * 1000 - myd2 * 10 + oppd - (mind if mind is not None else 0)
+        if best_val is None or val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

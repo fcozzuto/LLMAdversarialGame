@@ -1,0 +1,145 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    sx, sy = int(sx), int(sy)
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    def inside(x, y): return 0 <= x < w and 0 <= y < h
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                obstacles.add((x, y))
+
+    self_terr = set(tuple(p) for p in observation.get("self_territory") or [] if isinstance(p, (list, tuple)) and len(p) >= 2 and inside(p[0], p[1]))
+    opp_terr = set(tuple(p) for p in observation.get("opponent_territory") or [] if isinstance(p, (list, tuple)) and len(p) >= 2 and inside(p[0], p[1]))
+    unclaimed = set()
+    for p in observation.get("unclaimed_cells") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2 and inside(p[0], p[1]) and tuple(p) not in obstacles:
+            unclaimed.add((p[0], p[1]))
+
+    def neighbors4(x, y):
+        for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+            nx, ny = x + dx, y + dy
+            if inside(nx, ny): yield nx, ny
+
+    # Frontier target: unclaimed cells adjacent to opponent territory
+    frontier = []
+    for cx, cy in unclaimed:
+        for nx, ny in neighbors4(cx, cy):
+            if (nx, ny) in opp_terr:
+                frontier.append((cx, cy))
+                break
+
+    # If no frontier, go for any unclaimed; else prefer staying near opponent
+    if frontier:
+        targets = frontier
+    else:
+        # deterministic pick: choose farthest corner-biased cell among unclaimed
+        targets = list(unclaimed) if unclaimed else [sx, sy]
+
+    # Evaluate immediate move
+    best = None
+    best_score = None
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obstacles:
+            nx, ny = sx, sy
+            dx, dy = 0, 0
+
+        cell = (nx, ny)
+        score = 0
+        if cell in unclaimed:
+            score += 4
+        elif cell in opp_terr:
+            score += 8  # flipping on entry
+        elif cell in self_terr:
+            score += 1
+
+        # Aim toward frontier/target (tie-break by smaller distance)
+        if targets:
+            # deterministic nearest target among first few to keep cheap
+            limit = targets[:16] if len(targets) > 16 else targets
+            min_d = None
+            best_t = None
+            for tx, ty in limit:
+                d = abs(tx - nx) + abs(ty - ny)
+                if min_d is None or d < min_d or (d == min_d and (tx, ty) < best_t):
+                    min_d, best_t = d, (tx, ty)
+            if best_t is not None:
+                score += max(0, 6 - min_d)
+
+                # Extra bump for stepping onto cells that are adjacent to opponent territory
+                ax = best_t[0]
+                ay = best_t[1]
+                for tx, ty in neighbors4(ax, ay):
+                    if (tx, ty) in opp_terr:
+                        score += 2
+                        break
+
+        # Strong preference to avoid wasting on staying still when movement improves
+        if dx == 0 and dy == 0:
+            score -= 1
+
+        if best_score is None or score > best_score or (score == best_score and (dx, dy) < best):
+            best_score = score
+            best = (dx, dy)
+
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def parse_pos(v):
+        try:
+            if isinstance(v, (list, tuple)) and len(v) >= 2:
+                return int(v[0]), int(v[1])
+        except Exception:
+            pass
+        return 0, 0
+
+    sx, sy = parse_pos(observation.get("self_position"))
+    ox, oy = parse_pos(observation.get("opponent_position"))
+
+    obs = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                obs.add((x, y))
+
+    unclaimed = []
+    for p in observation.get("unclaimed_cells") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y) and (x, y) not in obs:
+                unclaimed.append((x, y))
+
+    dirs = [(-1, 0), (1, 0), (0, -1), (0, 1), (0, 0)]
+
+    best = (10**18, 0, 0)
+    targets = unclaimed if unclaimed else [(w // 2, h // 2), (ox, oy)]
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny) or (nx, ny) in obs:
+            continue
+        score = 0
+        if targets:
+            tx, ty = min(targets, key=lambda t: (abs(t[0] - nx) + abs(t[1] - ny), t[0], t[1]))
+            score = abs(tx - nx) + abs(ty - ny)
+        d_from_opp = abs(ox - nx) + abs(oy - ny)
+        score -= min(8, d_from_opp)
+        cand = (score, -d_from_opp, dx, dy)
+        if cand < best:
+            best = cand
+
+    return [int(best[2]), int(best[3])]

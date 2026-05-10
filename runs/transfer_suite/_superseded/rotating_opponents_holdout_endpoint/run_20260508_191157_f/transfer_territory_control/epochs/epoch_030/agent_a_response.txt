@@ -1,0 +1,159 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    sx, sy = int(sx), int(sy)
+    obstacles = observation.get("obstacles") or []
+    obs = {(int(x), int(y)) for x, y in obstacles if isinstance(x, int) and isinstance(y, int)}
+    self_terr = {(int(x), int(y)) for x, y in (observation.get("self_territory") or []) if isinstance(x, int) and isinstance(y, int)}
+    opp_terr = {(int(x), int(y)) for x, y in (observation.get("opponent_territory") or []) if isinstance(x, int) and isinstance(y, int)}
+    unclaimed = {(int(x), int(y)) for x, y in (observation.get("unclaimed_cells") or []) if isinstance(x, int) and isinstance(y, int)}
+    opp_pos = observation.get("opponent_position", (w - 1, h - 1))
+    ox, oy = (int(opp_pos[0]), int(opp_pos[1])) if isinstance(opp_pos, (list, tuple)) and len(opp_pos) == 2 else (w - 1, h - 1)
+
+    def inside(x, y): 
+        return 0 <= x < w and 0 <= y < h
+
+    def cell_free(x, y):
+        return inside(x, y) and (x, y) not in obs
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    neigh4 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+    def score_cell(x, y):
+        if (x, y) in obs or not inside(x, y):
+            return -10**9
+        # Prefer capturing unclaimed, then opponent territory (flip), while avoiding giving them easy expansion.
+        base = 0
+        if (x, y) in unclaimed:
+            base += 50
+        if (x, y) in opp_terr:
+            base += 80
+        if (x, y) in self_terr:
+            base += 5
+
+        # Being closer to the largest contested area helps; bias towards our frontier.
+        if self_terr:
+            # frontier targets are unclaimed cells adjacent to our territory
+            frontier_adj = any((x + dx, y + dy) in self_terr for dx, dy in neigh4)
+            if frontier_adj and (x, y) in unclaimed:
+                base += 60
+        # Avoid stepping into cells that are directly adjacent to opponent territory if we can't gain much.
+        if opp_terr:
+            opp_adj = any((x + dx, y + dy) in opp_terr for dx, dy in neigh4)
+            if opp_adj and (x, y) not in opp_terr:
+                base -= 20
+
+        # Keep moving toward the center bias to contest territory_center_claim archetype.
+        cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+        dist_center = abs(x - cx) + abs(y - cy)
+        base -= 0.5 * dist_center
+
+        # Mild attraction to opponent position to enable flipping when possible.
+        base -= 0.1 * (abs(x - ox) + abs(y - oy))
+
+        return base
+
+    # Candidate set: immediate reachable cells; if none helpful, use stay.
+    best_move = [0, 0]
+    best_val = -10**18
+
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not cell_free(nx, ny):
+            continue
+        # If move is blocked by obstacle, engine would keep us; but we filtered obstacles.
+        val = 0
+        val += score_cell(nx, ny)
+
+        # If move is to unclaimed, prefer those adjacent to our territory.
+        if (nx, ny) in unclaimed and self_terr:
+            if any((nx + ddx, ny + ddy) in self_terr for ddx, ddy in neigh4):
+                val += 25
+
+        # If move is to our already claimed territory, slightly prefer moves that approach frontier/unclaimed.
+        if (nx, ny) in self_terr:
+            if unclaimed:
+                # deterministic nearest distance among a small subset (avoid full search)
+                candidates = []
+                for ux, uy in unclaimed:
+                    md = abs(ux - nx) + abs(uy - ny)
+                    candidates.append((md, ux, uy))
+                candidates.sort()
+                if candidates:
+                    val -= 0.5 * candidates[0][0]
+
+        if val > best_val:
+            best_val = val
+            best_move = [dx, dy]
+
+    # If somehow no valid move found, stay.
+    if best_move == [0, 0]:
+        # still ensure it's legal (staying always legal)
+        return [0, 0]
+   
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    sx, sy = int(sx), int(sy)
+    opp = observation.get("opponent_position", (w - 1, h - 1))
+    ox, oy = (int(opp[0]), int(opp[1])) if isinstance(opp, (list, tuple)) and len(opp) == 2 else (w - 1, h - 1)
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            try:
+                x, y = int(p[0]), int(p[1])
+                obs.add((x, y))
+            except:
+                pass
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def free(x, y):
+        return inside(x, y) and (x, y) not in obs
+
+    resources = observation.get("resources") or []
+    res = []
+    for p in resources:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            try:
+                res.append((int(p[0]), int(p[1])))
+            except:
+                pass
+    unclaimed = observation.get("unclaimed_cells") or []
+    uc = []
+    for p in unclaimed:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            try:
+                uc.append((int(p[0]), int(p[1])))
+            except:
+                pass
+
+    target = None
+    if res:
+        target = min(res, key=lambda t: abs(t[0] - sx) + abs(t[1] - sy) + (0.001 * t[0] + 0.0001 * t[1]))
+    elif uc:
+        target = min(uc, key=lambda t: abs(t[0] - sx) + abs(t[1] - sy) + (0.001 * t[0] + 0.0001 * t[1]))
+    else:
+        target = (ox, oy)
+
+    moves = [(0, 0), (0, -1), (-1, 0), (1, 0), (0, 1)]
+    best = (0, 0, -10**18)
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny):
+            continue
+        dist_t = abs(nx - target[0]) + abs(ny - target[1])
+        dist_o = abs(nx - ox) + abs(ny - oy)
+        # Prefer reducing distance to target, and (slightly) moving away from opponent
+        val = -dist_t * 10 + dist_o * 1
+        # Deterministic tie-breaker by move order
+        if val > best[2]:
+            best = (dx, dy, val)
+    return [best[0], best[1]]

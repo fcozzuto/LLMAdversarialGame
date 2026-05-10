@@ -1,0 +1,70 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 0) or 8
+    h = int(observation.get("grid_height") or 0) or 8
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (0, 0)
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    blocks = set()
+    for p in observation.get("obstacles") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                blocks.add((x, y))
+
+    self_tr = set()
+    for p in observation.get("self_territory") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                self_tr.add((x, y))
+
+    opp_tr = set()
+    for p in observation.get("opponent_territory") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                opp_tr.add((x, y))
+
+    unclaimed = set()
+    for p in observation.get("unclaimed_cells") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                unclaimed.add((x, y))
+
+    resources = set()
+    for p in observation.get("resources") or []:
+        if p and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                resources.add((x, y))
+
+    dirs = [(-1, 0), (0, -1), (1, 0), (0, 1), (0, 0), (-1, -1), (-1, 1), (1, -1), (1, 1)]
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+
+    def cell_score(nx, ny):
+        if (nx, ny) in blocks or not (0 <= nx < w and 0 <= ny < h):
+            return -10**9
+        s = 0
+        if (nx, ny) in resources:
+            s += 100
+        if (nx, ny) in unclaimed:
+            s += 40
+        if (nx, ny) in opp_tr:
+            s += 25
+        if (nx, ny) in self_tr:
+            s += 6
+        s += -0.2 * (abs(nx - cx) + abs(ny - cy))
+        s += -2.0 * (abs(nx - ox) + abs(ny - oy))  # avoid opponent getting closer
+        return s
+
+    best = None
+    best_s = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        sc = cell_score(nx, ny)
+        if sc > best_s or (sc == best_s and (best is None or (dx, dy) < best)):
+            best_s = sc
+            best = (dx, dy)
+    return [int(best[0]), int(best[1])]

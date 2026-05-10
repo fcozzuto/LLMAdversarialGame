@@ -1,0 +1,47 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def valid(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h and (nx, ny) not in obstacles
+
+    def man(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    resources = []
+    for p in observation.get("resources", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                resources.append((x, y))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    best = None
+    best_u = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not valid(nx, ny):
+            u = -10**12
+        else:
+            if resources:
+                d = min(man((nx, ny), r) for r in resources)
+                u = -d * 1000 + (man((nx, ny), (ox, oy)) - man((sx, sy), (ox, oy))) * 2
+            else:
+                u = -man((nx, ny), (ox, oy)) * 1000
+            if (nx, ny) == (ox, oy):
+                u += 500
+        if u > best_u:
+            best_u = u
+            best = [dx, dy]
+    return best if best is not None else [0, 0]

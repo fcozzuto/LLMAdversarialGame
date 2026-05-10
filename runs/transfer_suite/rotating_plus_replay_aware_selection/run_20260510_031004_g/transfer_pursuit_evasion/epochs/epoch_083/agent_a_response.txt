@@ -1,0 +1,166 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    self_role = (observation.get("self_role", "") or "").lower()
+    opp_role = (observation.get("opponent_role", "") or "").lower()
+    is_pursuer = ("purs" in self_role) or (("evad" in opp_role) and ("evad" not in self_role))
+
+    obstacles = set()
+    for p in observation.get("obstacles", []) or []:
+        try:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+        except Exception:
+            pass
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def mobility(x, y):
+        c = 0
+        for dx, dy in dirs:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                c += 1
+        return c
+
+    def dist2(x, y, a, b):
+        dx, dy = x - a, y - b
+        return dx * dx + dy * dy
+
+    def corner_farthest(ax, ay):
+        corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+        best = None
+        bestd = -1
+        for cx, cy in corners:
+            d = abs(cx - ax) + abs(cy - ay)
+            if d > bestd:
+                bestd = d
+                best = (cx, cy)
+        return best
+
+    if is_pursuer:
+        corner = corner_farthest(ox, oy)  # use to bias toward cutting off
+    else:
+        corner = corner_farthest(ox, oy)  # flee toward farthest corner from pursuer
+
+    best_move = (0, 0)
+    if is_pursuer:
+        best_val = -10**18
+    else:
+        best_val = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        d_opp = dist2(nx, ny, ox, oy)
+        mob = mobility(nx, ny)
+
+        # Bias: pursuer tries to approach; evader tries to increase distance and head to a corner.
+        # Also penalize moving into low-mobility cells (helps avoid zigzag traps for evader).
+        if is_pursuer:
+            # Primary: minimize distance to opponent
+            val = -d_opp
+            # Secondary: increase ability to keep pressuring
+            val += 0.6 * mob
+            # Tertiary: drift slightly toward a cut-off corner (not directly opposite)
+            cx, cy = corner
+            val += -0.08 * dist2(nx, ny, cx, cy)
+            if val > best_val:
+                best_val = val
+                best_move = (dx, dy)
+        else:
+            # Primary: maximize distance to opponent
+            val = d_opp
+            # Secondary: prefer cells with more mobility
+            val += 0.8 * mob
+            # Tertiary: move toward far corner
+            cx, cy = corner
+            val += -0.06 * dist2(nx, ny, cx, cy)
+            if val > best_val:
+                best_val = val
+                best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width") or 8)
+    h = int(observation.get("grid_height") or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    obstacles = set()
+    for p in (observation.get("obstacles") or []):
+        try:
+            x, y = int(p[0]), int(p[1])
+            if 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+        except Exception:
+            pass
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+
+    role = (observation.get("self_role") or "").lower()
+    opp_role = (observation.get("opponent_role") or "").lower()
+    evade = ("evad" in role) or ("purs" in opp_role and "evad" not in role)
+
+    resources = observation.get("resources") or []
+    target_list = []
+    for r in resources:
+        try:
+            x, y = int(r[0]), int(r[1])
+            if 0 <= x < w and 0 <= y < h and (x, y) not in obstacles:
+                target_list.append((x, y))
+        except Exception:
+            pass
+
+    candidates = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            candidates.append((dx, dy, nx, ny))
+    if not candidates:
+        return [0, 0]
+
+    if target_list:
+        best = None
+        bestv = None
+        for dx, dy, nx, ny in candidates:
+            md = 10**18
+            for tx, ty in target_list:
+                d = (nx - tx) * (nx - tx) + (ny - ty) * (ny - ty)
+                if d < md: md = d
+            v = md if evade else -md
+            if bestv is None or v > bestv:
+                bestv = v
+                best = [dx, dy]
+        return [int(best[0]), int(best[1])]
+
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    cx, cy = max(corners, key=lambda t: (t[0] - ox) * (t[0] - ox) + (t[1] - oy) * (t[1] - oy))
+    ax, ay = (cx, cy) if evade else (ox, oy)
+
+    best = candidates[0][:2]
+    bestv = None
+    for dx, dy, nx, ny in candidates:
+        d = (nx - ax) * (nx - ax) + (ny - ay) * (ny - ay)
+        v = -d if not evade else d
+        if bestv is None or v > bestv:
+            bestv = v
+            best = [dx, dy]
+    return [int(best[0]), int(best[1])]

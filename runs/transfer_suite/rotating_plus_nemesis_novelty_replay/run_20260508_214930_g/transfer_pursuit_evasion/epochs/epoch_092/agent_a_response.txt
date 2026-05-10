@@ -1,0 +1,132 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position", [0, 0]) or [0, 0]
+    op = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    role = (observation.get("self_role", "") or "").lower()
+    is_evader = any(k in role for k in ("evader", "runner", "fugitive"))
+    is_pursuer = any(k in role for k in ("pursuer", "hunter", "seeker"))
+    if not is_evader and not is_pursuer:
+        is_pursuer = True
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for b in obstacles:
+        if isinstance(b, (list, tuple)) and len(b) >= 2:
+            x, y = int(b[0]), int(b[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    deltas = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    deltas.sort(key=lambda d: (d[0], d[1]))
+
+    def clamp(x, lo, hi):
+        return lo if x < lo else hi if x > hi else x
+
+    def step_candidates():
+        for dx, dy in deltas:
+            nx, ny = clamp(sx + dx, 0, w - 1), clamp(sy + dy, 0, h - 1)
+            yield dx, dy, nx, ny
+
+    if is_evader:
+        # Prefer far corner, but steer to avoid obstacles tightly near the path.
+        best = None
+        for dx, dy, nx, ny in step_candidates():
+            if (nx, ny) in obs:
+                continue
+            corner_score = -min(abs(cx - ox) + abs(cy - oy) for cx, cy in corners)  # baseline
+            # Use the farthest corner as the actual direction objective
+            far_corner = max(corners, key=lambda c: abs(c[0] - ox) + abs(c[1] - oy))
+            corner_score = abs(far_corner[0] - nx) + abs(far_corner[1] - ny)  # maximize distance-to-corner
+            # Obstacle repulsion: maximize min distance to obstacles; reward staying away from near ones
+            if obs:
+                mind = min(abs(nx - bx) + abs(ny - by) for (bx, by) in obs)
+                avoid = mind
+                if mind == 0:
+                    continue
+            else:
+                avoid = 99
+            # Also do not move closer to opponent too much
+            opp_dist = abs(nx - ox) + abs(ny - oy)
+            val = corner_score + 0.8 * avoid + 0.5 * opp_dist
+            if best is None or val > best[0]:
+                best = (val, dx, dy)
+        if best is None:
+            return [0, 0]
+        return [int(best[1]), int(best[2])]
+
+    # Pursuer: chase with one-step lead approximation and obstacle-aware cost.
+    tx = clamp(ox + (1 if ox < sx else -1 if ox > sx else 0), 0, w - 1)
+    ty = clamp(oy + (1 if oy < sy else -1 if oy > sy else 0), 0, h - 1)
+
+    best = None
+    for dx, dy, nx, ny in step_candidates():
+        if (nx, ny) in obs:
+            continue
+        chase = abs(nx - tx) + abs(ny - ty)
+        chase_now = abs(nx - ox) + abs(ny - oy)
+        # If near an obstacle, slightly discourage moves that reduce clearance
+        if obs:
+            mind = min(abs(nx - bx) + abs(ny - by) for (bx, by) in obs)
+            clearance_pen = 0.0 if mind >= 3 else (3 - mind) * 0.9
+        else:
+            clearance_pen = 0.0
+        # Prefer moves that reduce distance to opponent primarily
+        val = -(chase * 1.6 + chase_now * 1.0) + 0.2 * (-(clearance_pen))
+        # Deterministic tie
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sp = observation.get("self_position") or [0, 0]
+    op = observation.get("opponent_position") or [0, 0]
+    sx, sy = int(sp[0]), int(sp[1])
+    ox, oy = int(op[0]), int(op[1])
+
+    role = (observation.get("self_role") or "").lower()
+    is_evader = any(k in role for k in ("evader", "runner", "fugitive"))
+    is_pursuer = any(k in role for k in ("pursuer", "hunter", "seeker"))
+    if not is_evader and not is_pursuer:
+        is_pursuer = True
+
+    obstacles = observation.get("obstacles") or []
+    obs = set()
+    for b in obstacles:
+        if isinstance(b, (list, tuple)) and len(b) >= 2:
+            x, y = int(b[0]), int(b[1])
+            if 0 <= x < w and 0 <= y < h:
+                obs.add((x, y))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    moves.sort(key=lambda m: (m[0], m[1]))
+
+    def clamp(v, lo, hi):
+        return lo if v < lo else hi if v > hi else v
+
+    best = None
+    best_val = -10**9 if is_evader else 10**9
+    for dx, dy in moves:
+        nx, ny = clamp(sx + dx, 0, w - 1), clamp(sy + dy, 0, h - 1)
+        if (nx, ny) in obs:
+            continue
+        dist2 = (nx - ox) * (nx - ox) + (ny - oy) * (ny - oy)
+        val = dist2 if is_evader else -dist2
+        if is_evader:
+            if val > best_val:
+                best_val, best = val, [dx, dy]
+        else:
+            if val < best_val:
+                best_val, best = val, [dx, dy]
+
+    if best is not None:
+        return best
+
+    for dx, dy in moves:
+        return [dx, dy]
+    return [0, 0]

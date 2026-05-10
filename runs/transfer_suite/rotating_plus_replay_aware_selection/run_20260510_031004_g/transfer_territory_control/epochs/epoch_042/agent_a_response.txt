@@ -1,0 +1,160 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", (0, 0))
+    px, py = observation.get("opponent_position", (0, 0))
+
+    obstacles = set(map(tuple, observation.get("obstacles", [])))
+    unclaimed = list(map(tuple, observation.get("unclaimed_cells", [])))
+    self_terr = set(map(tuple, observation.get("self_territory", [])))
+    opp_terr = set(map(tuple, observation.get("opponent_territory", [])))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    # Pick a target deterministically: nearest unclaimed that we can reach "at least as early" as opponent.
+    # If none, fall back to any unclaimed; if still none, drift toward opponent's territory boundary.
+    best_target = None
+    best_td = 10**9
+    for ux, uy in unclaimed:
+        ds = abs(ux - sx) + abs(uy - sy)
+        do = abs(ux - px) + abs(uy - py)
+        # Prefer targets where we are not behind, then by distance to us, then coords
+        if ds <= do:
+            key = (ds, do, ux, uy)
+        else:
+            key = (ds + 100, do, ux, uy)
+        if key < (best_td, best_td, 10**9, 10**9):
+            best_td = key[0]
+            best_target = (ux, uy)
+
+    if best_target is None and unclaimed:
+        best_target = min(unclaimed, key=lambda t: (abs(t[0] - sx) + abs(t[1] - sy), t[0], t[1]))
+
+    # If no unclaimed, chase cells adjacent to opponent territory.
+    if best_target is None:
+        opp_cells = list(opp_terr)
+        candidates = []
+        for ox, oy in opp_cells:
+            for dx, dy in dirs:
+                nx, ny = ox + dx, oy + dy
+                if inb(nx, ny) and (nx, ny) not in obstacles:
+                    candidates.append((nx, ny))
+        if candidates:
+            best_target = min(candidates, key=lambda t: (max(abs(t[0] - sx), abs(t[1] - sy)), t[0], t[1]))
+        else:
+            best_target = (sx, sy)
+
+    tx, ty = best_target
+
+    def cell_bonus(x, y):
+        # Territory flipping on entry: strongly value opponent-owned adjacency/entry.
+        if (x, y) in obstacles or not inb(x, y):
+            return -10**9
+        val = 0
+        if (x, y) in unclaimed:
+            val += 320
+        if (x, y) in self_terr:
+            val += 25
+        if (x, y) in opp_terr:
+            val += 110
+        return val
+
+    # Score each legal immediate move by: cell bonus + advantage in reaching target + avoid giving opponent easy takeover.
+    best_move = (0, 0)
+    best_score = -10**18
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        ds_next = abs(nx - tx) + abs(ny - ty)
+        do_next = abs(nx - px) + abs(ny - py)
+
+        # Opponent also moves; approximate their next distance advantage by current target distance.
+        opp_ds = abs(px - tx) + abs(py - ty)
+        # We want to reduce our distance to target more than opponent's distance tends to reduce.
+        advantage = (opp_ds - ds_next)
+
+        # Prefer increasing distance from opponent if we can't immediately gain much.
+        sep = do_next
+
+        score = cell_bonus(nx, ny)
+        score += 4.5 * advantage
+        score += 0.15 * sep
+
+        # Slightly prefer staying within known territory late game to secure control.
+        if unclaimed == [] or observation.get("turns_remaining", 0) < 12:
+            if (nx, ny) in self_terr:
+                score += 30
+
+        # Deterministic tie-breaker
+        tie = (score, -dx * 2 - dy, -nx, -ny)
+        if tie > (best_score, -best_move[0] * 2 - best_move[1], -sx - best_move[0], -sy - best_move[1]):
+            best
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", (0, 0))
+    px, py = observation.get("opponent_position", (0, 0))
+
+    obstacles = set(map(tuple, observation.get("obstacles", [])))
+    unclaimed = list(map(tuple, observation.get("unclaimed_cells", observation.get("resources", []))))
+    if not unclaimed:
+        unclaimed = [tuple(p) for p in observation.get("resources", [])]
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    def best_target():
+        best = None
+        bestk = None
+        for x, y in unclaimed:
+            if not inb(x, y):
+                continue
+            ds = dist((sx, sy), (x, y))
+            do = dist((px, py), (x, y))
+            k = (0 if ds <= do else 1, ds, do, x, y)
+            if bestk is None or k < bestk:
+                bestk = k
+                best = (x, y)
+        return best
+
+    target = best_target()
+    if target is None:
+        tx, ty = px, py
+    else:
+        tx, ty = target
+
+    candidates = []
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if inb(nx, ny) and (nx, ny) not in obstacles:
+            candidates.append((dx, dy, nx, ny))
+    if not candidates:
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if inb(nx, ny):
+                candidates.append((dx, dy, nx, ny))
+
+    # Greedy: move that most reduces distance to target; tie-break with opponent distance and determinism.
+    best = None
+    bestk = None
+    for dx, dy, nx, ny in candidates:
+        ds = dist((nx, ny), (tx, ty))
+        do = dist((nx, ny), (px, py))
+        k = (ds, do, dx, dy)
+        if bestk is None or k < bestk:
+            bestk = k
+            best = (dx, dy)
+    return [int(best[0]), int(best[1])]

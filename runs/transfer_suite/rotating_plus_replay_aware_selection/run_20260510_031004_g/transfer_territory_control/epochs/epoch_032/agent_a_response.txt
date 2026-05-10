@@ -1,0 +1,146 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8))
+    h = int(observation.get("grid_height", 8))
+    sx, sy = observation.get("self_position", (0, 0))
+    px, py = observation.get("opponent_position", (0, 0))
+
+    obstacles = set(map(tuple, observation.get("obstacles", [])))
+    unclaimed = set(map(tuple, observation.get("unclaimed_cells", [])))
+    self_terr = set(map(tuple, observation.get("self_territory", [])))
+    opp_terr = set(map(tuple, observation.get("opponent_territory", [])))
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def free(x, y):
+        return inb(x, y) and (x, y) not in obstacles
+
+    def clamp_to_move(tx, ty):
+        dx = 0 if tx == sx else (1 if tx > sx else -1)
+        dy = 0 if ty == sy else (1 if ty > sy else -1)
+        return dx, dy
+
+    # Pick a deterministic target: prefer unclaimed nearest, else expand into our frontier,
+    # else capture opponent territory nearest.
+    targets = list(unclaimed)
+    if targets:
+        tx, ty = min(targets, key=lambda t: abs(t[0] - sx) + abs(t[1] - sy))[0:2]
+    else:
+        opp_targets = list(opp_terr)
+        if opp_targets:
+            tx, ty = min(opp_targets, key=lambda t: abs(t[0] - sx) + abs(t[1] - sy))[0:2]
+        else:
+            # fallback: move towards center-ish of map
+            tx, ty = w // 2, h // 2
+
+    best = (0, 0)
+    best_val = -10**18
+
+    def cell_kind(x, y):
+        if (x, y) in obstacles:
+            return -5
+        if (x, y) in opp_terr:
+            return 3
+        if (x, y) in self_terr:
+            return 1
+        if (x, y) in unclaimed:
+            return 2
+        return 0
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not free(nx, ny):
+            continue
+
+        # Immediate value
+        val = 0
+        if (nx, ny) in unclaimed:
+            val += 260
+        if (nx, ny) in self_terr:
+            val += 25
+        if (nx, ny) in opp_terr:
+            val += 140  # flipping on entry
+
+        # Avoid getting too close to opponent unless capturing opp territory
+        opp_dist = abs(nx - px) + abs(ny - py)
+        if (nx, ny) not in opp_terr:
+            val += max(-60, 30 - 20 * opp_dist)
+
+        # Two-step deterministic lookahead towards our target
+        tdx, tdy = clamp_to_move(tx, ty)
+        # Project a "soft" continuation aligned with target from (nx,ny)
+        cands = [(tdx, tdy), (0, 0)]
+        # If diagonal isn't aligned, also allow axis-aligned variant deterministically
+        if tdx != 0 and tdy != 0:
+            cands.append((tdx, 0))
+            cands.append((0, tdy))
+
+        future_best = -10**18
+        for fdx, fdy in cands:
+            mx, my = nx + fdx, ny + fdy
+            if not free(mx, my):
+                continue
+            kind = cell_kind(mx, my)
+            # Prefer moving nearer to target
+            dist = abs(mx - tx) + abs(my - ty)
+            future_best = max(future_best, 40 * kind - 6 * dist - (2 if kind < 1 else 0))
+
+        val += 0 if future_best == -10**18 else future_best
+
+        # Mild preference for staying aligned with move-to-target
+        val += -1 * (abs(dx - clamp_to_move(tx, ty)[0]) + abs(dy - clamp_to_move(tx, ty)[1]))
+
+        if val > best_val:
+            best_val = val
+            best = (dx, dy)
+
+    return [int(best[0]), int(best[1])]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", (0, 0))
+    sx, sy = int(sx), int(sy)
+    px, py = observation.get("opponent_position", (sx, sy))
+    px, py = int(px), int(py)
+
+    obstacles = set(tuple(p) for p in observation.get("obstacles", []) or [])
+    unclaimed = set(tuple(p) for p in observation.get("unclaimed_cells", []) or [])
+    self_terr = set(tuple(p) for p in observation.get("self_territory", []) or [])
+    opp_terr = set(tuple(p) for p in observation.get("opponent_territory", []) or [])
+    remaining = int(observation.get("remaining_resource_count", 0) or 0)
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+
+    best = None
+    best_score = -10**18
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+        score = 0
+        if (nx, ny) in unclaimed:
+            score += 100000 if remaining > 0 else 80000
+        if (nx, ny) in opp_terr:
+            score -= 90000
+        if (nx, ny) in self_terr:
+            score += 1500
+        d_opp = abs(nx - px) + abs(ny - py)
+        score += 2000 - 20 * d_opp
+        if (nx, ny) == (px, py):
+            score -= 5000
+        score -= 5 * (abs(nx - sx) + abs(ny - sy))
+        if score > best_score:
+            best_score = score
+            best = [dx, dy]
+
+    if best is None:
+        return [0, 0]
+    return best

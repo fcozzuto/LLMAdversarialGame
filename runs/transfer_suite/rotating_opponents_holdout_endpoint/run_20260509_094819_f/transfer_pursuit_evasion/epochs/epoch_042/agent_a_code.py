@@ -1,0 +1,71 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    s = observation.get("self_position", [0, 0]) or [0, 0]
+    o = observation.get("opponent_position", [0, 0]) or [0, 0]
+    sx, sy = int(s[0]), int(s[1])
+    ox, oy = int(o[0]), int(o[1])
+
+    blocked = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            blocked.add((int(p[0]), int(p[1])))
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    moves = sorted(moves, key=lambda m: (m[0], m[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in blocked
+
+    def manh(x, y, a, b):
+        dx = x - a
+        if dx < 0:
+            dx = -dx
+        dy = y - b
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+
+    self_role = (observation.get("self_role") or "").lower()
+    pursuer = ("purs" in self_role) or (self_role in ("captor", "pursuer"))
+    evader = not pursuer
+
+    def free_neighbors(x, y):
+        cnt = 0
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny):
+                cnt += 1
+        return cnt
+
+    best = None
+    best_move = [0, 0]
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        if nx == ox and ny == oy and pursuer:
+            return [dx, dy]
+
+        d = manh(nx, ny, ox, oy)
+        if evader:
+            corner_dist = 0
+            for cx, cy in corners:
+                cd = manh(nx, ny, cx, cy)
+                if cd > corner_dist:
+                    corner_dist = cd
+            fn = free_neighbors(nx, ny)
+            # wall-runner feel: avoid squeezing near obstacles; prefer "far corner" and distance from pursuer
+            score = d + 0.15 * corner_dist - 0.25 * (9 - fn)
+        else:
+            fn = free_neighbors(nx, ny)
+            # chase: minimize distance; slight preference for moves that keep mobility
+            score = -d + 0.05 * fn
+
+        if best is None or score > best:
+            best = score
+            best_move = [dx, dy]
+
+    return best_move

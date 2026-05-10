@@ -1,0 +1,145 @@
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = {(p[0], p[1]) for p in (observation.get("obstacles") or [])}
+    self_set = {(p[0], p[1]) for p in (observation.get("self_territory") or [])}
+    opp_set = {(p[0], p[1]) for p in (observation.get("opponent_territory") or [])}
+    unclaimed = {(p[0], p[1]) for p in (observation.get("unclaimed_cells") or [])}
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def dist(a, b):
+        dx = a[0] - b[0]
+        dy = a[1] - b[1]
+        return (dx * dx + dy * dy)
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    myc = observation.get("self_territory_count", len(self_set))
+    opc = observation.get("opponent_territory_count", len(opp_set))
+    behind = myc < opc
+
+    # If behind: strike opponent, else expand toward unclaimed.
+    targets = []
+    if behind and opp_set:
+        candidates = list(opp_set)
+        candidates.sort(key=lambda p: dist((sx, sy), p))
+        targets = candidates[:20]
+    elif unclaimed:
+        candidates = list(unclaimed)
+        # Prefer closer and more "frontier-like" (near opponent) to accelerate swing.
+        def frontier_score(p):
+            ax = 0
+            x, y = p
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    if dx == 0 and dy == 0:
+                        continue
+                    if (x + dx, y + dy) in opp_set:
+                        ax += 1
+            return (dist((sx, sy), p) - 3 * ax)
+        candidates.sort(key=frontier_score)
+        targets = candidates[:24]
+    elif opp_set:
+        candidates = list(opp_set)
+        candidates.sort(key=lambda p: dist((sx, sy), p))
+        targets = candidates[:20]
+    else:
+        return [0, 0]
+
+    def adj_unclaimed(x, y):
+        c = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                if (x + dx, y + dy) in unclaimed:
+                    c += 1
+        return c
+
+    def adj_opp(x, y):
+        c = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                if (x + dx, y + dy) in opp_set:
+                    c += 1
+        return c
+
+    best = None
+    best_val = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+        cell_is_opp = (nx, ny) in opp_set
+        cell_is_un = (nx, ny) in unclaimed
+        # Evaluate against nearest target(s)
+        d_best = min(dist((nx, ny), t) for t in targets)
+        val = -d_best
+        if cell_is_opp:
+            val += 250  # immediate capture swing
+        if cell_is_un:
+            val += 35
+        # Encourage edging to accelerate expansion/control flipping
+        val += 6 * adj_unclaimed(nx, ny)
+        val += 3 * adj_opp(nx, ny)
+        # Mild anti-stall: slightly prefer moving unless it's
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    sx, sy = observation["self_position"]
+    ox, oy = observation.get("opponent_position", (sx, sy))
+    w, h = observation["grid_width"], observation["grid_height"]
+    obstacles = {(p[0], p[1]) for p in (observation.get("obstacles") or [])}
+    unclaimed = {(p[0], p[1]) for p in (observation.get("unclaimed_cells") or [])}
+    self_territory = {(p[0], p[1]) for p in (observation.get("self_territory") or [])}
+    opp_territory = {(p[0], p[1]) for p in (observation.get("opponent_territory") or [])}
+
+    def ok(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def d2(a, b):
+        dx = a[0] - b[0]
+        dy = a[1] - b[1]
+        return dx * dx + dy * dy
+
+    myc = observation.get("self_territory_count", len(self_territory))
+    opc = observation.get("opponent_territory_count", len(opp_territory))
+    behind = myc < opc
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    best = (10**18, 0, 0)
+
+    if behind and opc > 0:
+        targets = [observation.get("opponent_position", (ox, oy))]
+        for tx, ty in targets:
+            for dx, dy in dirs:
+                nx, ny = sx + dx, sy + dy
+                if not ok(nx, ny):
+                    continue
+                score = d2((nx, ny), (tx, ty))
+                if score < best[0]:
+                    best = (score, dx, dy)
+    else:
+        if unclaimed:
+            tx, ty = min(unclaimed, key=lambda p: d2((sx, sy), p))
+        else:
+            tx, ty = (ox, oy)
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if not ok(nx, ny):
+                continue
+            score = d2((nx, ny), (tx, ty)) + (10 if behind else 0)
+            if score < best[0]:
+                best = (score, dx, dy)
+
+    if best[0] == 10**18:
+        for dx, dy in dirs:
+            nx, ny = sx + dx, sy + dy
+            if ok(nx, ny):
+                return [dx, dy]
+        return [0, 0]
+    return [best[1], best[2]]

@@ -1,0 +1,118 @@
+def choose_move(observation):
+    w, h = observation["grid_width"], observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = observation["obstacles"]
+    obs = set((x, y) for x, y in obstacles)
+    self_t = observation["self_territory"]
+    opp_t = observation["opponent_territory"]
+    self_set = set((x, y) for x, y in self_t)
+    opp_set = set((x, y) for x, y in opp_t)
+    unclaimed = set((x, y) for x, y in observation["unclaimed_cells"])
+
+    candidates = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    cx, cy = (w - 1) / 2.0, (h - 1) / 2.0
+    dist_opp = abs(sx - ox) + abs(sy - oy)
+    lead = observation["self_territory_count"] - observation["opponent_territory_count"]
+
+    best = None
+    best_val = -10**9
+    for dx, dy in candidates:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obs:
+            continue
+
+        gain = 0
+        if (nx, ny) in opp_set:
+            gain = 2  # flip on entry: we gain and opponent loses
+        elif (nx, ny) in unclaimed:
+            gain = 1
+        elif (nx, ny) in self_set:
+            gain = 0
+
+        # Strategic shaping: if we're behind, prioritize opponent; if leading, prioritize expansion near unclaimed
+        d_to_opp = abs(nx - ox) + abs(ny - oy)
+        d_to_center = abs(nx - cx) + abs(ny - cy)
+        # Penalize getting farther when behind; reward getting closer when behind, opposite when leading
+        if lead < 0:
+            shaped = (gain * 100) + (-d_to_opp) * 2 + (0 if gain > 0 else -d_to_center * 0.1)
+        else:
+            # Prefer growing territory and pushing toward frontier (closer to opponent too, lightly)
+            shaped = (gain * 100) + (-d_to_center) * 0.2 + (-d_to_opp) * 0.5 + (0 if gain > 0 else -d_to_center * 0.05)
+
+        # Extra: avoid stepping into opponent cell if it's not adjacent frontier while behind (discourage deep flips)
+        if lead < 0 and (nx, ny) in opp_set:
+            adj_opp = 0
+            for ddx in (-1, 0, 1):
+                for ddy in (-1, 0, 1):
+                    if ddx == 0 and ddy == 0:
+                        continue
+                    ax, ay = nx + ddx, ny + ddy
+                    if 0 <= ax < w and 0 <= ay < h and (ax, ay) in opp_set:
+                        adj_opp += 1
+            shaped -= (3 - adj_opp) * 2
+
+        if best is None or shaped > best_val or (shaped == best_val and (dx, dy) < best):
+            best_val = shaped
+            best = (dx, dy)
+
+    return [best[0], best[1]] if best is not None else [0, 0]
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    ox, oy = observation["opponent_position"]
+    obstacles = observation.get("obstacles", [])
+    obs = set(obstacles)
+    candidates = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    resources = observation.get("resources", []) or []
+    best_resource = None
+    best_rd = 10**9
+    for rx, ry in resources:
+        d = abs(sx - rx) + abs(sy - ry)
+        if d < best_rd:
+            best_rd = d
+            best_resource = (rx, ry)
+
+    score_self = observation.get("scores", {}).get("self", observation.get("scores", {}).get("me", 0))
+    score_opp = observation.get("scores", {}).get("opponent", observation.get("scores", {}).get("them", 0))
+    behind = score_self <= score_opp
+
+    best_move = (0, 0)
+    best_val = -10**18
+    for dx, dy in candidates:
+        nx, ny = sx + dx, sy + dy
+        if nx < 0 or nx >= w or ny < 0 or ny >= h:
+            continue
+        if (nx, ny) in obs:
+            continue
+        d_opp = abs(nx - ox) + abs(ny - oy)
+        d_res = 0
+        if best_resource is not None:
+            d_res = abs(nx - best_resource[0]) + abs(ny - best_resource[1])
+        # Attack if behind (try to approach), otherwise balance: approach resources and keep distance.
+        val = 0
+        if d_opp == 0:
+            val += 1000000
+        if d_opp <= 1:
+            val += 5000 if behind else 2000
+        if behind:
+            val += -d_opp * 20
+        else:
+            val += d_opp * 5
+        val += -d_res * 3
+        # Prefer moving (avoid staying unless it's best)
+        if dx == 0 and dy == 0:
+            val -= 1
+        # Deterministic tie-breaker: fixed ordering already ensures stability; still compare strictly
+        if val > best_val:
+            best_val = val
+            best_move = (dx, dy)
+
+    return [best_move[0], best_move[1]]

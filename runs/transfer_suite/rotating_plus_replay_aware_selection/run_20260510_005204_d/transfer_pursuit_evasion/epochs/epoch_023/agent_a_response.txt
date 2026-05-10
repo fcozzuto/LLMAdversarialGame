@@ -1,0 +1,119 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    blocked = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            blocked.add((int(p[0]), int(p[1])))
+
+    role = (observation.get("self_role") or "").lower()
+    is_evader = ("evad" in role) or ("escape" in role) or ("run" in role) or ("hide" in role) or ("runner" in role)
+
+    moves = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def ok(x, y): return inb(x, y) and (x, y) not in blocked
+    def cheb(x1, y1, x2, y2):
+        dx = abs(x1 - x2); dy = abs(y1 - y2)
+        return dx if dx > dy else dy
+    def obst_adj(x, y):
+        s = 0
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0: 
+                    continue
+                if (x + dx, y + dy) in blocked:
+                    s += 1
+        return s
+
+    corners = [(0, 0), (0, h - 1), (w - 1, 0), (w - 1, h - 1)]
+    center = (w // 2, h // 2)
+
+    # Target choice: evader goes to corner farthest from pursuer; pursuer "cuts off" toward the same corner.
+    far_corner = max(corners, key=lambda c: cheb(c[0], c[1], ox, oy))
+    tx, ty = far_corner
+
+    best = None
+    best_score = None
+    # Deterministic tie-break order consistent with move list.
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not ok(nx, ny):
+            continue
+
+        d_opp = cheb(nx, ny, ox, oy)
+        d_corner = cheb(nx, ny, tx, ty)
+        d_opp_corner = cheb(ox, oy, tx, ty)
+        adj = obst_adj(nx, ny)
+
+        if is_evader:
+            # Avoid being pulled too directly: prioritize increasing distance; then increase corner distance from pursuer.
+            # Penalize adjacency to obstacles to reduce getting trapped in zigzags.
+            score = (10 - d_opp) * 1000 + (d_opp_corner - d_corner) * 10 - adj * 50
+        else:
+            # Pursuer: minimize distance, and prefer moves that reduce opponent's distance-to-target-corner.
+            score = (10 - d_opp) * 1000 + (d_opp_corner - cheb(nx, ny, tx, ty)) * 20 - adj * 50
+            # Add slight bias toward moving closer to corner/centerline (cuts off).
+            score += (cheb(nx, ny, center[0], center[1]) <= cheb(sx, sy, center[0], center[1])) * 5
+
+        if best_score is None or score > best_score:
+            best_score = score
+            best = (dx, dy)
+
+    if best is None:
+        return [0, 0]
+    return
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    blocked = set()
+    for p in observation.get("obstacles", []) or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            blocked.add((int(p[0]), int(p[1])))
+
+    role = str(observation.get("self_role", "")).lower()
+    is_evader = any(k in role for k in ("evad", "escape", "run", "hide", "runner"))
+
+    targets = []
+    for r in (observation.get("resources", []) or []):
+        if isinstance(r, (list, tuple)) and len(r) >= 2:
+            targets.append((int(r[0]), int(r[1])))
+        elif isinstance(r, dict) and "position" in r:
+            pr = r.get("position")
+            if isinstance(pr, (list, tuple)) and len(pr) >= 2:
+                targets.append((int(pr[0]), int(pr[1])))
+    if not targets:
+        targets = [(ox, oy)]
+
+    def inb(x, y): return 0 <= x < w and 0 <= y < h
+    def ok(x, y): return inb(x, y) and (x, y) not in blocked
+    def cheb(x1, y1, x2, y2):
+        a = abs(x1 - x2); b = abs(y1 - y2)
+        return a if a > b else b
+
+    best = None
+    bestv = None
+    for dx in (-1, 0, 1):
+        for dy in (-1, 0, 1):
+            nx, ny = sx + dx, sy + dy
+            if not ok(nx, ny):
+                continue
+            dres = min(cheb(nx, ny, tx, ty) for tx, ty in targets) if targets else 0
+            dop = cheb(nx, ny, ox, oy)
+            v = (dres * 2 + (dop if not is_evader else -dop))
+            if best is None or v < bestv or (v == bestv and (dx, dy) < best):
+                bestv = v
+                best = (dx, dy)
+
+    return [0, 0] if best is None else [int(best[0]), int(best[1])]

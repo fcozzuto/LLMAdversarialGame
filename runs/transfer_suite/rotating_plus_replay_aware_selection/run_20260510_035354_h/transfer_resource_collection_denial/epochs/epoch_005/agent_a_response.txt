@@ -1,0 +1,149 @@
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    if not resources:
+        return [0, 0]
+
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    # Pick a target: if opponent is clearly ahead for some resource, contest the closest-to-opponent one;
+    # otherwise pursue best resource by "advantage".
+    best_op = resources[0]
+    best_op_d = 10**9
+    for r in resources:
+        rx, ry = r
+        od = man(ox, oy, rx, ry)
+        if od < best_op_d or (od == best_op_d and (rx, ry) < (best_op[0], best_op[1])):
+            best_op_d = od
+            best_op = r
+
+    my_for_op = man(sx, sy, best_op[0], best_op[1])
+    target = None
+    if my_for_op > best_op_d:  # opponent closer to their nearest resource
+        # Contest that resource if we can still reduce distance; otherwise pick our best advantage.
+        target = [best_op[0], best_op[1]]
+        # If we're too far behind, switch to best advantage resource to avoid endless contest.
+        if my_for_op - best_op_d >= 3:
+            target = None
+
+    if target is None:
+        best = None
+        best_key = None
+        for r in resources:
+            rx, ry = r
+            myd = man(sx, sy, rx, ry)
+            opd = man(ox, oy, rx, ry)
+            # Prefer resources where we are closer; add small deterministic center preference.
+            adv = (opd - myd)  # bigger is better
+            center = 0.01 * (abs(rx - (w - 1) / 2.0) + abs(ry - (h - 1) / 2.0))
+            key = (-(adv - center), ry, rx)  # deterministic: smaller key is better
+            if best_key is None or key < best_key:
+                best_key = key
+                best = r
+        target = [best[0], best[1]]
+
+    tx, ty = target[0], target[1]
+
+    deltas = [(-1, -1), (-1, 0), (-1, 1),
+              (0, -1), (0, 0), (0, 1),
+              (1, -1), (1, 0), (1, 1)]
+    deltas.sort()
+
+    # Move to best adjacent cell that is not an obstacle, with deterministic tie-break.
+    best_move = [0, 0]
+    best_score = None
+    for dx, dy in deltas:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        nd = man(nx, ny, tx, ty)
+        # Also consider improving relative position vs opponent on the way.
+        od_here = man(ox, oy, tx, ty)
+        # If we become closer than opponent, boost deterministically.
+        rel = od_here - nd
+        score = (-nd) + 0.35 * rel
+        if best_score is None or score > best_score or (score == best_score and (dx, dy) < (best_move[0], best_move[1])):
+            best_score = score
+            best_move = [dx, dy]
+
+    # If all candidate moves invalid, stay.
+    return
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation.get("grid_width", 8)
+    h = observation.get("grid_height", 8)
+    sx, sy = observation.get("self_position", [0, 0])
+    ox, oy = observation.get("opponent_position", [0, 0])
+    resources = observation.get("resources", []) or []
+    obstacles = observation.get("obstacles", []) or []
+    obs = set()
+    for p in obstacles:
+        if isinstance(p, (list, tuple)) and len(p) == 2:
+            obs.add((p[0], p[1]))
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    def man(ax, ay, bx, by):
+        return abs(ax - bx) + abs(ay - by)
+
+    if not resources:
+        return [0, 0]
+
+    best = None
+    best_d = 10**9
+    for r in resources:
+        rx, ry = r
+        d = man(sx, sy, rx, ry)
+        if d < best_d or (d == best_d and (rx, ry) < (best[0], best[1]) if best else True):
+            best_d = d
+            best = (rx, ry)
+
+    tx, ty = best
+    od = man(ox, oy, tx, ty)
+    # If opponent is significantly closer, pick a different resource (closest to us among those not too contested).
+    if od + 1 < best_d:
+        best2 = best
+        best2_d = best_d
+        for r in resources:
+            rx, ry = r
+            myd = man(sx, sy, rx, ry)
+            oppd = man(ox, oy, rx, ry)
+            score = (myd, oppd - myd, (rx, ry))
+            if (myd < best2_d and oppd - myd >= 0) or (best2 is best and oppd - myd >= 0 and myd < best2_d):
+                best2 = (rx, ry)
+                best2_d = myd
+        tx, ty = best2
+
+    moves = [(0, -1), (0, 1), (-1, 0), (1, 0), (0, 0)]
+    best_move = [0, 0]
+    best_val = -10**18
+    for dx, dy in moves:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny) or (nx, ny) in obs:
+            continue
+        dist_to = man(nx, ny, tx, ty)
+        dist_opp = man(nx, ny, ox, oy)
+        val = -dist_to * 10 + dist_opp
+        # small deterministic tie-breaker favor staying close to resources chosen
+        val += -man(sx, sy, tx, ty) * 0.001
+        if val > best_val:
+            best_val = val
+            best_move = [dx, dy]
+
+    return best_move if best_move in ([0, -1], [0, 1], [-1, 0], [1, 0], [0, 0]) else [0, 0]

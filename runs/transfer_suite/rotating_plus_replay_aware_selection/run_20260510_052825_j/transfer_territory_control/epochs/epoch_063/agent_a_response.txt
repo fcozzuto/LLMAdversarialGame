@@ -1,0 +1,163 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    x, y = observation["self_position"]
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = set(tuple(p) for p in (observation.get("unclaimed_cells") or []))
+    selfT = set(tuple(p) for p in (observation.get("self_territory") or []))
+    oppT = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+
+    deltas = [(-1, -1), (0, -1), (1, -1),
+              (-1, 0), (0, 0), (1, 0),
+              (-1, 1), (0, 1), (1, 1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    # If nothing else to do, drift toward open cells away from obstacles.
+    if not unclaimed and not oppT:
+        for dx, dy in deltas:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                return [dx, dy]
+        return [0, 0]
+
+    # Heuristic: grab unclaimed first; if none, counterclaim opponent near frontier.
+    best_move = [0, 0]
+    best_score = -10**18
+    dirs_to_check = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    # Precompute closest distances to unclaimed and opponent territory using simple local scan.
+    # Keep it bounded to avoid full-grid cost.
+    unclaimed_list = list(unclaimed) if unclaimed else []
+    opp_list = list(oppT) if oppT else []
+
+    def closest_dist(pt_list, px, py):
+        if not pt_list:
+            return 10**9
+        md = 10**9
+        for ax, ay in pt_list:
+            d = abs(ax - px) + abs(ay - py)
+            if d < md:
+                md = d
+        return md
+
+    du = closest_dist(unclaimed_list, x, y)
+    do = closest_dist(opp_list, x, y)
+
+    for dx, dy in deltas:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        score = 0.0
+        # Immediate cell value
+        if (nx, ny) in unclaimed:
+            score += 7.0
+        if (nx, ny) in oppT:
+            score += 4.5
+        if (nx, ny) in selfT:
+            score += 1.0
+
+        # Frontier/pressure: count adjacent unclaimed and adjacent opponent to decide expansion.
+        adj_un = 0
+        adj_opp = 0
+        for adx, ady in dirs_to_check:
+            ax, ay = nx + adx, ny + ady
+            if not inb(ax, ay) or (ax, ay) in obstacles:
+                continue
+            if (ax, ay) in unclaimed:
+                adj_un += 1
+            elif (ax, ay) in oppT:
+                adj_opp += 1
+        score += adj_un * 0.35
+        score += adj_opp * 0.18
+
+        # Distance shaping: move toward nearest unclaimed; if none, toward opponent.
+        nd_u = closest_dist(unclaimed_list, nx, ny) if unclaimed_list else 10**9
+        nd_o = closest_dist(opp_list, nx, ny) if opp_list else 10**9
+        if unclaimed_list:
+            score += (du - nd_u) * 0.55
+            score -= (nd_o) * 0.01  # slight penalty if far from target frontier elsewhere
+        else:
+            score += (do - nd_o) * 0.4
+
+        # Avoid getting stuck: prefer moves that increase number of free neighbors.
+        free_n = 0
+        for adx, ady in deltas:
+            ax, ay = nx + adx, ny + ady
+            if inb(ax, ay) and (ax, ay) not in obstacles:
+                free_n += 1
+        score += free_n * 0.01
+
+        # Deterministic tie-break is by deltas order.
+        if score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+
+    return best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    x, y = observation["self_position"]
+    ox, oy = observation.get("opponent_position", (x, y))
+
+    obstacles = set(tuple(p) for p in (observation.get("obstacles") or []))
+    unclaimed = list(observation.get("unclaimed_cells") or [])
+    selfT = set(tuple(p) for p in (observation.get("self_territory") or []))
+    oppT = set(tuple(p) for p in (observation.get("opponent_territory") or []))
+
+    moves = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+
+    def inb(nx, ny):
+        return 0 <= nx < w and 0 <= ny < h
+
+    if not unclaimed and not oppT:
+        for dx, dy in moves:
+            nx, ny = x + dx, y + dy
+            if inb(nx, ny) and (nx, ny) not in obstacles:
+                return [dx, dy]
+        return [0, 0]
+
+    max_check = 30
+    unclaimed_check = unclaimed[:max_check] if unclaimed else []
+
+    def manh(a, b, c, d):
+        return abs(a - c) + abs(b - d)
+
+    best = [0, 0]
+    best_score = -10**18
+
+    for dx, dy in moves:
+        nx, ny = x + dx, y + dy
+        if not inb(nx, ny) or (nx, ny) in obstacles:
+            continue
+
+        score = 0
+
+        if unclaimed_check:
+            dmin = 10**9
+            for p in unclaimed_check:
+                px, py = p
+                d = manh(nx, ny, px, py)
+                if d < dmin:
+                    dmin = d
+            score += 200 - 10 * dmin
+            if (nx, ny) in set(unclaimed_check):
+                score += 300
+        else:
+            score += 120 - 10 * manh(nx, ny, ox, oy)
+
+        if (nx, ny) in oppT:
+            score += 250
+        if (nx, ny) in selfT:
+            score -= 5
+
+        if score > best_score:
+            best_score = score
+            best = [dx, dy]
+
+    return best

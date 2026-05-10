@@ -1,0 +1,146 @@
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (sx, sy)
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h
+
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                obstacles.add((x, y))
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+
+    unclaimed = []
+    for key in ("unclaimed_cells", "unclaimed"):
+        for p in observation.get(key) or []:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                x, y = p[0], p[1]
+                if isinstance(x, int) and isinstance(y, int) and inside(x, y) and (x, y) not in obstacles:
+                    unclaimed.append((x, y))
+        if unclaimed:
+            break
+
+    self_terr = observation.get("self_territory") or []
+    self_set = set()
+    for p in self_terr:
+        if isinstance(p, (list, tuple)) and len(p) >= 2 and inside(p[0], p[1]) and (p[0], p[1]) not in obstacles:
+            self_set.add((int(p[0]), int(p[1])))
+
+    def dist(a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+    # Candidate selection: prefer close unclaimed, but also relatively far from opponent (to reduce contest chances)
+    best = None
+    best_key = None
+    opp_pos = (ox, oy)
+    us_pos = (sx, sy)
+    if unclaimed:
+        for x, y in unclaimed:
+            d1 = dist((x, y), us_pos)
+            d2 = dist((x, y), opp_pos)
+            # Tie-break deterministically by coordinates
+            key = (d1 - 0.35 * d2, x, y)
+            if best_key is None or key < best_key:
+                best_key = key
+                best = (x, y)
+
+    # If no unclaimed, aim for nearest cell adjacent to our territory that is not obstacle
+    if best is None and self_set:
+        boundary = []
+        for (x, y) in self_set:
+            for dx, dy in dirs:
+                nx, ny = x + dx, y + dy
+                if inside(nx, ny) and (nx, ny) not in obstacles and (nx, ny) not in self_set:
+                    boundary.append((nx, ny))
+        if boundary:
+            # prefer closer to us, then farther from opponent
+            bx = None
+            bkey = None
+            for x, y in boundary:
+                d1 = dist((x, y), us_pos)
+                d2 = dist((x, y), opp_pos)
+                key = (d1 - 0.25 * d2, x, y)
+                if bkey is None or key < bkey:
+                    bkey = key
+                    bx = (x, y)
+            best = bx
+
+    # Final fallback: move toward center
+    if best is None:
+        best = (w // 2, h // 2)
+
+    tx, ty = int(best[0]), int(best[1])
+    dx = 0 if tx == sx else (1 if tx > sx else -1)
+    dy = 0 if ty == sy else (1 if ty > sy else -1)
+
+    nx, ny = sx + dx, sy + dy
+    if not inside(nx, ny) or (nx, ny) in obstacles:
+        # Try axis-aligned alternatives in a deterministic order
+        options = [(dx, 0), (0, dy), (dx, dy)]
+        for ddx, ddy in options:
+            nx, ny = sx + ddx, sy + ddy
+            if inside(nx, ny) and (nx, ny) not in obstacles:
+                return
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 8) or 8)
+    h = int(observation.get("grid_height", 8) or 8)
+    sx, sy = observation.get("self_position") or (0, 0)
+    ox, oy = observation.get("opponent_position") or (sx, sy)
+    sx, sy, ox, oy = int(sx), int(sy), int(ox), int(oy)
+    obstacles = set()
+    for p in observation.get("obstacles") or []:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            x, y = p[0], p[1]
+            if isinstance(x, int) and isinstance(y, int) and 0 <= x < w and 0 <= y < h:
+                obstacles.add((x, y))
+
+    def inside(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obstacles
+
+    def collect(keys):
+        out = []
+        for k in keys:
+            for p in observation.get(k) or []:
+                if isinstance(p, (list, tuple)) and len(p) >= 2:
+                    x, y = p[0], p[1]
+                    if isinstance(x, int) and isinstance(y, int) and inside(x, y):
+                        out.append((x, y))
+        return out
+
+    unclaimed = collect(["unclaimed_cells", "unclaimed"])
+    resources = collect(["resources", "resource_cells", "resource_locations"])
+    target_list = unclaimed if unclaimed else resources if resources else []
+
+    tx, ty = ox, oy
+    if target_list:
+        best = None
+        for x, y in target_list:
+            d = (x - sx) * (x - sx) + (y - sy) * (y - sy)
+            if best is None or d < best[0] or (d == best[0] and (x, y) < (best[1], best[2])):
+                best = (d, x, y)
+        tx, ty = best[1], best[2]
+
+    dirs = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 0), (0, 1), (1, -1), (1, 0), (1, 1)]
+    best_move = (0, 0)
+    best_score = None
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inside(nx, ny):
+            continue
+        score = (nx - tx) * (nx - tx) + (ny - ty) * (ny - ty)
+        score += 0 if (dx, dy) == (0, 0) else 0
+        if score < (best_score if best_score is not None else score + 1) or (best_score is None and True):
+            best_score = score
+            best_move = (dx, dy)
+
+    return [int(best_move[0]), int(best_move[1])]

@@ -1,0 +1,158 @@
+def choose_move(observation):
+    w = observation["grid_width"]
+    h = observation["grid_height"]
+    sx, sy = observation["self_position"]
+    obstacles = observation.get("obstacles", []) or []
+    obs_set = {tuple(p) for p in obstacles}
+
+    self_set = {tuple(p) for p in (observation.get("self_territory", []) or [])}
+    opp_set = {tuple(p) for p in (observation.get("opponent_territory", []) or [])}
+    un_set = {tuple(p) for p in (observation.get("unclaimed_cells", []) or [])}
+
+    dirs = [(-1, -1), (0, -1), (1, -1), (-1, 0), (0, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+    neigh4 = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs_set
+
+    def man(ax, ay, bx, by):
+        dx = ax - bx
+        if dx < 0:
+            dx = -dx
+        dy = ay - by
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    def min_dist_to(sset, x, y):
+        if not sset:
+            return 99
+        md = 10**9
+        for (tx, ty) in sset:
+            d = man(x, y, tx, ty)
+            if d < md:
+                md = d
+        return md
+
+    def count_adj_to(sset, x, y):
+        c = 0
+        for dx, dy in neigh4:
+            if (x + dx, y + dy) in sset:
+                c += 1
+        return c
+
+    cand_phase = observation.get("turn_index", 0) % 6
+    center_bias = 0.25 if cand_phase < 3 else 0.12
+
+    best = -10**18
+    best_move = [0, 0]
+    opp_min_d = min_dist_to(opp_set, sx, sy)
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+
+        score = 0.0
+        adj_self = count_adj_to(self_set, nx, ny)
+        adj_opp = count_adj_to(opp_set, nx, ny)
+
+        if (nx, ny) in un_set:
+            score += 4.5 + 1.2 * adj_self
+            if adj_opp > 0:
+                score += 2.0 + 0.6 * adj_opp  # deny/interrupt sweeper routes
+            score += center_bias * (min(nx, w - 1 - nx) + min(ny, h - 1 - ny))
+            score += 0.05 * min(nx, ny, w - 1 - nx, h - 1 - ny)
+        elif (nx, ny) in opp_set:
+            # Flip pressure: only do it if we're not stepping too close without support.
+            d_to_opp_after = min_dist_to(opp_set, nx, ny)
+            score += 10.0 + 1.0 * adj_self - 0.9 * adj_opp
+            score += 0.25 * (opp_min_d - d_to_opp_after)
+
+        # Territory safety: prefer staying farther from opponent if not directly attacking.
+        d_to_opp = min_dist_to(opp_set, nx, ny)
+        score += 0.15 * (d_to_opp - 2)
+
+        # Mild obstacle-aware: discourage moving adjacent to obstacles.
+        adj_obs = 0
+        for ddx, ddy in neigh4:
+            tx, ty = nx + ddx, ny + ddy
+            if (tx, ty) in obs_set:
+                adj_obs += 1
+        score -= 0.25 * adj_obs
+
+        # If we are losing territory pressure, prioritize flips/denials more.
+        if observation.get("self_territory_count", 0) < observation.get("opponent_territory_count", 0):
+            score += 1.2 * adj_opp
+
+        if score > best + 1e-9:
+            best = score
+            best_move
+
+--- REPAIR ATTEMPT ---
+
+def choose_move(observation):
+    w = int(observation.get("grid_width", 0) or 0)
+    h = int(observation.get("grid_height", 0) or 0)
+    sx, sy = observation.get("self_position", (0, 0))
+    ox, oy = observation.get("opponent_position", (0, 0))
+
+    obstacles = observation.get("obstacles", []) or []
+    obs = {tuple(p) for p in obstacles if p is not None and len(p) >= 2}
+
+    resources = observation.get("resources", []) or []
+    res = [tuple(p) for p in resources if p is not None and len(p) >= 2]
+    opp_t = set(tuple(p) for p in (observation.get("opponent_territory", []) or []) if p is not None and len(p) >= 2)
+    self_t = set(tuple(p) for p in (observation.get("self_territory", []) or []) if p is not None and len(p) >= 2)
+    un = set(tuple(p) for p in (observation.get("unclaimed_cells", []) or []) if p is not None and len(p) >= 2)
+
+    def man(x1, y1, x2, y2):
+        dx = x1 - x2
+        if dx < 0:
+            dx = -dx
+        dy = y1 - y2
+        if dy < 0:
+            dy = -dy
+        return dx + dy
+
+    def inb(x, y):
+        return 0 <= x < w and 0 <= y < h and (x, y) not in obs
+
+    def nearest_res(x, y):
+        if not res:
+            return 0
+        bestd = 10**9
+        for rx, ry in res:
+            d = man(x, y, rx, ry)
+            if d < bestd:
+                bestd = d
+        return bestd
+
+    dirs = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]
+    best_score = -10**18
+    best_move = [0, 0]
+
+    for dx, dy in dirs:
+        nx, ny = sx + dx, sy + dy
+        if not inb(nx, ny):
+            continue
+
+        dres = nearest_res(nx, ny)
+        dprop = man(nx, ny, ox, oy)
+
+        score = -dres
+        if (nx, ny) in self_t:
+            score += 3
+        if (nx, ny) in opp_t:
+            score -= 6
+        if (nx, ny) in un:
+            score += 2
+        score -= dprop * 0.15
+
+        if score > best_score:
+            best_score = score
+            best_move = [dx, dy]
+
+    if best_move == [0, 0] and (sx, sy) in obs:
+        return [0, 0]
+    return best_move
