@@ -8,14 +8,17 @@ from typing import Any
 from xml.sax.saxutils import escape
 
 from PIL import Image as PILImage
+from reportlab.lib import colors
 from reportlab.lib.colors import HexColor
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
 IMAGE_PATTERN = re.compile(r"!\[(?P<alt>[^\]]*)\]\((?P<path>[^)]+)\)")
+ORDERED_LIST_PATTERN = re.compile(r"(?P<num>\d+)\.\s+(?P<text>.+)")
+TABLE_SEPARATOR_PATTERN = re.compile(r"^:?-{3,}:?$")
 
 
 def write_pdf_report(
@@ -44,17 +47,36 @@ def _build_story(markdown_report: str, report_dir: Path, run_name: str) -> list[
     styles = _build_styles()
     story: list[Any] = []
     title_seen = False
+    lines = markdown_report.splitlines()
+    index = 0
 
-    for raw_line in markdown_report.splitlines():
+    while index < len(lines):
+        raw_line = lines[index]
         stripped = raw_line.strip()
         if not stripped:
             if story:
                 story.append(Spacer(1, 0.08 * inch))
+            index += 1
             continue
 
         image_match = IMAGE_PATTERN.fullmatch(stripped)
         if image_match:
             story.extend(_image_flowables(image_match.group("path"), image_match.group("alt"), report_dir))
+            index += 1
+            continue
+
+        if _looks_like_table_row(stripped):
+            table_lines = [raw_line]
+            index += 1
+            while index < len(lines) and _looks_like_table_row(lines[index].strip()):
+                table_lines.append(lines[index])
+                index += 1
+            table_flowables = _table_flowable(table_lines, styles)
+            if table_flowables is not None:
+                story.extend(table_flowables)
+                continue
+            for table_line in table_lines:
+                story.append(Paragraph(escape(_sanitize_markdown_text(table_line.strip())), styles["body"]))
             continue
 
         if stripped.startswith("# "):
@@ -62,6 +84,7 @@ def _build_story(markdown_report: str, report_dir: Path, run_name: str) -> list[
             story.append(Paragraph(escape(text), styles["title"]))
             story.append(Spacer(1, 0.14 * inch))
             title_seen = True
+            index += 1
             continue
 
         if stripped.startswith("## "):
@@ -69,19 +92,30 @@ def _build_story(markdown_report: str, report_dir: Path, run_name: str) -> list[
             if title_seen:
                 story.append(Spacer(1, 0.1 * inch))
             story.append(Paragraph(escape(text), styles["h2"]))
+            index += 1
             continue
 
         if stripped.startswith("### "):
             text = _sanitize_markdown_text(stripped[4:])
             story.append(Paragraph(escape(text), styles["h3"]))
+            index += 1
+            continue
+
+        ordered_match = ORDERED_LIST_PATTERN.fullmatch(stripped)
+        if ordered_match:
+            text = _sanitize_markdown_text(ordered_match.group("text"))
+            story.append(Paragraph(escape(text), styles["bullet"], bulletText=f'{ordered_match.group("num")}.'))
+            index += 1
             continue
 
         if stripped.startswith("- "):
             text = _sanitize_markdown_text(stripped[2:])
-            story.append(Paragraph(escape(text), styles["bullet"], bulletText="•"))
+            story.append(Paragraph(escape(text), styles["bullet"], bulletText="-"))
+            index += 1
             continue
 
         story.append(Paragraph(escape(_sanitize_markdown_text(stripped)), styles["body"]))
+        index += 1
 
     if not story:
         story.append(Paragraph(f"LLM Adversarial Grid Report {escape(run_name)}", styles["title"]))
@@ -140,6 +174,22 @@ def _build_styles() -> dict[str, ParagraphStyle]:
             firstLineIndent=0,
             spaceAfter=2,
         ),
+        "table_header": ParagraphStyle(
+            "ReportTableHeader",
+            parent=base["BodyText"],
+            fontName="Helvetica-Bold",
+            fontSize=9,
+            leading=11,
+            textColor=HexColor("#111111"),
+        ),
+        "table_cell": ParagraphStyle(
+            "ReportTableCell",
+            parent=base["BodyText"],
+            fontName="Helvetica",
+            fontSize=9,
+            leading=11,
+            textColor=HexColor("#222222"),
+        ),
         "caption": ParagraphStyle(
             "ReportCaption",
             parent=base["BodyText"],
@@ -154,6 +204,69 @@ def _build_styles() -> dict[str, ParagraphStyle]:
 
 def _sanitize_markdown_text(text: str) -> str:
     return text.replace("`", "")
+
+
+def _looks_like_table_row(text: str) -> bool:
+    return text.startswith("|") and text.endswith("|") and text.count("|") >= 3
+
+
+def _table_flowable(table_lines: list[str], styles: dict[str, ParagraphStyle]) -> list[Any] | None:
+    if len(table_lines) < 2:
+        return None
+
+    rows = [_split_table_row(line) for line in table_lines]
+    if not rows or not _is_separator_row(rows[1]):
+        return None
+
+    body_rows = [rows[0], *rows[2:]]
+    column_count = max(len(row) for row in body_rows)
+    normalized_rows = [row + [""] * (column_count - len(row)) for row in body_rows]
+    widths = _table_column_widths(normalized_rows)
+    table_data: list[list[Paragraph]] = []
+
+    for row_index, row in enumerate(normalized_rows):
+        style = styles["table_header"] if row_index == 0 else styles["table_cell"]
+        table_data.append([Paragraph(escape(_sanitize_markdown_text(cell)), style) for cell in row])
+
+    table = Table(table_data, colWidths=widths, repeatRows=1, hAlign="LEFT")
+    table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), HexColor("#E8EEF7")),
+                ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#111111")),
+                ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, HexColor("#F7F9FC")]),
+            ]
+        )
+    )
+    return [table, Spacer(1, 0.08 * inch)]
+
+
+def _split_table_row(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _is_separator_row(row: list[str]) -> bool:
+    return bool(row) and all(TABLE_SEPARATOR_PATTERN.fullmatch(cell.strip()) for cell in row)
+
+
+def _table_column_widths(rows: list[list[str]]) -> list[float]:
+    max_width = 7.2 * inch
+    column_count = len(rows[0])
+    weights: list[float] = []
+
+    for column_index in range(column_count):
+        column_lengths = [len(re.sub(r"\s+", " ", row[column_index]).strip()) for row in rows]
+        weight = max(column_lengths) or 1
+        weights.append(float(min(max(weight, 10), 60)))
+
+    total_weight = sum(weights) or float(column_count)
+    return [max_width * (weight / total_weight) for weight in weights]
 
 
 def _image_flowables(path_text: str, alt_text: str, report_dir: Path) -> list[Any]:
