@@ -247,6 +247,11 @@ def run_epoch(
     elif scores[agent_names[1]] > scores[agent_names[0]]:
         winner = agent_names[1]
 
+    executed_codes = {
+        name: str(runtimes[name].executed_code or codes[name])
+        for name in agent_names
+    }
+
     return {
         "epoch_index": epoch_index,
         "map_seed": map_seed,
@@ -259,7 +264,7 @@ def run_epoch(
             positions=positions,
             scores=scores,
         ),
-        "codes": codes,
+        "codes": executed_codes,
         "scores": {name: float(value) for name, value in scores.items()},
         "winner": winner,
         "paths": {name: [list(item) for item in path] for name, path in paths.items()},
@@ -600,7 +605,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
             for agent in active_agents
         }
         code_fingerprints = {
-            agent.name: fingerprint_record(submitted_codes[agent.name])
+            agent.name: fingerprint_record(str(epoch_result["codes"][agent.name]))
             for agent in active_agents
         }
         epoch_result["behavioral_descriptors"] = behavioral_descriptors
@@ -647,7 +652,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
                         config=config,
                         focal_agent_name=focal_name,
                         focal_agent=base_agents[focal_name],
-                        focal_code=str(epoch_result["submitted_codes"][focal_name]),
+                        focal_code=str(epoch_result["codes"][focal_name]),
                         opponent_agent_name=opponent_name,
                         opponent_pool=replay_pool,
                         generation_cache=generation_cache,
@@ -663,7 +668,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
                         config=config,
                         focal_agent_name=focal_name,
                         focal_agent=base_agents[focal_name],
-                        focal_code=str(epoch_result["submitted_codes"][focal_name]),
+                        focal_code=str(epoch_result["codes"][focal_name]),
                         opponent_agent_name=opponent_name,
                         opponent_pool=holdout_pool,
                         generation_cache=generation_cache,
@@ -737,7 +742,7 @@ def run_condition(config: ConditionConfig, condition_dir: Path) -> dict[str, Any
         final_focal_code = (
             str(incumbent["code"])
             if incumbent and incumbent.get("code")
-            else str(history[-1]["submitted_codes"].get(focal_name, history[-1]["codes"].get(focal_name, "")))
+            else str(history[-1]["codes"].get(focal_name, history[-1]["submitted_codes"].get(focal_name, "")))
         )
         if final_focal_code:
             evaluation_summary = run_holdout_evaluation(

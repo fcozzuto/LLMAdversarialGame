@@ -270,7 +270,7 @@ def record_epoch_outcome(
             label=str(opponent_info["label"]),
             provider=str(opponent_info["agent"].provider),
             model=str(opponent_info["agent"].model),
-            code=str(epoch_result["submitted_codes"][opponent_agent]),
+            code=str(epoch_result["codes"][opponent_agent]),
             metadata=dict(opponent_info.get("metadata", {})),
             source_epoch=int(epoch_result["epoch_index"]),
             score_margin=abs(score_margin),
@@ -293,8 +293,8 @@ def record_epoch_outcome(
     if selection_decision and bool(selection_decision.get("accepted", False)):
         incumbent = {
             "epoch_index": int(epoch_result["epoch_index"]),
-            "code": str(epoch_result["submitted_codes"][focal_agent]),
-            "fingerprint": code_fingerprint(str(epoch_result["submitted_codes"][focal_agent])),
+            "code": str(epoch_result["codes"][focal_agent]),
+            "fingerprint": code_fingerprint(str(epoch_result["codes"][focal_agent])),
             "descriptor": focal_descriptor or {},
             "behavior_profile": behavioral_profile_label(focal_descriptor or {}),
             "behavior_cell": behavioral_cell(focal_descriptor or {}),
@@ -306,9 +306,9 @@ def record_epoch_outcome(
             elite_entry = ElitePolicyEntry(
                 cell=behavioral_cell(focal_descriptor),
                 behavior_profile=behavioral_profile_label(focal_descriptor),
-                code=str(epoch_result["submitted_codes"][focal_agent]),
+                code=str(epoch_result["codes"][focal_agent]),
                 descriptor=dict(focal_descriptor),
-                fingerprint=code_fingerprint(str(epoch_result["submitted_codes"][focal_agent])),
+                fingerprint=code_fingerprint(str(epoch_result["codes"][focal_agent])),
                 score=focal_score,
                 source_epoch=int(epoch_result["epoch_index"]),
                 opponent_label=str(opponent_info["label"]) if opponent_info else "",
@@ -331,7 +331,7 @@ def record_epoch_outcome(
             "reason": selection_decision.get("reason"),
             "score_delta": selection_decision.get("score_delta"),
             "behavioral_distance": selection_decision.get("behavioral_distance"),
-            "candidate_fingerprint": code_fingerprint(str(epoch_result["submitted_codes"][focal_agent])),
+            "candidate_fingerprint": code_fingerprint(str(epoch_result["codes"][focal_agent])),
         }
 
     trace_entry = {

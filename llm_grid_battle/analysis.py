@@ -148,7 +148,7 @@ def _curriculum_metrics(
 
     opponent_name = _opponent_name(agent_names, agent_name)
     fingerprints = [
-        str(epoch.get("code_fingerprints", {}).get(agent_name, {}).get("fingerprint", normalize_code(epoch["submitted_codes"][agent_name])))
+        str(epoch.get("code_fingerprints", {}).get(agent_name, {}).get("fingerprint", normalize_code(epoch["codes"][agent_name])))
         for epoch in epochs
     ]
     descriptors = [epoch.get("behavioral_descriptors", {}).get(agent_name, {}) for epoch in epochs]
@@ -160,7 +160,7 @@ def _curriculum_metrics(
     ]
     margins = [_score_margin(epoch, agent_name, opponent_name) for epoch in epochs]
     novelties = [
-        round(1.0 - code_similarity(epochs[index - 1]["submitted_codes"][agent_name], epochs[index]["submitted_codes"][agent_name]), 4)
+        round(1.0 - code_similarity(epochs[index - 1]["codes"][agent_name], epochs[index]["codes"][agent_name]), 4)
         for index in range(1, len(epochs))
     ]
     descriptor_shifts = [
@@ -606,7 +606,7 @@ def summarize_condition(condition_summary: dict[str, Any]) -> dict[str, Any]:
         win_counts[epoch["winner"]] += 1
         for agent_name in agent_names:
             score_series[agent_name].append(float(epoch["scores"][agent_name]))
-            current_code = epoch.get("submitted_codes", {}).get(agent_name, epoch["codes"][agent_name])
+            current_code = epoch["codes"][agent_name]
             codes_by_agent[agent_name].append(current_code)
             descriptor_series_by_agent[agent_name].append(epoch.get("behavioral_descriptors", {}).get(agent_name, {}))
             if previous_codes[agent_name] is not None:
