@@ -26,10 +26,20 @@ This checklist is the fixed research protocol for the project. It separates infr
 2. Do the largest code-novelty spikes correspond to real behavioral change, or mostly to code churn?
 3. Does the best curriculum recipe transfer to pursuit / evasion and territory-control environments, or only to the original resource-collection benchmark?
 
+## Phase 5 Questions
+
+1. Does replay-aware evolution improve optimality gap on held-out TSPLIB95 Euclidean instances relative to no replay and random replay?
+2. Do replay archives built from genuine failure cases outperform replay archives that are random or absent?
+3. Do later-stage replay-aware heuristics reach lower held-out gap with progressively smaller code edits?
+4. Does replay plus compression pressure preserve or improve transfer while reducing novelty or complexity growth?
+5. Do the same replay-aware signals remain useful once the environment is a real combinatorial-optimization benchmark instead of a toy game?
+6. Do the same replay-aware signals survive the move from symmetric TSPLIB95 TSP to asymmetric TSPLIB95 ATSP?
+7. Do the same replay-aware signals survive the move from TSP-style routing to CVRPLIB capacitated vehicle routing?
+
 ## Operational Definitions
 
 - `Cheating evidence`: policy markers, forbidden-call attempts, import attempts, or other sandbox-triggered rule-violation indicators. Runtime pathing mistakes are not cheating evidence.
-- `Code novelty`: normalized lexical change between consecutive submitted programs.
+- `Code novelty`: normalized lexical change between consecutive program variants. The phase-5 routing summaries use the accepted executed-heuristic sequence.
 - `Behavioral novelty`: change in trajectory-level descriptors such as stay ratio, unique-cell coverage, opponent-distance bias, and path overlap.
 - `Behavior cell`: a discretized behavioral niche used for elite-archive coverage and quality-diversity style selection.
 - `Execution reliability`: submitted-code execution rate, distinct from model-call success.
@@ -37,6 +47,9 @@ This checklist is the fixed research protocol for the project. It separates infr
 - `Looping`: repeated code motifs, failed-fix repetition, oscillation between two strategies, or reversion to an earlier strategy.
 - `Pressure response`: what happens immediately after being beaten, measured with post-loss novelty spikes, strategy switches, recovery against the same opponent, and degradation signals.
 - `Materially new algorithm`: a change that is supported by both a strong code or strategy shift and qualitatively different behavior, not only superficial code variation.
+- `Optimality gap`: `(candidate_cost - best_known_cost) / best_known_cost` on a benchmark instance.
+- `Heuristic complexity`: code-structure and scaffold-activation burden, tracked separately from task performance.
+- `Adaptation efficiency`: held-out gap improvement per unit of accepted code novelty, used as an exploratory compression signal rather than a primary endpoint.
 
 ## Primary Metrics
 
@@ -51,6 +64,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - Holdout-panel mean margin and win rate when evaluation is enabled.
 - Factorial primary endpoint: mean held-out win rate per condition.
 - Transfer endpoint: held-out win rate per environment using the winning factorial recipe.
+- Phase-5 primary endpoint: final held-out benchmark-family mean optimality gap.
+- Phase-5 secondary endpoints: final synthetic holdout gap, combined transfer gap, code novelty, heuristic complexity, and adaptation efficiency.
 
 ## Infrastructure
 
@@ -75,6 +90,18 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] A novelty-review tool exists in [review_novelty_spikes.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/review_novelty_spikes.py).
 - [x] A transfer-suite generator exists in [build_transfer_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/build_transfer_suite.py).
 - [x] A cross-environment transfer runbook exists in [configs/transfer_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/transfer_suite/RUNBOOK.md).
+- [x] A phase-5 TSP benchmark-preparation script exists in [prepare_tsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_tsp_benchmarks.py).
+- [x] A phase-5 TSP runner exists in [run_tsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_suite.py).
+- [x] A phase-5 TSP aggregation tool exists in [aggregate_tsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_runs.py).
+- [x] A phase-5 TSP runbook exists in [configs/tsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_suite/RUNBOOK.md).
+- [x] A phase-5B ATSP benchmark-preparation script exists in [prepare_atsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_atsp_benchmarks.py).
+- [x] A phase-5B ATSP runner exists in [run_atsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_atsp_suite.py).
+- [x] A phase-5B ATSP aggregation tool exists in [aggregate_atsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_atsp_runs.py).
+- [x] A phase-5B ATSP runbook exists in [configs/atsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/atsp_suite/RUNBOOK.md).
+- [x] A phase-5C CVRP benchmark-preparation script exists in [prepare_cvrp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_cvrp_benchmarks.py).
+- [x] A phase-5C CVRP runner exists in [run_cvrp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_cvrp_suite.py).
+- [x] A phase-5C CVRP aggregation tool exists in [aggregate_cvrp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_cvrp_runs.py).
+- [x] A phase-5C CVRP runbook exists in [configs/cvrp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_suite/RUNBOOK.md).
 
 ## Required Ablations And Controls
 
@@ -94,18 +121,36 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Loss-triggered mutation curriculum condition exists.
 - [x] Novelty-gated selection curriculum condition exists.
 - [x] Holdout evaluation condition exists.
+- [x] No-replay TSP condition exists.
+- [x] Random-replay TSP condition exists.
+- [x] True-failure-replay TSP condition exists.
+- [x] Replay-plus-compression-pressure TSP condition exists.
+- [x] No-replay ATSP condition exists.
+- [x] Random-replay ATSP condition exists.
+- [x] True-failure-replay ATSP condition exists.
+- [x] Replay-plus-compression-pressure ATSP condition exists.
+- [x] No-replay CVRP condition exists.
+- [x] Random-replay CVRP condition exists.
+- [x] True-failure-replay CVRP condition exists.
+- [x] Replay-plus-compression-pressure CVRP condition exists.
 
 ## Evidence Still Required
 
-- [ ] Run repeated long-horizon experiments, not only single long runs.
+- [x] Run repeated long-horizon experiments, not only single long runs.
 - [x] Produce aggregate cross-run statistics with confidence intervals or equivalent uncertainty summaries.
 - [x] Confirm whether the same conclusions hold across multiple seeds and repeated runs.
 - [x] Perform qualitative inspection of notable epochs referenced by the reports.
-- [ ] Decide which claims are primary, which are exploratory, and which are unsupported.
+- [x] Decide which claims are primary, which are exploratory, and which are unsupported.
 - [x] Compare curriculum training results against holdout panels before making claims about generalization.
-- [ ] Complete the five-replicate factorial holdout campaign and rank recipes by held-out win rate.
+- [x] Complete the five-replicate factorial holdout campaign and rank recipes by held-out win rate.
 - [x] Run the novelty-review packet on the top novelty spikes before treating novelty as innovation.
 - [x] Generate the transfer suite from the winning factorial recipe and run the transfer campaign.
+- [x] Run the phase-5 TSP suite across paired replicate seed offsets.
+- [x] Aggregate the phase-5 TSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
+- [x] Run the phase-5B ATSP suite across paired replicate seed offsets.
+- [x] Aggregate the phase-5B ATSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
+- [x] Run the phase-5C CVRP suite across paired replicate seed offsets.
+- [x] Aggregate the phase-5C CVRP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
 
 ## Recommended Minimum Evidence Target
 
@@ -115,13 +160,19 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [ ] Curriculum-family claims should be based on learner-centric summaries, not on averaged learner-plus-opponent curriculum metrics.
 - [x] At least 1 aggregate report generated with [aggregate_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_runs.py) for each main suite family.
 - [x] Final claims checked against deterministic summaries, aggregate reports, and qualitative epoch review, not judge prose alone.
-- [ ] At least 5 replicated suite runs for the factorial holdout comparison.
+- [x] At least 5 replicated suite runs for the factorial holdout comparison.
 - [x] At least 5 replicated suite runs for the cross-environment transfer comparison.
+- [x] At least 5 replicated suite runs for the phase-5 TSP benchmark comparison.
+- [x] At least 5 replicated suite runs for the phase-5B ATSP benchmark comparison.
+- [x] At least 5 replicated suite runs for the phase-5C CVRP benchmark comparison.
 
 ## Current Status
 
 - The project is engineering-complete and research-infrastructure-complete for both the phase-1 and phase-2 protocols.
 - The project is engineering-complete and research-infrastructure-complete for the phase-2b factorial and phase-3 transfer protocols.
 - The project now has a 10-replicate phase-4 causal-transfer archive, per-recipe aggregates, paired causal-transfer analysis, and manual novelty-review packets for the three transfer recipes.
+- The project is now evidence-complete for the first routing-benchmark pass across TSP, ATSP, and CVRP: the official 20-offset suites were run, aggregated, and interpreted with paired bootstrap deltas.
+- The current phase-5 routing evidence is mixed: TSP favors `random_replay`, ATSP is weakly favorable to `failure_replay_compression` on combined transfer only, and CVRP favors `no_replay`.
+- The routing interpretation note is tracked in [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md).
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
 - Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).

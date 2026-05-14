@@ -84,7 +84,7 @@ Goal: move from "works on this benchmark family" toward stronger and more defens
 - [ ] Add variation in board size, obstacle density, resource layout, and spawn rules.
 - [ ] Test unseen opponent families that were never present during training.
 - [ ] Report generalization separately by regime instead of averaging everything together.
-- [ ] Avoid broad generalization claims unless a second environment is added.
+- [ ] Avoid broad generalization claims even after the added routing benchmark families are run with replicated official suites. The completed 20-offset TSP/ATSP/CVRP pass is mixed and family-dependent, so broader replay-aware claims still need tighter scope and better mechanism-level explanation.
 - [ ] If feasible, add a second related environment and rerun the evaluation protocol there.
 
 Why this matters:
