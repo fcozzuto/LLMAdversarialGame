@@ -1,6 +1,6 @@
 # Phase 4 Causal Transfer Protocol
 
-This document defines the next study phase after the initial transfer result.
+This document defines the next study phase after the initial transfer result. The benchmark-transfer phase that follows this causal-interpretation pass starts in [docs/TSP_PHASE_5_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/TSP_PHASE_5_PROTOCOL.md) and extends through [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md).
 
 The goal is not to add another curriculum mechanism yet. The goal is to strengthen the causal interpretation of the transfer result already on the table.
 

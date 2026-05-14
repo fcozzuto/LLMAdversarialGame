@@ -5,7 +5,7 @@ This document defines the follow-on study after the first adversarial-curriculum
 1. `Phase 2b`: a holdout-first factorial ablation in the original resource-collection environment.
 2. `Phase 3`: cross-environment transfer of the best curriculum recipe.
 
-For the next step after the initial transfer result, use [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md).
+For the next step after the initial transfer result, use [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md). For the benchmark-transfer step after the causal interpretation phase, start with [docs/TSP_PHASE_5_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/TSP_PHASE_5_PROTOCOL.md) and then use [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md) for the ATSP/CVRP extensions.
 
 ## Why This Exists
 
