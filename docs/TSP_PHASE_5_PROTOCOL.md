@@ -151,4 +151,7 @@ The first completed 20-offset routing pass is summarized in [docs/PHASE_5_ROUTIN
 
 For this TSP family, the strongest result was not `failure_replay`; it was `random_replay`. That means this protocol remains useful as the benchmark recipe, but the completed evidence should be read through the results note rather than through the original expectation alone.
 
-The direct follow-on phase is now [docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md), which focuses on explaining why `random_replay` beat `failure_replay` on symmetric TSP before the project makes stronger replay-mechanism claims.
+The two direct follow-on phases are now:
+
+- [docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md) for the mechanism study
+- [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md) for modular operator discovery

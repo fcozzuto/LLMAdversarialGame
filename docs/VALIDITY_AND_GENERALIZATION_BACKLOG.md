@@ -131,6 +131,19 @@ Goal: make the phase-6 replay explanation harder to dismiss as a post hoc story.
 Why this matters:
 - “Random replay won” is interesting, but the mechanism claim still needs to survive basic robustness checks.
 
+## 9. Tighten Phase 7 Discovery Validation
+
+Goal: reduce the chance that a phase-7 “discovered operator” is only a renamed standard trick or a host-scaffold artifact.
+
+- [ ] Add a manual literature audit for any operator that survives the automated filter.
+- [ ] Expand transplant validation from held-out TSPLIB to a second scaffold pool if runtime allows.
+- [ ] Check whether operator signatures remain stable when validation-family seeds are changed.
+- [ ] Compare rediscovery counts using both exact signatures and coarser novelty-classification families.
+- [ ] Add a blinded review step for the strongest surviving operator reports before making novelty claims.
+
+Why this matters:
+- The main scientific value of phase 7 is interpretability, so false-positive “discoveries” are especially costly.
+
 ## Exit Condition
 
 These items are reduced enough for a stronger publication push when:
