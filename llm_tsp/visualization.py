@@ -162,3 +162,181 @@ def write_metric_plot_png(
         draw.line([(width - right_margin + 8, legend_y), (width - right_margin + 30, legend_y)], fill=color, width=4)
         draw.text((width - right_margin + 40, legend_y - 6), label, fill=color, font=body_font)
     image.save(path)
+
+
+def write_scatter_plot_svg(
+    *,
+    path: Path,
+    title: str,
+    x_label: str,
+    y_label: str,
+    points: list[dict[str, object]],
+) -> None:
+    width = 980
+    height = 460
+    left_margin = 84
+    right_margin = 240
+    top_margin = 68
+    bottom_margin = 76
+    colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#8c564b", "#17becf", "#ff7f0e"]
+    x_values = [float(point.get("x", 0.0)) for point in points]
+    y_values = [float(point.get("y", 0.0)) for point in points]
+    min_x = min(x_values) if x_values else 0.0
+    max_x = max(x_values) if x_values else 1.0
+    min_y = min(y_values) if y_values else 0.0
+    max_y = max(y_values) if y_values else 1.0
+    if abs(max_x - min_x) < 1e-9:
+        max_x = min_x + 1.0
+    if abs(max_y - min_y) < 1e-9:
+        max_y = min_y + 1.0
+
+    def project_x(value: float) -> float:
+        return left_margin + ((value - min_x) / (max_x - min_x)) * (width - left_margin - right_margin)
+
+    def project_y(value: float) -> float:
+        return height - bottom_margin - ((value - min_y) / (max_y - min_y)) * (height - top_margin - bottom_margin)
+
+    labels = sorted({str(point.get("series", "points")) for point in points})
+    color_map = {label: colors[index % len(colors)] for index, label in enumerate(labels)}
+    parts = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
+        f"<title>{escape(title)}</title>",
+        '<rect width="100%" height="100%" fill="#ffffff"/>',
+        f'<text x="{left_margin}" y="34" font-family="Arial" font-size="22" font-weight="bold" fill="#111111">{escape(title)}</text>',
+        f'<line x1="{left_margin}" y1="{height - bottom_margin}" x2="{width - right_margin}" y2="{height - bottom_margin}" stroke="#444444"/>',
+        f'<line x1="{left_margin}" y1="{top_margin}" x2="{left_margin}" y2="{height - bottom_margin}" stroke="#444444"/>',
+        f'<text x="{left_margin + (width - left_margin - right_margin) / 2}" y="{height - 20}" text-anchor="middle" font-family="Arial" font-size="14" fill="#333333">{escape(x_label)}</text>',
+        f'<text x="24" y="{top_margin + (height - top_margin - bottom_margin) / 2}" font-family="Arial" font-size="14" fill="#333333" transform="rotate(-90 24 {top_margin + (height - top_margin - bottom_margin) / 2})">{escape(y_label)}</text>',
+    ]
+
+    for tick_index in range(6):
+        x_value = min_x + ((max_x - min_x) * tick_index / 5.0)
+        x_pos = project_x(x_value)
+        parts.extend(
+            [
+                f'<line x1="{x_pos}" y1="{height - bottom_margin}" x2="{x_pos}" y2="{height - bottom_margin + 6}" stroke="#666666"/>',
+                f'<line x1="{x_pos}" y1="{top_margin}" x2="{x_pos}" y2="{height - bottom_margin}" stroke="#f0f0f0"/>',
+                f'<text x="{x_pos}" y="{height - bottom_margin + 22}" text-anchor="middle" font-family="Arial" font-size="12" fill="#555555">{x_value:.3f}</text>',
+            ]
+        )
+    for tick_index in range(6):
+        y_value = min_y + ((max_y - min_y) * tick_index / 5.0)
+        y_pos = project_y(y_value)
+        parts.extend(
+            [
+                f'<line x1="{left_margin - 6}" y1="{y_pos}" x2="{left_margin}" y2="{y_pos}" stroke="#666666"/>',
+                f'<line x1="{left_margin}" y1="{y_pos}" x2="{width - right_margin}" y2="{y_pos}" stroke="#f0f0f0"/>',
+                f'<text x="{left_margin - 10}" y="{y_pos + 4}" text-anchor="end" font-family="Arial" font-size="12" fill="#555555">{y_value:.3f}</text>',
+            ]
+        )
+
+    for point in points:
+        x_pos = project_x(float(point.get("x", 0.0)))
+        y_pos = project_y(float(point.get("y", 0.0)))
+        color = color_map[str(point.get("series", "points"))]
+        label = str(point.get("label", ""))
+        parts.append(f'<circle cx="{x_pos}" cy="{y_pos}" r="5" fill="{color}" opacity="0.85"/>')
+        if label:
+            parts.append(
+                f'<text x="{x_pos + 8}" y="{y_pos - 8}" font-family="Arial" font-size="11" fill="{color}">{escape(label)}</text>'
+            )
+
+    for index, label in enumerate(labels):
+        legend_y = top_margin + 24 * index
+        color = color_map[label]
+        parts.extend(
+            [
+                f'<circle cx="{width - right_margin + 18}" cy="{legend_y}" r="5" fill="{color}"/>',
+                f'<text x="{width - right_margin + 32}" y="{legend_y + 4}" font-family="Arial" font-size="14" fill="{color}">{escape(label)}</text>',
+            ]
+        )
+    parts.append("</svg>")
+    path.write_text("\n".join(parts), encoding="utf-8")
+
+
+def write_scatter_plot_png(
+    *,
+    path: Path,
+    title: str,
+    x_label: str,
+    y_label: str,
+    points: list[dict[str, object]],
+) -> None:
+    width = 980
+    height = 460
+    left_margin = 84
+    right_margin = 280
+    top_margin = 68
+    bottom_margin = 76
+    colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#8c564b", "#17becf", "#ff7f0e"]
+    x_values = [float(point.get("x", 0.0)) for point in points]
+    y_values = [float(point.get("y", 0.0)) for point in points]
+    min_x = min(x_values) if x_values else 0.0
+    max_x = max(x_values) if x_values else 1.0
+    min_y = min(y_values) if y_values else 0.0
+    max_y = max(y_values) if y_values else 1.0
+    if abs(max_x - min_x) < 1e-9:
+        max_x = min_x + 1.0
+    if abs(max_y - min_y) < 1e-9:
+        max_y = min_y + 1.0
+
+    def project_x(value: float) -> float:
+        return left_margin + ((value - min_x) / (max_x - min_x)) * (width - left_margin - right_margin)
+
+    def project_y(value: float) -> float:
+        return height - bottom_margin - ((value - min_y) / (max_y - min_y)) * (height - top_margin - bottom_margin)
+
+    def hex_to_rgb(color: str) -> tuple[int, int, int]:
+        color = color.lstrip("#")
+        return tuple(int(color[idx : idx + 2], 16) for idx in (0, 2, 4))
+
+    def text_size(draw: ImageDraw.ImageDraw, font: ImageFont.ImageFont, text: str) -> tuple[int, int]:
+        box = draw.textbbox((0, 0), text, font=font)
+        return box[2] - box[0], box[3] - box[1]
+
+    labels = sorted({str(point.get("series", "points")) for point in points})
+    color_map = {label: hex_to_rgb(colors[index % len(colors)]) for index, label in enumerate(labels)}
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    title_font = ImageFont.load_default()
+    body_font = ImageFont.load_default()
+
+    draw.text((left_margin, 20), title, fill=(17, 17, 17), font=title_font)
+    draw.line([(left_margin, height - bottom_margin), (width - right_margin, height - bottom_margin)], fill=(68, 68, 68), width=2)
+    draw.line([(left_margin, top_margin), (left_margin, height - bottom_margin)], fill=(68, 68, 68), width=2)
+    x_width, _ = text_size(draw, body_font, x_label)
+    draw.text(((left_margin + (width - left_margin - right_margin) / 2) - (x_width / 2), height - 34), x_label, fill=(51, 51, 51), font=body_font)
+    draw.text((18, top_margin + 8), y_label, fill=(51, 51, 51), font=body_font)
+
+    for tick_index in range(6):
+        x_value = min_x + ((max_x - min_x) * tick_index / 5.0)
+        x_pos = project_x(x_value)
+        draw.line([(x_pos, height - bottom_margin), (x_pos, height - bottom_margin + 6)], fill=(102, 102, 102), width=1)
+        draw.line([(x_pos, top_margin), (x_pos, height - bottom_margin)], fill=(240, 240, 240), width=1)
+        label = f"{x_value:.3f}"
+        label_width, _ = text_size(draw, body_font, label)
+        draw.text((x_pos - (label_width / 2), height - bottom_margin + 10), label, fill=(85, 85, 85), font=body_font)
+    for tick_index in range(6):
+        y_value = min_y + ((max_y - min_y) * tick_index / 5.0)
+        y_pos = project_y(y_value)
+        draw.line([(left_margin - 6, y_pos), (left_margin, y_pos)], fill=(102, 102, 102), width=1)
+        draw.line([(left_margin, y_pos), (width - right_margin, y_pos)], fill=(240, 240, 240), width=1)
+        label = f"{y_value:.3f}"
+        label_width, label_height = text_size(draw, body_font, label)
+        draw.text((left_margin - 10 - label_width, y_pos - (label_height / 2)), label, fill=(85, 85, 85), font=body_font)
+
+    for point in points:
+        x_pos = project_x(float(point.get("x", 0.0)))
+        y_pos = project_y(float(point.get("y", 0.0)))
+        color = color_map[str(point.get("series", "points"))]
+        draw.ellipse((x_pos - 4, y_pos - 4, x_pos + 4, y_pos + 4), fill=color)
+        label = str(point.get("label", ""))
+        if label:
+            draw.text((x_pos + 7, y_pos - 10), label, fill=color, font=body_font)
+
+    for index, label in enumerate(labels):
+        legend_y = top_margin + 24 * index
+        color = color_map[label]
+        draw.ellipse((width - right_margin + 12, legend_y - 4, width - right_margin + 20, legend_y + 4), fill=color)
+        draw.text((width - right_margin + 30, legend_y - 6), label, fill=color, font=body_font)
+    image.save(path)

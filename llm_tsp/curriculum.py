@@ -8,15 +8,24 @@ from .behavioral_descriptors import behavioral_cell, behavioral_profile_label
 from .benchmark import TSPInstance
 from .code_features import code_fingerprint
 from .config import TSPConditionConfig
+from .replay_policies import archive_composition_snapshots, select_replay_entries
 
 
-def build_curriculum_state(config: TSPConditionConfig, adversarial_instances: list[TSPInstance]) -> dict[str, Any]:
+def build_curriculum_state(
+    config: TSPConditionConfig,
+    adversarial_instances: list[TSPInstance],
+    *,
+    reference_instances: list[TSPInstance] | None = None,
+    difficulty_model: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     adversarial_archive = ReplayArchive(max_size=max(config.replay.archive_max_size, len(adversarial_instances), 1))
     adversarial_archive.record_many(
         [
             ReplayEntry(
                 instance=instance.to_dict(),
                 gap=0.0,
+                expected_gap=0.0,
+                residual_gap=0.0,
                 source_epoch=0,
                 replay_kind="adversarial_layout",
             )
@@ -24,13 +33,19 @@ def build_curriculum_state(config: TSPConditionConfig, adversarial_instances: li
         ]
     )
     return {
+        "experience_archive": ReplayArchive(max_size=config.replay.experience_archive_max_size),
         "worst_archive": ReplayArchive(max_size=config.replay.archive_max_size),
         "failure_archive": ReplayArchive(max_size=config.replay.archive_max_size),
+        "residual_archive": ReplayArchive(max_size=config.replay.archive_max_size, ranking_metric="residual_gap"),
         "adversarial_archive": adversarial_archive,
         "elite_archive": EliteHeuristicArchive(max_size=config.selection.elite_archive_max_size),
         "incumbent": None,
         "last_rejection": None,
+        "last_replay_selection": {},
         "non_improving_streak": 0,
+        "replay_reference_instances": list(reference_instances or adversarial_instances),
+        "difficulty_model": difficulty_model,
+        "selection_epoch_cursor": 0,
         "trace": [],
     }
 
@@ -43,21 +58,29 @@ def current_baseline_score(state: dict[str, Any]) -> float | None:
 
 
 def build_prompt_context(config: TSPConditionConfig, state: dict[str, Any]) -> dict[str, Any]:
+    experience_archive = state["experience_archive"]
     elite_archive = state["elite_archive"]
     worst_archive = state["worst_archive"]
     failure_archive = state["failure_archive"]
+    residual_archive = state["residual_archive"]
     adversarial_archive = state["adversarial_archive"]
+    archive_snapshots = archive_composition_snapshots(state)
     return {
         "enabled": True,
         "replay_mode": config.replay.mode,
+        "experience_archive_size": len(experience_archive),
         "worst_archive_size": len(worst_archive),
         "worst_archive_examples": [entry.to_dict() for entry in worst_archive.hardest(4)],
         "failure_archive_size": len(failure_archive),
         "failure_archive_examples": [entry.to_dict() for entry in failure_archive.hardest(4)],
+        "residual_archive_size": len(residual_archive),
+        "residual_archive_examples": [entry.to_dict() for entry in residual_archive.hardest(4, metric="residual_gap")],
         "adversarial_archive_size": len(adversarial_archive),
         "adversarial_archive_examples": [entry.to_dict() for entry in adversarial_archive.hardest(4)],
+        "archive_composition": archive_snapshots,
         "elite_archive_size": len(elite_archive),
         "elite_profiles": elite_archive.profiles()[:6],
+        "last_replay_selection": dict(state.get("last_replay_selection", {})),
         "non_improving_streak": int(state.get("non_improving_streak", 0)),
         "last_acceptance_reason": (state.get("incumbent") or {}).get("selection_reason", "n/a"),
         "compression_pressure": bool(config.selection.compression_pressure),
@@ -80,22 +103,8 @@ def _dedupe_entries(entries: list[ReplayEntry], *, limit: int) -> list[ReplayEnt
 
 
 def replay_pool(config: TSPConditionConfig, state: dict[str, Any]) -> list[dict[str, Any]]:
-    count = max(0, int(config.replay.replay_instance_count))
-    if count <= 0:
-        return []
-    if config.replay.mode == "random":
-        selected = _dedupe_entries(
-            state["worst_archive"].randomish(count) + state["adversarial_archive"].randomish(count),
-            limit=count,
-        )
-        state["worst_archive"].note_selected(selected)
-        state["adversarial_archive"].note_selected(selected)
-        return [entry.to_dict() for entry in selected]
-    if config.replay.mode == "failure":
-        selected = state["failure_archive"].hardest(count)
-        state["failure_archive"].note_selected(selected)
-        return [entry.to_dict() for entry in selected]
-    return []
+    selected = select_replay_entries(config, state)
+    return [entry.to_dict() for entry in _dedupe_entries(selected, limit=len(selected))]
 
 
 def record_epoch_outcome(
@@ -110,16 +119,51 @@ def record_epoch_outcome(
     adversarial_probe_results: list[dict[str, Any]],
     mean_training_score: float,
 ) -> dict[str, Any]:
+    experience_archive = state["experience_archive"]
     worst_archive = state["worst_archive"]
     failure_archive = state["failure_archive"]
+    residual_archive = state["residual_archive"]
     adversarial_archive = state["adversarial_archive"]
     archive_events: dict[str, Any] = {}
+
+    experience_archive.record_many(
+        [
+            ReplayEntry(
+                instance=dict(item["instance"]),
+                gap=float(item["optimality_gap"]),
+                expected_gap=float(item.get("expected_gap", 0.0)),
+                residual_gap=float(item.get("residual_gap", 0.0)),
+                source_epoch=epoch_index,
+                replay_kind="training_experience",
+            )
+            for item in training_results
+        ]
+    )
+    if adversarial_probe_results:
+        experience_archive.record_many(
+            [
+                ReplayEntry(
+                    instance=dict(item["instance"]),
+                    gap=float(item["optimality_gap"]),
+                    expected_gap=float(item.get("expected_gap", 0.0)),
+                    residual_gap=float(item.get("residual_gap", 0.0)),
+                    source_epoch=epoch_index,
+                    replay_kind="adversarial_experience",
+                )
+                for item in adversarial_probe_results
+            ]
+        )
+    archive_events["experience_archive"] = {
+        "archive_size": len(experience_archive),
+    }
 
     worst_archive.record_many(
         [
             ReplayEntry(
                 instance=dict(item["instance"]),
                 gap=float(item["optimality_gap"]),
+                expected_gap=float(item.get("expected_gap", 0.0)),
+                residual_gap=float(item.get("residual_gap", 0.0)),
                 source_epoch=epoch_index,
                 replay_kind="worst_training_gap",
             )
@@ -144,6 +188,8 @@ def record_epoch_outcome(
                 ReplayEntry(
                     instance=dict(item["instance"]),
                     gap=float(item["optimality_gap"]),
+                    expected_gap=float(item.get("expected_gap", 0.0)),
+                    residual_gap=float(item.get("residual_gap", 0.0)),
                     source_epoch=epoch_index,
                     replay_kind="catastrophic_gap",
                 )
@@ -158,12 +204,40 @@ def record_epoch_outcome(
             "archive_size": len(failure_archive),
         }
 
+    residual_training = [
+        item for item in training_results
+        if float(item.get("residual_gap", 0.0)) > 0.0
+    ]
+    if residual_training:
+        residual_archive.record_many(
+            [
+                ReplayEntry(
+                    instance=dict(item["instance"]),
+                    gap=float(item["optimality_gap"]),
+                    expected_gap=float(item.get("expected_gap", 0.0)),
+                    residual_gap=float(item.get("residual_gap", 0.0)),
+                    source_epoch=epoch_index,
+                    replay_kind="residual_failure_gap",
+                )
+                for item in residual_training
+            ]
+        )
+        worst_residual = max(residual_training, key=lambda item: float(item.get("residual_gap", 0.0)))
+        archive_events["residual_failures"] = {
+            "count": len(residual_training),
+            "worst_instance_name": worst_residual["instance"]["name"],
+            "worst_residual_gap": round(float(worst_residual["residual_gap"]), 6),
+            "archive_size": len(residual_archive),
+        }
+
     if adversarial_probe_results:
         adversarial_archive.record_many(
             [
                 ReplayEntry(
                     instance=dict(item["instance"]),
                     gap=float(item["optimality_gap"]),
+                    expected_gap=float(item.get("expected_gap", 0.0)),
+                    residual_gap=float(item.get("residual_gap", 0.0)),
                     source_epoch=epoch_index,
                     replay_kind="adversarial_layout",
                 )
@@ -226,8 +300,12 @@ def record_epoch_outcome(
         "selection": selection_decision,
         "archive_events": archive_events,
         "elite_event": elite_event,
+        "replay_selection": dict(state.get("last_replay_selection", {})),
+        "archive_composition": archive_composition_snapshots(state),
+        "experience_archive_mean_gap": round(mean([entry.gap for entry in experience_archive.hardest(6)]), 6) if len(experience_archive) else 0.0,
         "worst_archive_mean_gap": round(mean([entry.gap for entry in worst_archive.hardest(4)]), 6) if len(worst_archive) else 0.0,
         "failure_archive_mean_gap": round(mean([entry.gap for entry in failure_archive.hardest(4)]), 6) if len(failure_archive) else 0.0,
+        "residual_archive_mean_gap": round(mean([entry.residual_gap for entry in residual_archive.hardest(4, metric="residual_gap")]), 6) if len(residual_archive) else 0.0,
         "adversarial_archive_mean_gap": round(mean([entry.gap for entry in adversarial_archive.hardest(4)]), 6) if len(adversarial_archive) else 0.0,
     }
     state["trace"].append(trace_entry)

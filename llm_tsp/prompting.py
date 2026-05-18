@@ -109,14 +109,37 @@ def build_generation_prompt(
                 "",
                 "Replay-aware context:",
                 f"- Replay mode: {curriculum_context.get('replay_mode', 'none')}",
+                f"- Experience archive size: {curriculum_context.get('experience_archive_size', 0)}",
                 f"- Worst-case archive size: {curriculum_context.get('worst_archive_size', 0)}",
                 f"- Failure archive size: {curriculum_context.get('failure_archive_size', 0)}",
+                f"- Residual-failure archive size: {curriculum_context.get('residual_archive_size', 0)}",
                 f"- Adversarial-layout archive size: {curriculum_context.get('adversarial_archive_size', 0)}",
                 f"- Elite archive size: {curriculum_context.get('elite_archive_size', 0)}",
                 f"- Non-improving streak: {curriculum_context.get('non_improving_streak', 0)}",
                 f"- Last acceptance reason: {curriculum_context.get('last_acceptance_reason', 'n/a')}",
             ]
         )
+        archive_composition = curriculum_context.get("archive_composition", {})
+        if archive_composition:
+            experience = archive_composition.get("experience_archive", {})
+            worst = archive_composition.get("worst_archive", {})
+            residual = archive_composition.get("residual_archive", {})
+            parts.extend(
+                [
+                    f"- Experience-archive descriptor diversity: {experience.get('descriptor_diversity', 0.0)} and hardness: {experience.get('archive_hardness', 0.0)}",
+                    f"- Worst-case archive descriptor diversity: {worst.get('descriptor_diversity', 0.0)} and hardness: {worst.get('archive_hardness', 0.0)}",
+                    f"- Residual-failure archive descriptor diversity: {residual.get('descriptor_diversity', 0.0)} and residual hardness: {residual.get('archive_residual_hardness', 0.0)}",
+                ]
+            )
+        last_replay_selection = curriculum_context.get("last_replay_selection", {})
+        if last_replay_selection:
+            parts.extend(
+                [
+                    f"- Last replay selection diversity: {last_replay_selection.get('descriptor_diversity', 0.0)}",
+                    f"- Last replay selection expected gap: {last_replay_selection.get('selected_mean_expected_gap', 0.0)}",
+                    f"- Last replay selection residual gap: {last_replay_selection.get('selected_mean_residual_gap', 0.0)}",
+                ]
+            )
         if curriculum_context.get("worst_archive_examples"):
             parts.append("- Worst-performing training cases in archive:")
             for item in curriculum_context["worst_archive_examples"][:4]:
@@ -124,6 +147,10 @@ def build_generation_prompt(
         if curriculum_context.get("failure_archive_examples"):
             parts.append("- Catastrophic failure cases in archive:")
             for item in curriculum_context["failure_archive_examples"][:4]:
+                parts.append(f"  {json.dumps(item, sort_keys=True)}")
+        if curriculum_context.get("residual_archive_examples"):
+            parts.append("- Residual failure cases in archive:")
+            for item in curriculum_context["residual_archive_examples"][:4]:
                 parts.append(f"  {json.dumps(item, sort_keys=True)}")
         if curriculum_context.get("adversarial_archive_examples"):
             parts.append("- Adversarial geometric layouts tracked in archive:")

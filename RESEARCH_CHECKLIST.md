@@ -36,6 +36,14 @@ This checklist is the fixed research protocol for the project. It separates infr
 6. Do the same replay-aware signals survive the move from symmetric TSPLIB95 TSP to asymmetric TSPLIB95 ATSP?
 7. Do the same replay-aware signals survive the move from TSP-style routing to CVRPLIB capacitated vehicle routing?
 
+## Phase 6 Questions
+
+1. Why did `random_replay` beat `failure_replay` on symmetric TSPLIB95 TSP?
+2. Does archive descriptor diversity explain held-out transfer better than raw replay hardness?
+3. Does residual-failure replay outperform raw-failure replay once expected difficulty is estimated from instance descriptors and baseline heuristics?
+4. Does compression pressure help once it is applied to the replay arm that actually won in phase 5?
+5. Are the final replay-aware heuristics genuinely different, or mainly different parameter tunings of the same scaffold?
+
 ## Operational Definitions
 
 - `Cheating evidence`: policy markers, forbidden-call attempts, import attempts, or other sandbox-triggered rule-violation indicators. Runtime pathing mistakes are not cheating evidence.
@@ -50,6 +58,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - `Optimality gap`: `(candidate_cost - best_known_cost) / best_known_cost` on a benchmark instance.
 - `Heuristic complexity`: code-structure and scaffold-activation burden, tracked separately from task performance.
 - `Adaptation efficiency`: held-out gap improvement per unit of accepted code novelty, used as an exploratory compression signal rather than a primary endpoint.
+- `Archive descriptor diversity`: mean pairwise distance among replayed-instance descriptor vectors.
+- `Residual failure gap`: `observed_gap - expected_gap(instance_features, baseline_portfolio)`.
 
 ## Primary Metrics
 
@@ -66,6 +76,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - Transfer endpoint: held-out win rate per environment using the winning factorial recipe.
 - Phase-5 primary endpoint: final held-out benchmark-family mean optimality gap.
 - Phase-5 secondary endpoints: final synthetic holdout gap, combined transfer gap, code novelty, heuristic complexity, and adaptation efficiency.
+- Phase-6 primary endpoint: final held-out TSPLIB mean optimality gap across the nine replay arms.
+- Phase-6 secondary endpoints: synthetic transfer gap, archive descriptor diversity, archive hardness, size bias, replay failure concentration, code novelty, heuristic complexity, and adaptation efficiency.
 
 ## Infrastructure
 
@@ -94,6 +106,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] A phase-5 TSP runner exists in [run_tsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_suite.py).
 - [x] A phase-5 TSP aggregation tool exists in [aggregate_tsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_runs.py).
 - [x] A phase-5 TSP runbook exists in [configs/tsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_suite/RUNBOOK.md).
+- [x] A phase-6 TSP replay-mechanism aggregation tool exists in [aggregate_tsp_phase6_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_phase6_runs.py).
+- [x] A phase-6 TSP runbook exists in [configs/tsp_phase6_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase6_suite/RUNBOOK.md).
 - [x] A phase-5B ATSP benchmark-preparation script exists in [prepare_atsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_atsp_benchmarks.py).
 - [x] A phase-5B ATSP runner exists in [run_atsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_atsp_suite.py).
 - [x] A phase-5B ATSP aggregation tool exists in [aggregate_atsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_atsp_runs.py).
@@ -125,6 +139,15 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Random-replay TSP condition exists.
 - [x] True-failure-replay TSP condition exists.
 - [x] Replay-plus-compression-pressure TSP condition exists.
+- [x] Phase-6 no-replay TSP condition exists.
+- [x] Phase-6 random-replay TSP condition exists.
+- [x] Phase-6 raw-failure-replay TSP condition exists.
+- [x] Phase-6 random-replay-plus-compression TSP condition exists.
+- [x] Phase-6 stratified-random TSP condition exists.
+- [x] Phase-6 diversity-weighted replay TSP condition exists.
+- [x] Phase-6 residual-failure-replay TSP condition exists.
+- [x] Phase-6 diversity-failure-replay TSP condition exists.
+- [x] Phase-6 diversity-failure-replay-plus-compression TSP condition exists.
 - [x] No-replay ATSP condition exists.
 - [x] Random-replay ATSP condition exists.
 - [x] True-failure-replay ATSP condition exists.
@@ -147,6 +170,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Generate the transfer suite from the winning factorial recipe and run the transfer campaign.
 - [x] Run the phase-5 TSP suite across paired replicate seed offsets.
 - [x] Aggregate the phase-5 TSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
+- [ ] Run the phase-6 TSP replay-mechanism suite across paired replicate seed offsets.
+- [ ] Aggregate the phase-6 TSP replay-mechanism suite and answer the mechanism questions about diversity, hardness, residual replay, and compression on the winning replay arm.
 - [x] Run the phase-5B ATSP suite across paired replicate seed offsets.
 - [x] Aggregate the phase-5B ATSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
 - [x] Run the phase-5C CVRP suite across paired replicate seed offsets.
@@ -163,6 +188,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] At least 5 replicated suite runs for the factorial holdout comparison.
 - [x] At least 5 replicated suite runs for the cross-environment transfer comparison.
 - [x] At least 5 replicated suite runs for the phase-5 TSP benchmark comparison.
+- [ ] At least 5 replicated suite runs for the phase-6 TSP replay-mechanism comparison.
 - [x] At least 5 replicated suite runs for the phase-5B ATSP benchmark comparison.
 - [x] At least 5 replicated suite runs for the phase-5C CVRP benchmark comparison.
 
@@ -174,5 +200,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - The project is now evidence-complete for the first routing-benchmark pass across TSP, ATSP, and CVRP: the official 20-offset suites were run, aggregated, and interpreted with paired bootstrap deltas.
 - The current phase-5 routing evidence is mixed: TSP favors `random_replay`, ATSP is weakly favorable to `failure_replay_compression` on combined transfer only, and CVRP favors `no_replay`.
 - The routing interpretation note is tracked in [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md).
+- The project is now engineering-complete and smoke-verified for phase 6: the TSP replay-mechanism suite, descriptor logging, residual-failure replay, and mechanism aggregate/report path exist.
+- Phase-6 evidence is not complete until its official paired-offset campaign is run and aggregated.
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
 - Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).

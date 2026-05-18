@@ -118,6 +118,19 @@ Goal: keep the public-facing reports conservative and researcher-appropriate unt
 Why this matters:
 - Strong claims are much harder to defend than careful, scoped claims.
 
+## 8. Strengthen The Phase 6 Mechanism Claim
+
+Goal: make the phase-6 replay explanation harder to dismiss as a post hoc story.
+
+- [ ] Check whether archive descriptor diversity predicts transfer after controlling for archive hardness and archive size bias.
+- [ ] Verify that the residual-difficulty estimator is stable across baseline portfolios, not only one fixed reference set.
+- [ ] Test whether the phase-6 mechanism claim holds if the train subset or synthetic family mix changes modestly.
+- [ ] Add sensitivity analyses for archive size and replay-instance count.
+- [ ] Report whether the diversity signal is driven by one descriptor family or remains broad-based.
+
+Why this matters:
+- “Random replay won” is interesting, but the mechanism claim still needs to survive basic robustness checks.
+
 ## Exit Condition
 
 These items are reduced enough for a stronger publication push when:

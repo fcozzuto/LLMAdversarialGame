@@ -2,7 +2,10 @@
 
 This project runs adversarial experiments in a family of small 2D games. The original benchmark is resource collection / denial on a grid, and the same harness now supports pursuit / evasion and territory-control variants for transfer studies. Each epoch is a full game. After every epoch, the framework saves the code, prompts, scores, paths, environment events, and sandbox/runtime signals, then feeds a configurable subset of that information back to the models so they can propose improved deterministic code for the next epoch.
 
-The repository now also includes a separate phase-5 routing-benchmark path. That path keeps the replay-aware curriculum logic, replay archives, novelty/complexity tracking, and held-out transfer evaluation, but swaps the toy grid environments for constrained heuristic scaffolds on three real benchmark families: symmetric TSPLIB95 Euclidean TSP, asymmetric TSPLIB95 ATSP, and CVRPLIB capacitated vehicle routing.
+The repository now also includes routing-benchmark follow-on phases. Those phases keep the replay-aware curriculum logic, replay archives, novelty/complexity tracking, and held-out transfer evaluation, but move from the toy grid environments to benchmark-driven routing studies:
+
+- phase 5: symmetric TSPLIB95 Euclidean TSP, TSPLIB95 ATSP, and CVRPLIB CVRP
+- phase 6: a TSP-only replay-mechanism study that asks why `random_replay` beat `failure_replay`
 
 The design stays intentionally small:
 
@@ -25,12 +28,17 @@ The design stays intentionally small:
 - `configs/curriculum_suite/`: phase-2 adversarial-curriculum suite bundle plus ordered runbook.
 - `configs/factorial_holdout_suite/`: holdout-first factorial ablation bundle for recipe comparison.
 - `configs/transfer_suite/`: cross-environment transfer runbook plus the generated transfer suite.
+- `configs/tsp_suite/`: phase-5 symmetric TSP replay-transfer suite.
+- `configs/tsp_phase6_suite/`: phase-6 TSP replay-mechanism suite.
+- `configs/atsp_suite/`: phase-5B ATSP replay-transfer suite.
+- `configs/cvrp_suite/`: phase-5C CVRP replay-transfer suite.
 - `build_transfer_suite.py`: generate a transfer suite from the winning factorial recipe.
 - `analyze_causal_transfer.py`: paired-seed transfer comparison plus failure-mode and behavior-versus-novelty analysis for phase 4.
 - `review_novelty_spikes.py`: build a manual novelty-validation packet from completed runs.
 - `prepare_tsp_benchmarks.py`: download the phase-5 TSPLIB95 subset, compute best-known costs from official tours, and write the benchmark manifest.
 - `run_tsp_suite.py`: run the constrained replay-aware TSP benchmark suite.
 - `aggregate_tsp_runs.py`: aggregate repeated TSP-suite runs into one cross-run report.
+- `aggregate_tsp_phase6_runs.py`: aggregate repeated phase-6 TSP replay-mechanism runs into one cross-run report.
 - `prepare_atsp_benchmarks.py`: download the phase-5B TSPLIB95 ATSP subset and write the benchmark manifest with official best-known costs.
 - `run_atsp_suite.py`: run the constrained replay-aware ATSP benchmark suite.
 - `aggregate_atsp_runs.py`: aggregate repeated ATSP-suite runs into one cross-run report.
@@ -50,6 +58,7 @@ The design stays intentionally small:
 - `docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md`: holdout-first factorial and cross-environment transfer protocol.
 - `docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md`: phase-4 protocol for paired transfer replication, opponent failure modes, and functional-adaptation analysis.
 - `docs/TSP_PHASE_5_PROTOCOL.md`: phase-5A protocol for the initial symmetric-TSPLIB transfer step.
+- `docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md`: phase-6 protocol for the focused TSP replay-mechanism study.
 - `docs/ROUTING_PHASE_5B_5C_PROTOCOL.md`: phase-5B/5C protocol for the ATSP and CVRP extensions.
 - `docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md`: first replicated routing-benchmark results note across TSP, ATSP, and CVRP.
 - `docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md`: deferred checklist for metric validation, stronger evaluation, replication discipline, and broader generalization claims.
@@ -108,6 +117,7 @@ Expected keys:
 - Use [docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md) when you are working on the holdout-first factorial study or the cross-environment transfer study.
 - Use [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) when you are working on the next causal-interpretation phase after the initial transfer result.
 - Use [docs/TSP_PHASE_5_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/TSP_PHASE_5_PROTOCOL.md) when you are moving the replay-aware machinery onto symmetric TSPLIB95 and the constrained TSP heuristic scaffold.
+- Use [docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md) when you are running the focused mechanism study on why `random_replay` beat `failure_replay` on symmetric TSP.
 - Use [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md) when you are extending the benchmark-transfer study to TSPLIB95 ATSP or CVRPLIB.
 - Use [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md) when you need the current evidence readout for the completed 20-offset routing campaign.
 - Use `configs/research_ablations_suite.json` when you want causal comparisons on feedback visibility or the generation scaffold.
@@ -119,6 +129,7 @@ Expected keys:
 - Use [configs/transfer_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/transfer_suite/RUNBOOK.md) after the factorial study, once you have selected the winning recipe and generated the transfer suite.
 - Use [configs/transfer_suite/PHASE_4_RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/transfer_suite/PHASE_4_RUNBOOK.md) when you want the paired phase-4 transfer replication and the causal-transfer analysis pass.
 - Use [configs/tsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_suite/RUNBOOK.md) when you want the replay-aware TSP benchmark suite, its replication workflow, and the phase-5 aggregation commands.
+- Use [configs/tsp_phase6_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase6_suite/RUNBOOK.md) when you want the TSP replay-mechanism suite, its 20-offset workflow, and the mechanism-study aggregation commands.
 - Use [configs/atsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/atsp_suite/RUNBOOK.md) when you want the replay-aware ATSP benchmark suite and its replication workflow.
 - Use [configs/cvrp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_suite/RUNBOOK.md) when you want the replay-aware CVRP benchmark suite and its replication workflow.
 - After collecting repeated runs, aggregate them with:
@@ -159,13 +170,14 @@ For the full suite, it writes:
 - curriculum trace fields, behavioral descriptors, and code fingerprints inside each epoch artifact when curriculum is enabled
 - holdout evaluation summaries inside `condition_summary.json` and the report when evaluation is enabled
 
-For the phase-5 TSP suite, it writes:
+For the phase-5 and phase-6 TSP suites, it writes:
 
 - `condition_summary.json` with per-epoch training, replay-probe, held-out probe, adversarial probe, and transfer-probe gaps
 - `training_gap.svg/png` and `transfer_gap.svg/png`
 - `suite_summary.json`, `run_metadata.json`, `report.md`, and `report.pdf`
 - replay-archive snapshots for worst cases, catastrophic failures, and adversarial layouts
 - benchmark-manifest-backed held-out TSPLIB and synthetic evaluation summaries
+- phase-6 archive descriptor-diversity, hardness, size-bias, and residual-failure summaries
 
 For the ATSP and CVRP suites, it writes the same artifact structure with family-appropriate held-out benchmark summaries and replay-archive traces.
 
@@ -175,6 +187,7 @@ For the ATSP and CVRP suites, it writes the same artifact structure with family-
 - The default judge model is `gpt-4.1-mini`. It is a stable low-cost fallback for summary-style analysis that does not depend on GPT-5-family organization verification.
 - If you want offline smoke tests first, change providers in the config to `builtin` and use models like `nearest_resource`, `sweep_rows`, or `opponent_shadow`.
 - The phase-5 TSP smoke suite writes to `DO NOT COMMIT/tsp_suite/smoke`; official TSP study runs remain under `runs/tsp_suite/...`.
+- The phase-6 TSP smoke suite writes to `DO NOT COMMIT/tsp_phase6_suite/smoke`; official mechanism-study runs remain under `runs/tsp_phase6_suite/...`.
 - The phase-5 ATSP smoke suite writes to `DO NOT COMMIT/atsp_suite/smoke`; official ATSP study runs remain under `runs/atsp_suite/...`.
 - The phase-5 CVRP smoke suite writes to `DO NOT COMMIT/cvrp_suite/smoke`; official CVRP study runs remain under `runs/cvrp_suite/...`.
 - The transfer workflow assumes the factorial study identifies a winning recipe first; use `build_transfer_suite.py` to stamp that recipe into the cross-environment suite before running official transfer experiments.

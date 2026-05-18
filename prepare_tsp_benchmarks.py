@@ -7,7 +7,8 @@ import re
 import subprocess
 import urllib.request
 
-from llm_tsp.benchmark import compute_tour_cost, parse_tsplib_euc_2d, parse_tsplib_tour
+from llm_tsp.benchmark import compute_tour_cost, make_synthetic_instance, parse_tsplib_euc_2d, parse_tsplib_tour
+from llm_tsp.instance_features import ensure_instance_descriptors
 
 
 BASE_URL = "https://softlib.rice.edu/pub/tsplib/tsp/"
@@ -40,6 +41,32 @@ SYNTHETIC_HOLDOUT = [
     {"name": "holdout_grid_outliers_18_a", "family": "grid_outliers", "dimension": 18, "seed": 2103},
     {"name": "holdout_two_corridors_18_a", "family": "two_corridors", "dimension": 18, "seed": 2104},
 ]
+PHASE7_VALIDATION_FAMILIES = {
+    "uniform_euclidean": [
+        {"name": "phase7_uniform_18_a", "family": "uniform_random", "dimension": 18, "seed": 3101},
+        {"name": "phase7_uniform_18_b", "family": "uniform_random", "dimension": 18, "seed": 3102},
+    ],
+    "clustered_tsp": [
+        {"name": "phase7_clustered_18_a", "family": "clustered_gaussian", "dimension": 18, "seed": 3201},
+        {"name": "phase7_clustered_18_b", "family": "clustered_gaussian", "dimension": 18, "seed": 3202},
+    ],
+    "grid_like_tsp": [
+        {"name": "phase7_grid_18_a", "family": "grid_outliers", "dimension": 18, "seed": 3301},
+        {"name": "phase7_grid_18_b", "family": "grid_outliers", "dimension": 18, "seed": 3302},
+    ],
+    "two_cluster_bottleneck_tsp": [
+        {"name": "phase7_bottleneck_18_a", "family": "two_cluster_bottleneck", "dimension": 18, "seed": 3401},
+        {"name": "phase7_bottleneck_18_b", "family": "two_cluster_bottleneck", "dimension": 18, "seed": 3402},
+    ],
+    "elongated_corridor_tsp": [
+        {"name": "phase7_corridor_18_a", "family": "elongated_corridor", "dimension": 18, "seed": 3501},
+        {"name": "phase7_corridor_18_b", "family": "elongated_corridor", "dimension": 18, "seed": 3502},
+    ],
+    "nearest_neighbor_trap_tsp": [
+        {"name": "phase7_trap_18_a", "family": "nearest_neighbor_trap", "dimension": 18, "seed": 3601},
+        {"name": "phase7_trap_18_b", "family": "nearest_neighbor_trap", "dimension": 18, "seed": 3602},
+    ],
+}
 
 
 def _family_from_name(name: str) -> str:
@@ -85,6 +112,8 @@ def _fetch_instance(name: str, tsplib_dir: Path, *, force: bool) -> dict[str, ob
     instance = parse_tsplib_euc_2d(problem_path, source="TSPLIB95", family=_family_from_name(name), tags=["tsplib95"])
     tour = parse_tsplib_tour(tour_path)
     best_cost = compute_tour_cost(instance, tour)
+    instance.best_known_cost = int(best_cost)
+    ensure_instance_descriptors(instance)
     return {
         "kind": "tsplib",
         "name": instance.name,
@@ -94,6 +123,7 @@ def _fetch_instance(name: str, tsplib_dir: Path, *, force: bool) -> dict[str, ob
         "source": "TSPLIB95",
         "family": _family_from_name(name),
         "tags": ["tsplib95", "euc_2d"],
+        "descriptors": dict(instance.descriptors or {}),
     }
 
 
@@ -145,27 +175,34 @@ def main() -> None:
         ],
         "train": train,
         "holdout": holdout,
-        "adversarial": [
-            {
-                "kind": "synthetic",
-                "source": "synthetic_adversarial_pool",
-                **item,
-            }
-            for item in SYNTHETIC_ADVERSARIAL
-        ],
-        "synthetic_holdout": [
-            {
-                "kind": "synthetic",
-                "source": "synthetic_holdout_pool",
-                **item,
-            }
-            for item in SYNTHETIC_HOLDOUT
-        ],
+        "adversarial": [_synthetic_manifest_entry(item, source="synthetic_adversarial_pool") for item in SYNTHETIC_ADVERSARIAL],
+        "synthetic_holdout": [_synthetic_manifest_entry(item, source="synthetic_holdout_pool") for item in SYNTHETIC_HOLDOUT],
+        "phase7_validation_families": {
+            family_name: [_synthetic_manifest_entry(item, source=f"phase7_{family_name}") for item in items]
+            for family_name, items in PHASE7_VALIDATION_FAMILIES.items()
+        },
         "skipped_candidates": skipped,
     }
     manifest_path = root / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     print(f"Wrote benchmark manifest to {manifest_path}")
+
+
+def _synthetic_manifest_entry(item: dict[str, object], *, source: str) -> dict[str, object]:
+    instance = make_synthetic_instance(
+        name=str(item["name"]),
+        family=str(item["family"]),
+        dimension=int(item["dimension"]),
+        seed=int(item["seed"]),
+        source=source,
+    )
+    ensure_instance_descriptors(instance)
+    return {
+        "kind": "synthetic",
+        "source": source,
+        **item,
+        "descriptors": dict(instance.descriptors or {}),
+    }
 
 
 if __name__ == "__main__":

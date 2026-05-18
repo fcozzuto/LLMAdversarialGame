@@ -29,7 +29,7 @@ The current evidence is mixed and family-dependent.
 - ATSP: `failure_replay_compression` is weakly favorable on combined transfer, but not cleanly on the primary held-out ATSP endpoint.
 - CVRP: `no_replay` is the strongest overall baseline.
 
-This means the phase does not currently support a broad claim that true failure replay is the dominant routing recipe across benchmark families.
+This means the phase does not currently support a broad claim that raw-gap failure replay is the dominant routing recipe across benchmark families.
 
 ## Family Summaries
 

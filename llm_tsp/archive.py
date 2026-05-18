@@ -14,12 +14,16 @@ class ReplayEntry:
     gap: float
     source_epoch: int
     replay_kind: str
+    expected_gap: float = 0.0
+    residual_gap: float = 0.0
     times_selected: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "instance": dict(self.instance),
             "gap": round(self.gap, 6),
+            "expected_gap": round(self.expected_gap, 6),
+            "residual_gap": round(self.residual_gap, 6),
             "source_epoch": self.source_epoch,
             "replay_kind": self.replay_kind,
             "times_selected": self.times_selected,
@@ -27,8 +31,9 @@ class ReplayEntry:
 
 
 class ReplayArchive:
-    def __init__(self, max_size: int) -> None:
+    def __init__(self, max_size: int, *, ranking_metric: str = "gap") -> None:
         self.max_size = max(1, int(max_size))
+        self.ranking_metric = str(ranking_metric)
         self._entries: list[ReplayEntry] = []
         self._cursor = 0
 
@@ -36,16 +41,21 @@ class ReplayArchive:
         name = str(entry.instance.get("name", ""))
         for existing in self._entries:
             if str(existing.instance.get("name", "")) == name:
-                if entry.gap > existing.gap or (entry.gap == existing.gap and entry.source_epoch >= existing.source_epoch):
+                if (
+                    entry.gap > existing.gap
+                    or entry.residual_gap > existing.residual_gap
+                    or (entry.gap == existing.gap and entry.source_epoch >= existing.source_epoch)
+                ):
                     existing.gap = entry.gap
+                    existing.expected_gap = entry.expected_gap
+                    existing.residual_gap = entry.residual_gap
                     existing.source_epoch = entry.source_epoch
                     existing.replay_kind = entry.replay_kind
                     existing.instance = dict(entry.instance)
                 return False
         self._entries.append(entry)
-        self._entries.sort(key=lambda item: (item.gap, item.source_epoch, -item.times_selected), reverse=True)
         if len(self._entries) > self.max_size:
-            self._entries = self._entries[: self.max_size]
+            self._entries = self.hardest(self.max_size, metric=self.ranking_metric)
         return True
 
     def record_many(self, entries: list[ReplayEntry]) -> int:
@@ -54,8 +64,18 @@ class ReplayArchive:
             recorded += int(self.record(entry))
         return recorded
 
-    def hardest(self, limit: int) -> list[ReplayEntry]:
-        return list(self._entries[: max(0, int(limit))])
+    def hardest(self, limit: int, *, metric: str = "gap") -> list[ReplayEntry]:
+        ordered = sorted(
+            self._entries,
+            key=lambda item: (
+                self._metric(item, metric),
+                item.gap,
+                item.source_epoch,
+                -item.times_selected,
+            ),
+            reverse=True,
+        )
+        return list(ordered[: max(0, int(limit))])
 
     def randomish(self, limit: int) -> list[ReplayEntry]:
         if not self._entries:
@@ -79,6 +99,9 @@ class ReplayArchive:
     def to_list(self) -> list[dict[str, Any]]:
         return [entry.to_dict() for entry in self._entries]
 
+    def entries(self) -> list[ReplayEntry]:
+        return list(self._entries)
+
     def note_selected(self, entries: list[ReplayEntry]) -> None:
         selected_names = {str(entry.instance.get("name", "")) for entry in entries}
         if not selected_names:
@@ -89,6 +112,14 @@ class ReplayArchive:
 
     def __len__(self) -> int:
         return len(self._entries)
+
+    @staticmethod
+    def _metric(entry: ReplayEntry, name: str) -> float:
+        if name == "residual_gap":
+            return float(entry.residual_gap)
+        if name == "expected_gap":
+            return float(entry.expected_gap)
+        return float(entry.gap)
 
 
 FailureArchive = ReplayArchive

@@ -63,6 +63,8 @@ Maintain archives for:
 - adversarial synthetic geometric layouts
 - catastrophic failure cases above a fixed optimality-gap threshold
 
+For the current phase-5 implementation, the `failure_replay` arm replays the highest raw-gap cases from the worst-case archive. The catastrophic-failure archive is still logged separately and remains available for later mechanism variants.
+
 ### Final Evaluation
 
 Evaluate the final accepted heuristic on:
@@ -84,7 +86,7 @@ The default phase-5 comparison set is:
 
 Interpretation target:
 
-- whether true failure replay beats both no replay and random replay
+- whether raw-gap failure replay beats both no replay and random replay
 - whether replay plus compression pressure preserves or improves transfer while reducing novelty or complexity growth
 
 ## Endpoints
@@ -148,3 +150,5 @@ Keep the benchmark manifest, held-out set, and synthetic families fixed across c
 The first completed 20-offset routing pass is summarized in [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md).
 
 For this TSP family, the strongest result was not `failure_replay`; it was `random_replay`. That means this protocol remains useful as the benchmark recipe, but the completed evidence should be read through the results note rather than through the original expectation alone.
+
+The direct follow-on phase is now [docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md), which focuses on explaining why `random_replay` beat `failure_replay` on symmetric TSP before the project makes stronger replay-mechanism claims.

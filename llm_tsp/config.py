@@ -38,6 +38,7 @@ class GenerationConfig:
 class ReplayPolicyConfig:
     mode: str = "none"
     archive_max_size: int = 12
+    experience_archive_max_size: int = 24
     replay_instance_count: int = 0
     catastrophic_gap_threshold: float = 0.08
 

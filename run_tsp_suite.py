@@ -10,6 +10,7 @@ from llm_grid_battle.pdf_report import write_pdf_report
 from llm_grid_battle.selection import decide_candidate_acceptance
 from llm_tsp.analysis import render_markdown_report, summarize_suite
 from llm_tsp.behavioral_descriptors import behavioral_distance, behavioral_profile_label
+from llm_tsp.difficulty import baseline_reference_summary, build_difficulty_model, expected_gap, residual_failure_gap
 from llm_tsp.benchmark import BenchmarkBundle, TSPInstance, instance_from_dict, load_benchmark_bundle, summarize_instance
 from llm_tsp.code_features import code_similarity, fingerprint_record
 from llm_tsp.config import TSPConditionConfig, TSPSuiteConfig
@@ -63,6 +64,8 @@ def _summarize_panel(results: list[dict[str, Any]], *, panel_name: str) -> dict[
             "name": item["instance"]["name"],
             "family": item["instance"]["family"],
             "optimality_gap": round(float(item["optimality_gap"]), 6),
+            "expected_gap": round(float(item.get("expected_gap", 0.0)), 6),
+            "residual_gap": round(float(item.get("residual_gap", 0.0)), 6),
             "best_known_cost": int(item["best_known_cost"]),
             "cost": int(item["cost"]),
         }
@@ -84,13 +87,18 @@ def _evaluate_panel(
     instances: list[TSPInstance],
     panel_name: str,
     seed_base: int,
+    difficulty_model: Any | None = None,
     incumbent_spec: dict[str, Any] | None = None,
     tolerance: float | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     results = [solve_instance(instance, spec, seed=seed_base + index) for index, instance in enumerate(instances)]
+    if difficulty_model is not None:
+        _attach_difficulty_annotations(results, difficulty_model)
     summary = _summarize_panel(results, panel_name=panel_name)
     if incumbent_spec is not None and tolerance is not None:
         incumbent_results = [solve_instance(instance, incumbent_spec, seed=seed_base + 10_000 + index) for index, instance in enumerate(instances)]
+        if difficulty_model is not None:
+            _attach_difficulty_annotations(incumbent_results, difficulty_model)
         baseline_mean = _summarize_panel(incumbent_results, panel_name=panel_name)["mean_optimality_gap"]
         candidate_mean = float(summary["mean_optimality_gap"])
         summary["baseline_mean_optimality_gap"] = baseline_mean
@@ -105,6 +113,7 @@ def _evaluate_transfer_probe(
     holdout_instances: list[TSPInstance],
     adversarial_instances: list[TSPInstance],
     seed_base: int,
+    difficulty_model: Any | None = None,
     incumbent_spec: dict[str, Any] | None = None,
     tolerance: float | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
@@ -112,6 +121,9 @@ def _evaluate_transfer_probe(
     adversarial_results = [
         solve_instance(instance, spec, seed=seed_base + 20_000 + index) for index, instance in enumerate(adversarial_instances)
     ]
+    if difficulty_model is not None:
+        _attach_difficulty_annotations(holdout_results, difficulty_model)
+        _attach_difficulty_annotations(adversarial_results, difficulty_model)
     holdout_summary = _summarize_panel(holdout_results, panel_name="heldout_probe")
     adversarial_summary = _summarize_panel(adversarial_results, panel_name="adversarial_probe")
     combined_results = holdout_results + adversarial_results
@@ -126,6 +138,9 @@ def _evaluate_transfer_probe(
             solve_instance(instance, incumbent_spec, seed=seed_base + 30_000 + index)
             for index, instance in enumerate(adversarial_instances)
         ]
+        if difficulty_model is not None:
+            _attach_difficulty_annotations(incumbent_holdout_results, difficulty_model)
+            _attach_difficulty_annotations(incumbent_adversarial_results, difficulty_model)
         baseline_summary = _summarize_panel(incumbent_holdout_results + incumbent_adversarial_results, panel_name="transfer_probe")
         baseline_mean = float(baseline_summary["mean_optimality_gap"])
         candidate_mean = float(summary["mean_optimality_gap"])
@@ -140,15 +155,32 @@ def _combined_final_evaluation(
     spec: dict[str, Any],
     bundle: BenchmarkBundle,
     seed_base: int,
+    difficulty_model: Any | None = None,
 ) -> dict[str, Any]:
-    tsplib_summary, _ = _evaluate_panel(spec=spec, instances=bundle.holdout, panel_name="heldout_tsplib", seed_base=seed_base)
-    synthetic_summary, _ = _evaluate_panel(spec=spec, instances=bundle.synthetic_holdout, panel_name="synthetic_holdout", seed_base=seed_base + 50_000)
+    tsplib_summary, tsplib_results = _evaluate_panel(
+        spec=spec,
+        instances=bundle.holdout,
+        panel_name="heldout_tsplib",
+        seed_base=seed_base,
+        difficulty_model=difficulty_model,
+    )
+    synthetic_summary, synthetic_results = _evaluate_panel(
+        spec=spec,
+        instances=bundle.synthetic_holdout,
+        panel_name="synthetic_holdout",
+        seed_base=seed_base + 50_000,
+        difficulty_model=difficulty_model,
+    )
     mean_transfer = (
         (float(tsplib_summary["mean_optimality_gap"]) * max(1, len(bundle.holdout)))
         + (float(synthetic_summary["mean_optimality_gap"]) * max(1, len(bundle.synthetic_holdout)))
     ) / max(1, len(bundle.holdout) + len(bundle.synthetic_holdout))
     return {
         "panels": [tsplib_summary, synthetic_summary],
+        "results": {
+            "heldout_tsplib": tsplib_results,
+            "synthetic_holdout": synthetic_results,
+        },
         "combined": {
             "mean_tsplib_gap": round(float(tsplib_summary["mean_optimality_gap"]), 6),
             "mean_synthetic_gap": round(float(synthetic_summary["mean_optimality_gap"]), 6),
@@ -160,6 +192,14 @@ def _combined_final_evaluation(
 def _replay_instances(config: TSPConditionConfig, state: dict[str, Any]) -> list[TSPInstance]:
     selected = replay_pool(config, state)
     return [instance_from_dict(item["instance"]) for item in selected]
+
+
+def _attach_difficulty_annotations(results: list[dict[str, Any]], difficulty_model: Any) -> None:
+    for item in results:
+        instance = instance_from_dict(item["instance"])
+        predicted_gap = expected_gap(difficulty_model, instance)
+        item["expected_gap"] = round(predicted_gap, 6)
+        item["residual_gap"] = round(residual_failure_gap(difficulty_model, instance, float(item["optimality_gap"])), 6)
 
 
 def _apply_compression_pressure(
@@ -192,7 +232,13 @@ def _apply_compression_pressure(
 def run_condition(config: TSPConditionConfig, condition_dir: Path) -> dict[str, Any]:
     condition_dir.mkdir(parents=True, exist_ok=True)
     bundle = load_benchmark_bundle(Path(config.benchmark.manifest_path))
-    state = build_curriculum_state(config, bundle.adversarial)
+    difficulty_model = build_difficulty_model(bundle.train + bundle.adversarial, seed_base=config.seed + 700_000)
+    state = build_curriculum_state(
+        config,
+        bundle.adversarial,
+        reference_instances=bundle.train + bundle.adversarial,
+        difficulty_model=difficulty_model,
+    )
     history: list[dict[str, Any]] = []
     generation_cache: dict[str, str] = {}
 
@@ -204,8 +250,13 @@ def run_condition(config: TSPConditionConfig, condition_dir: Path) -> dict[str, 
     for epoch_index in range(1, int(config.optimization.epochs) + 1):
         epoch_dir = condition_dir / "epochs" / f"epoch_{epoch_index:03d}"
         epoch_dir.mkdir(parents=True, exist_ok=True)
+        state["selection_epoch_cursor"] = epoch_index
         training_instances = _instance_panel(bundle.train, epoch_index=epoch_index, count=int(config.benchmark.curriculum_batch_size))
-        training_panel_summary = [summarize_instance(instance) for instance in training_instances]
+        training_panel_summary = []
+        for instance in training_instances:
+            summary = summarize_instance(instance)
+            summary["expected_gap"] = round(expected_gap(difficulty_model, instance), 6)
+            training_panel_summary.append(summary)
         prompt_context = build_prompt_context(config, state)
         prompt = build_generation_prompt(
             epoch_index=epoch_index,
@@ -238,6 +289,7 @@ def run_condition(config: TSPConditionConfig, condition_dir: Path) -> dict[str, 
             instances=training_instances,
             panel_name="training",
             seed_base=config.seed + (epoch_index * 1_000),
+            difficulty_model=difficulty_model,
         )
         descriptor = aggregate_descriptor(training_results)
         code_fingerprint = fingerprint_record(executed_code)
@@ -256,6 +308,7 @@ def run_condition(config: TSPConditionConfig, condition_dir: Path) -> dict[str, 
                 instances=replay_instances,
                 panel_name="replay_probe",
                 seed_base=config.seed + 200_000 + (epoch_index * 1_000),
+                difficulty_model=difficulty_model,
                 incumbent_spec=incumbent_spec,
                 tolerance=float(config.selection.replay_gap_tolerance),
             )
@@ -281,6 +334,7 @@ def run_condition(config: TSPConditionConfig, condition_dir: Path) -> dict[str, 
             holdout_instances=holdout_probe_instances,
             adversarial_instances=adversarial_probe_instances,
             seed_base=config.seed + 400_000 + (epoch_index * 1_000),
+            difficulty_model=difficulty_model,
             incumbent_spec=incumbent_spec,
             tolerance=float(config.selection.transfer_gap_tolerance) if incumbent_spec is not None else None,
         )
@@ -369,6 +423,7 @@ def run_condition(config: TSPConditionConfig, condition_dir: Path) -> dict[str, 
         spec=final_spec,
         bundle=bundle,
         seed_base=config.seed + 900_000,
+        difficulty_model=difficulty_model,
     )
 
     write_metric_plot_svg(
@@ -405,12 +460,19 @@ def run_condition(config: TSPConditionConfig, condition_dir: Path) -> dict[str, 
         "benchmark": config.benchmark.__dict__,
         "optimization": config.optimization.__dict__,
         "metadata": config.metadata,
+        "difficulty_model": {
+            "reference_summary": baseline_reference_summary(difficulty_model),
+            "reference_count": len(difficulty_model.references),
+            "neighbor_count": difficulty_model.neighbor_count,
+        },
         "epochs": history,
         "final_evaluation": final_evaluation,
         "archive": state["failure_archive"].to_list(),
         "replay_archives": {
+            "experience_cases": state["experience_archive"].to_list(),
             "worst_cases": state["worst_archive"].to_list(),
             "failure_cases": state["failure_archive"].to_list(),
+            "residual_failures": state["residual_archive"].to_list(),
             "adversarial_layouts": state["adversarial_archive"].to_list(),
         },
         "elite_archive": state["elite_archive"].to_list(),
@@ -428,9 +490,10 @@ def build_judge_prompt(suite_summary: dict[str, Any]) -> str:
             "",
             "Rules:",
             "- Treat held-out TSPLIB gap and synthetic holdout gap as the main evidence for transfer.",
+            "- For mechanism studies, analyze replay archive diversity, hardness, size bias, and failure concentration explicitly.",
             "- If code novelty falls while transfer improves, say that explicitly.",
             "- Do not equate lexical novelty with algorithmic invention unless the deterministic metrics support it.",
-            "- Distinguish no replay, random replay, failure replay, and compression-aware replay conditions carefully.",
+            "- Distinguish broad-coverage replay, raw-failure replay, residual-failure replay, diversity-weighted replay, and compression-aware replay conditions carefully.",
             "",
             json.dumps(suite_summary, indent=2, sort_keys=True),
         ]

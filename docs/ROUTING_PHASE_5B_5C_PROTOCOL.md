@@ -71,7 +71,7 @@ Both extension phases keep the same four core condition families:
 
 1. no replay
 2. random replay
-3. true failure replay
+3. raw-gap failure replay
 4. failure replay plus compression pressure
 
 Both maintain replay archives for:
@@ -79,6 +79,8 @@ Both maintain replay archives for:
 - worst-performing training instances
 - adversarial synthetic layouts
 - catastrophic failure cases above a fixed gap threshold
+
+As in the symmetric TSP phase, the current `failure_replay` arm replays the highest raw-gap cases from the worst-case archive, while the catastrophic-failure archive is logged separately for diagnosis and later mechanism variants.
 
 Both reserve exact synthetic holdouts for final evaluation rather than allowing them to leak into the inner loop.
 
