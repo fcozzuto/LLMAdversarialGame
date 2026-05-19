@@ -171,27 +171,8 @@ def summarize_phase6_paired_comparisons(
 def _find_unique_condition(condition_names: set[str], family: str) -> str | None:
     exact_matches: list[str] = []
     for name in sorted(condition_names):
-        if family == "no_replay" and name.endswith("_no_replay"):
-            exact_matches.append(name)
-        elif family == "random_replay" and name.endswith("_random_replay"):
-            exact_matches.append(name)
-        elif family == "failure_replay" and name.endswith("_failure_replay"):
-            if name.endswith("_residual_failure_replay") or name.endswith("_diversity_failure_replay"):
-                continue
-            exact_matches.append(name)
-        elif family == "random_replay_compression" and name.endswith("_random_replay_compression"):
-            exact_matches.append(name)
-        elif family == "stratified_random_replay" and name.endswith("_stratified_random_replay"):
-            exact_matches.append(name)
-        elif family == "diversity_weighted_replay" and name.endswith("_diversity_weighted_replay"):
-            exact_matches.append(name)
-        elif family == "residual_failure_replay" and name.endswith("_residual_failure_replay"):
-            exact_matches.append(name)
-        elif family == "diversity_failure_replay" and name.endswith("_diversity_failure_replay"):
-            if name.endswith("_diversity_failure_replay_compression"):
-                continue
-            exact_matches.append(name)
-        elif family == "diversity_failure_replay_compression" and name.endswith("_diversity_failure_replay_compression"):
+        family_suffix = name.split("_", 1)[1] if "_" in name else name
+        if family_suffix == family:
             exact_matches.append(name)
     return exact_matches[0] if len(exact_matches) == 1 else None
 
@@ -254,12 +235,13 @@ def build_mechanism_answers(
     if random_vs_no and failure_vs_random:
         random_transfer = random_vs_no["metrics"]["transfer_gap"]["mean_delta"]
         failure_transfer = failure_vs_random["metrics"]["transfer_gap"]["mean_delta"]
-        random_diversity = random_vs_no["metrics"]["archive_diversity"]["mean_delta"]
+        failure_diversity = failure_vs_random["metrics"]["archive_diversity"]["mean_delta"]
         failure_hardness = failure_vs_random["metrics"]["archive_hardness"]["mean_delta"]
         why_random = (
-            "Random replay outperformed raw failure replay when it kept broader archive coverage. "
-            f"Its transfer delta vs no replay was {random_transfer}, while failure replay vs random was {failure_transfer}; "
-            f"the diversity shift was {random_diversity} and the hardness shift was {failure_hardness}."
+            "Random replay beat raw failure replay only narrowly, but the paired comparison points in the same direction as the coverage hypothesis. "
+            f"Relative to no replay, random replay changed transfer by {random_transfer}. "
+            f"Relative to random replay, failure replay changed transfer by {failure_transfer}, "
+            f"archive diversity by {failure_diversity}, and archive hardness by {failure_hardness}."
         )
 
     diversity_explanation = (
