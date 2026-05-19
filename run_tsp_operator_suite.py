@@ -381,7 +381,19 @@ def _build_full_solver_payload(config: Phase7ConditionConfig, condition_dir: Pat
 
 
 def _as_full_solver_config(config: Phase7ConditionConfig) -> Any:
+    from dataclasses import fields
+
+    from llm_tsp.config import SelectionPolicyConfig as FullSolverSelectionPolicyConfig
     from llm_tsp.config import TSPConditionConfig
+
+    supported_selection_keys = {field.name for field in fields(FullSolverSelectionPolicyConfig)}
+    full_solver_selection = {
+        key: value
+        for key, value in config.selection.__dict__.items()
+        if key in supported_selection_keys
+    }
+    if full_solver_selection.get("mode") == "pareto":
+        full_solver_selection["mode"] = "score_only"
 
     data = {
         "name": config.name,
@@ -390,10 +402,7 @@ def _as_full_solver_config(config: Phase7ConditionConfig) -> Any:
         "agent": config.agent.__dict__,
         "generation": config.generation.__dict__,
         "replay": config.replay.__dict__,
-        "selection": {
-            **config.selection.__dict__,
-            "mode": "score_only" if config.selection.mode == "pareto" else config.selection.mode,
-        },
+        "selection": full_solver_selection,
         "benchmark": {
             "manifest_path": config.benchmark.manifest_path,
             "curriculum_batch_size": config.benchmark.curriculum_batch_size,
