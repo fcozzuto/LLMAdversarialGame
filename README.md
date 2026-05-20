@@ -59,6 +59,7 @@ The design stays intentionally small:
 - `docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md`: phase-4 protocol for paired transfer replication, opponent failure modes, and functional-adaptation analysis.
 - `docs/TSP_PHASE_5_PROTOCOL.md`: phase-5A protocol for the initial symmetric-TSPLIB transfer step.
 - `docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md`: phase-6 protocol for the focused TSP replay-mechanism study.
+- `docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md`: official phase-6 mechanism-study result note.
 - `docs/ROUTING_PHASE_5B_5C_PROTOCOL.md`: phase-5B/5C protocol for the ATSP and CVRP extensions.
 - `docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md`: first replicated routing-benchmark results note across TSP, ATSP, and CVRP.
 - `docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md`: deferred checklist for metric validation, stronger evaluation, replication discipline, and broader generalization claims.
@@ -118,6 +119,7 @@ Expected keys:
 - Use [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) when you are working on the next causal-interpretation phase after the initial transfer result.
 - Use [docs/TSP_PHASE_5_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/TSP_PHASE_5_PROTOCOL.md) when you are moving the replay-aware machinery onto symmetric TSPLIB95 and the constrained TSP heuristic scaffold.
 - Use [docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md) when you are running the focused mechanism study on why `random_replay` beat `failure_replay` on symmetric TSP.
+- Use [docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md) when you need the current evidence readout for the completed phase-6 mechanism campaign.
 - Use [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md) when you are extending the benchmark-transfer study to TSPLIB95 ATSP or CVRPLIB.
 - Use [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md) when you need the current evidence readout for the completed 20-offset routing campaign.
 - Use `configs/research_ablations_suite.json` when you want causal comparisons on feedback visibility or the generation scaffold.
