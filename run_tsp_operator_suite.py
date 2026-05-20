@@ -14,14 +14,15 @@ from llm_tsp.benchmark import BenchmarkBundle, TSPInstance, instance_from_dict, 
 from llm_tsp.code_features import code_similarity, fingerprint_record
 from llm_tsp.curriculum import build_curriculum_state, build_prompt_context, current_baseline_score, record_epoch_outcome, replay_pool
 from llm_tsp.difficulty import baseline_reference_summary, build_difficulty_model, expected_gap, residual_failure_gap
-from llm_tsp.llm import generate_code, judge_text, load_env_files
 from llm_tsp.visualization import write_metric_plot_png, write_metric_plot_svg
 from llm_tsp_operator.analysis import render_markdown_report, summarize_suite
 from llm_tsp_operator.config import Phase7ConditionConfig, Phase7SuiteConfig
+from llm_tsp_operator.llm import generate_code
 from llm_tsp_operator.prompting import build_generation_prompt
 from llm_tsp_operator.sandbox import materialize_operator
 from llm_tsp_operator.scaffold_engine import aggregate_descriptor, solve_with_portfolio, solve_with_scaffold
 from llm_tsp_operator.validation import load_validation_families, render_operator_report, validate_operator_candidate
+from llm_tsp.llm import judge_text, load_env_files
 from run_tsp_suite import run_condition as run_full_solver_condition
 
 
