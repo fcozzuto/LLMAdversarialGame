@@ -129,11 +129,11 @@ Goal: make the phase-6 replay explanation harder to dismiss as a post hoc story.
 - [ ] Report whether the diversity signal is driven by one descriptor family or remains broad-based.
 
 Why this matters:
-- “Random replay won” is interesting, but the mechanism claim still needs to survive basic robustness checks.
+- "Random replay won" is interesting, but the mechanism claim still needs to survive basic robustness checks.
 
 ## 9. Tighten Phase 7 Discovery Validation
 
-Goal: reduce the chance that a phase-7 “discovered operator” is only a renamed standard trick or a host-scaffold artifact.
+Goal: reduce the chance that a phase-7 "discovered operator" is only a renamed standard trick or a host-scaffold artifact.
 
 - [ ] Add a manual literature audit for any operator that survives the automated filter.
 - [ ] Expand transplant validation from held-out TSPLIB to a second scaffold pool if runtime allows.
@@ -142,7 +142,28 @@ Goal: reduce the chance that a phase-7 “discovered operator” is only a renam
 - [ ] Add a blinded review step for the strongest surviving operator reports before making novelty claims.
 
 Why this matters:
-- The main scientific value of phase 7 is interpretability, so false-positive “discoveries” are especially costly.
+- The main scientific value of phase 7 is interpretability, so false-positive "discoveries" are especially costly.
+
+## 10. Add A High-Probability Closeout Phase
+
+Goal: land one more bounded, positive result that is easier to defend than another open-ended operator-invention campaign.
+
+- [ ] Replace open-ended operator invention with feature-based selection or configuration over a fixed library of known operators and solver scaffolds.
+- [ ] Freeze a library of candidate low-level operators and host scaffolds before the study begins.
+- [ ] Reuse the phase-6 descriptor basis and add lightweight online search-state features for selector context.
+- [ ] Compare against the single-best fixed scaffold, full-solver evolution, and random operator selection.
+- [ ] Treat a statistically reliable held-out TSPLIB gain or a clean Pareto gain over the single-best fixed baseline as the success criterion.
+- [ ] Keep the operator library interpretable enough that any win can be explained as selection, scheduling, or parameter control rather than hidden solver invention.
+
+Research basis:
+- Rice-style per-instance algorithm selection, as summarized in [Algorithm selection on a meta level](https://link.springer.com/article/10.1007/s10994-022-06161-4), is a better fit when instance descriptors already exist and whole-solver discovery is unstable.
+- Selection-oriented hyper-heuristics remain a standard, better-supported alternative to unconstrained heuristic generation; see [Hyper-heuristics: A survey and taxonomy](https://www.sciencedirect.com/science/article/pii/S0360835223008392).
+- Automatic configuration is already recommended practice in routing because it improves solution quality and supports fairer comparisons; see [On automatic algorithm configuration of vehicle routing problem solvers](https://link.springer.com/article/10.1007/s41604-019-00010-9).
+- A recent routing example using contextual low-level operator selection is [Landscape-Aware Bandit Hyper-Heuristics for Online Operator Selection in UAV Inspection Routing](https://arxiv.org/abs/2605.14620).
+
+Why this matters:
+- The current evidence suggests the system is stronger at curation, scheduling, and tuning than at inventing wholly new reusable operators.
+- That makes a selector/configurator phase the most plausible way to end with a positive, interpretable claim without pretending that phase 7 already discovered a reusable primitive.
 
 ## Exit Condition
 

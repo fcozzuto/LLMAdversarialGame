@@ -160,7 +160,7 @@ The required deliverable is a short mechanism report that answers:
 - Run the suite with [run_tsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_suite.py) and [configs/tsp_phase6_suite/01_replay_mechanism.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase6_suite/01_replay_mechanism.json)
 - Use [configs/tsp_phase6_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase6_suite/RUNBOOK.md) for concrete commands
 - Aggregate repeated runs with [aggregate_tsp_phase6_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_phase6_runs.py)
-- Official results note: [docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md)
+- Official results note: versioned on branch `replay-mechanism` as `docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md`
 
 ## Relationship To Phase 5
 
