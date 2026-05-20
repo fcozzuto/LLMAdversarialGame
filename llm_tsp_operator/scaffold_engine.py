@@ -123,6 +123,28 @@ SCAFFOLD_LIBRARY: dict[str, dict[str, Any]] = {
         "three_opt_samples": 4,
         "or_opt_span": 2,
     },
+    "farthest_insertion_2opt": {
+        "construction_mode": "farthest_insertion",
+        "seed_mode": "farthest_from_centroid",
+        "candidate_limit": 18,
+        "lookahead_limit": 2,
+        "cluster_mode": "none",
+        "cluster_count": 1,
+        "restart_count": 1,
+        "seed_pool_size": 1,
+        "use_perturbation_restarts": False,
+        "perturbation_mode": "segment_reversal",
+        "perturbation_strength": 1,
+        "perturbation_attempts": 1,
+        "acceptance_mode": "improving_only",
+        "base_threshold": 0.0,
+        "temperature": 0.0,
+        "two_opt_passes": 3,
+        "two_opt_candidate_limit": 18,
+        "use_three_opt": False,
+        "three_opt_samples": 0,
+        "or_opt_span": 1,
+    },
 }
 
 
@@ -183,9 +205,28 @@ def solve_with_scaffold(
 ) -> dict[str, Any]:
     if scaffold_name not in SCAFFOLD_LIBRARY:
         raise ValueError(f"Unsupported scaffold: {scaffold_name}")
+    return solve_with_recipe(
+        instance=instance,
+        scaffold_name=scaffold_name,
+        recipe=dict(SCAFFOLD_LIBRARY[scaffold_name]),
+        operator_spec=operator_spec,
+        seed=seed,
+        stagnation_state=stagnation_state,
+    )
+
+
+def solve_with_recipe(
+    instance: TSPInstance,
+    *,
+    scaffold_name: str,
+    recipe: dict[str, Any],
+    operator_spec: dict[str, Any] | None = None,
+    seed: int = 0,
+    stagnation_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     ensure_instance_descriptors(instance)
     descriptors = descriptor_payload(instance)
-    scaffold = dict(SCAFFOLD_LIBRARY[scaffold_name])
+    scaffold = dict(recipe)
     operator = canonicalize_operator_spec(operator_spec) if operator_spec else None
     stagnation_state = dict(stagnation_state or {})
     counter = EvalCounter()
@@ -486,6 +527,8 @@ def _construct_tour(
     mode = str(scaffold["construction_mode"])
     if mode == "cheapest_insertion":
         return _construct_cheapest_insertion(instance, matrix, counter, seed_node)
+    if mode == "farthest_insertion":
+        return _construct_farthest_insertion(instance, matrix, counter, seed_node)
     return _construct_nearest_neighbor(
         instance=instance,
         matrix=matrix,
@@ -555,6 +598,40 @@ def _construct_cheapest_insertion(instance: TSPInstance, matrix: list[list[int]]
                     best_choice = candidate
         assert best_choice is not None
         _, node, insert_at = best_choice
+        tour.insert(insert_at, node)
+        remaining.remove(node)
+    return tour
+
+
+def _construct_farthest_insertion(instance: TSPInstance, matrix: list[list[int]], counter: EvalCounter, seed_node: int) -> list[int]:
+    n = instance.dimension
+    if n <= 3:
+        return list(range(n))
+    farthest = max(range(n), key=lambda node: _distance(matrix, seed_node, node, counter) if node != seed_node else -1)
+    third = max(
+        (node for node in range(n) if node not in {seed_node, farthest}),
+        key=lambda node: min(
+            _distance(matrix, node, seed_node, counter),
+            _distance(matrix, node, farthest, counter),
+        ),
+    )
+    tour = [seed_node, farthest, third]
+    remaining = [node for node in range(n) if node not in set(tour)]
+    while remaining:
+        node = max(
+            remaining,
+            key=lambda candidate: min(_distance(matrix, candidate, existing, counter) for existing in tour),
+        )
+        best_choice = None
+        for index in range(len(tour)):
+            left = tour[index]
+            right = tour[(index + 1) % len(tour)]
+            increase = _distance(matrix, left, node, counter) + _distance(matrix, node, right, counter) - _distance(matrix, left, right, counter)
+            candidate = (increase, index + 1)
+            if best_choice is None or candidate < best_choice:
+                best_choice = candidate
+        assert best_choice is not None
+        _, insert_at = best_choice
         tour.insert(insert_at, node)
         remaining.remove(node)
     return tour
@@ -764,6 +841,26 @@ def _perturb_tour(tour: list[int], mode: str, strength: int, seed: int) -> list[
         window = current[start : start + 4]
         current[start : start + 4] = window[2:] + window[:2]
         return current
+    if mode == "edge_preserving_shuffle":
+        protected = {
+            0,
+            max(1, n // 4),
+            max(2, n // 2),
+            max(3, (3 * n) // 4),
+        }
+        movable = [node for index, node in enumerate(current) if index not in protected]
+        if len(movable) < 4:
+            return current
+        rotate = 1 + (offset % max(1, min(4, len(movable) - 1)))
+        rotated = movable[rotate:] + movable[:rotate]
+        result = list(current)
+        cursor = 0
+        for index in range(n):
+            if index in protected:
+                continue
+            result[index] = rotated[cursor]
+            cursor += 1
+        return result
     cut1 = 1 + (offset % max(2, n - 6))
     cut2 = cut1 + max(2, n // 6)
     cut3 = min(n - 2, cut2 + max(2, n // 6))

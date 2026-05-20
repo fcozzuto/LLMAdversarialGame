@@ -14,7 +14,12 @@ PRIMARY_DESCRIPTOR_KEYS = [
     "city_count_norm",
     "coordinate_spread_norm",
     "aspect_ratio_norm",
+    "corridor_score",
+    "distance_mean_norm",
+    "distance_std_norm",
+    "distance_cv",
     "nn_distance_mean_norm",
+    "nn_distance_variance_norm",
     "nn_distance_cv",
     "mst_length_norm",
     "convex_hull_ratio",
@@ -25,6 +30,16 @@ PRIMARY_DESCRIPTOR_KEYS = [
     "bottleneck_score",
     "nearest_neighbor_trap_score",
 ]
+
+
+REQUIRED_DESCRIPTOR_KEYS = set(PRIMARY_DESCRIPTOR_KEYS) | {
+    "city_count",
+    "aspect_ratio",
+    "cluster_separation_score",
+    "random_likeness",
+    "structure_class",
+    "size_bucket",
+}
 
 
 @dataclass(frozen=True)
@@ -53,6 +68,12 @@ class ArchiveCompositionSummary:
 
 def ensure_instance_descriptors(instance: TSPInstance) -> TSPInstance:
     if getattr(instance, "descriptors", None):
+        if REQUIRED_DESCRIPTOR_KEYS.issubset(set(instance.descriptors or {})):
+            return instance
+        instance.descriptors = {
+            **dict(instance.descriptors or {}),
+            **compute_instance_descriptors(instance),
+        }
         return instance
     instance.descriptors = compute_instance_descriptors(instance)
     return instance
@@ -72,8 +93,13 @@ def compute_instance_descriptors(instance: TSPInstance) -> dict[str, Any]:
             "bbox_height_norm": 0.0,
             "aspect_ratio": 1.0,
             "aspect_ratio_norm": 0.0,
+            "corridor_score": 0.0,
+            "distance_mean_norm": 0.0,
+            "distance_std_norm": 0.0,
+            "distance_cv": 0.0,
             "nn_distance_mean_norm": 0.0,
             "nn_distance_std_norm": 0.0,
+            "nn_distance_variance_norm": 0.0,
             "nn_distance_cv": 0.0,
             "nn_distance_min_norm": 0.0,
             "nn_distance_max_norm": 0.0,
@@ -109,6 +135,16 @@ def compute_instance_descriptors(instance: TSPInstance) -> dict[str, Any]:
     nn_mean = _safe_mean(nearest_neighbor_distances)
     nn_std = statistics.pstdev(nearest_neighbor_distances) if len(nearest_neighbor_distances) >= 2 else 0.0
     nn_cv = nn_std / max(1e-9, nn_mean)
+    nn_variance_norm = (nn_std / bbox_diag) ** 2 if bbox_diag > 0 else 0.0
+
+    pairwise_distances = [
+        float(matrix[left_index][right_index])
+        for left_index in range(n)
+        for right_index in range(left_index + 1, n)
+    ]
+    distance_mean = _safe_mean(pairwise_distances)
+    distance_std = statistics.pstdev(pairwise_distances) if len(pairwise_distances) >= 2 else 0.0
+    distance_cv = distance_std / max(1e-9, distance_mean)
 
     mst_edges = _mst_edge_lengths(matrix)
     mst_length = float(sum(mst_edges))
@@ -129,6 +165,12 @@ def compute_instance_descriptors(instance: TSPInstance) -> dict[str, Any]:
     random_likeness = max(0.0, min(1.0, 0.65 * (1.0 - grid_likeness) + 0.35 * (1.0 - clusteredness_score)))
     bottleneck_score = _bottleneck_score(mst_edges, cluster_metrics.cluster_separation_score)
     nearest_neighbor_trap_score = _nearest_neighbor_trap_score(instance, matrix)
+    corridor_score = _corridor_score(
+        aspect_ratio=aspect_ratio,
+        aspect_ratio_norm=aspect_ratio_norm,
+        clusteredness_score=clusteredness_score,
+        grid_likeness=grid_likeness,
+    )
 
     structure_class = _structure_class(
         aspect_ratio=aspect_ratio,
@@ -147,8 +189,13 @@ def compute_instance_descriptors(instance: TSPInstance) -> dict[str, Any]:
         "bbox_height_norm": round(height / bbox_diag, 6),
         "aspect_ratio": round(aspect_ratio, 6),
         "aspect_ratio_norm": round(aspect_ratio_norm, 6),
+        "corridor_score": round(corridor_score, 6),
+        "distance_mean_norm": round(distance_mean / bbox_diag, 6),
+        "distance_std_norm": round(distance_std / bbox_diag, 6),
+        "distance_cv": round(distance_cv, 6),
         "nn_distance_mean_norm": round(nn_mean / bbox_diag, 6),
         "nn_distance_std_norm": round(nn_std / bbox_diag, 6),
+        "nn_distance_variance_norm": round(nn_variance_norm, 6),
         "nn_distance_cv": round(nn_cv, 6),
         "nn_distance_min_norm": round(min(nearest_neighbor_distances) / bbox_diag, 6),
         "nn_distance_max_norm": round(max(nearest_neighbor_distances) / bbox_diag, 6),
@@ -179,12 +226,17 @@ def prompt_descriptor_summary(instance: TSPInstance | dict[str, Any]) -> dict[st
         "structure_class": descriptors.get("structure_class", "unknown"),
         "size_bucket": descriptors.get("size_bucket", "unknown"),
         "coordinate_spread_norm": descriptors.get("coordinate_spread_norm", 0.0),
+        "distance_mean_norm": descriptors.get("distance_mean_norm", 0.0),
+        "distance_std_norm": descriptors.get("distance_std_norm", 0.0),
+        "distance_cv": descriptors.get("distance_cv", 0.0),
         "nn_distance_mean_norm": descriptors.get("nn_distance_mean_norm", 0.0),
+        "nn_distance_variance_norm": descriptors.get("nn_distance_variance_norm", 0.0),
         "nn_distance_cv": descriptors.get("nn_distance_cv", 0.0),
         "mst_length_norm": descriptors.get("mst_length_norm", 0.0),
         "convex_hull_ratio": descriptors.get("convex_hull_ratio", 0.0),
         "clusteredness_score": descriptors.get("clusteredness_score", 0.0),
         "grid_likeness": descriptors.get("grid_likeness", 0.0),
+        "corridor_score": descriptors.get("corridor_score", 0.0),
         "bottleneck_score": descriptors.get("bottleneck_score", 0.0),
         "nearest_neighbor_trap_score": descriptors.get("nearest_neighbor_trap_score", 0.0),
         "tags": list(data.get("tags", [])),
@@ -418,6 +470,18 @@ def _bottleneck_score(mst_edges: list[int], cluster_separation_score: float) -> 
     longest_edge = float(max(mst_edges))
     mst_jump = longest_edge / max(1.0, median_edge)
     return round(max(0.0, min(1.0, (0.5 * min(1.0, (mst_jump - 1.0) / 4.0)) + (0.5 * min(1.0, cluster_separation_score / 6.0)))), 6)
+
+
+def _corridor_score(
+    *,
+    aspect_ratio: float,
+    aspect_ratio_norm: float,
+    clusteredness_score: float,
+    grid_likeness: float,
+) -> float:
+    elongation = min(1.0, max(0.0, (aspect_ratio - 1.2) / 2.8))
+    corridor = (0.65 * max(aspect_ratio_norm, elongation)) + (0.2 * (1.0 - clusteredness_score)) + (0.15 * (1.0 - min(1.0, grid_likeness)))
+    return round(max(0.0, min(1.0, corridor)), 6)
 
 
 def _nearest_neighbor_trap_score(instance: TSPInstance, matrix: list[list[int]]) -> float:
