@@ -28,6 +28,16 @@ Phase 7 therefore constrains the search object to one operator at a time.
 
 Phase 7 uses fixed operator interfaces implemented as bounded operator specifications returned by `build_operator()`.
 
+The interface is typed and range-bounded on purpose:
+
+- `candidate_ranker` uses bounded float weights
+- `perturbation` and `restart_controller` use bounded integer controls plus small enumerated mode sets
+- `candidate_pruner` uses bounded integer controls rather than free-form continuous weights
+- `acceptance` uses bounded float thresholds and temperatures
+- `scaffold_selector` chooses only from the fixed scaffold pool
+
+This is deliberate methodological discipline, not an implementation detail. It reduces output ambiguity, improves repeatability, and keeps the search object attributable instead of letting the LLM smuggle whole-solver behavior through an underspecified interface.
+
 The current supported operator families are:
 
 - `candidate_ranker`
