@@ -207,6 +207,7 @@ The required deliverable is an operator-discovery report for each surviving cand
 - Run the suite with [run_tsp_operator_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_operator_suite.py) and [configs/tsp_phase7_suite/01_operator_discovery.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase7_suite/01_operator_discovery.json)
 - Use [configs/tsp_phase7_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase7_suite/RUNBOOK.md) for concrete commands
 - Aggregate repeated runs with [aggregate_tsp_operator_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_operator_runs.py)
+- Official results note: [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md)
 
 ## Relationship To Phase 6
 

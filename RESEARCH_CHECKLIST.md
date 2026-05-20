@@ -193,10 +193,10 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Generate the transfer suite from the winning factorial recipe and run the transfer campaign.
 - [x] Run the phase-5 TSP suite across paired replicate seed offsets.
 - [x] Aggregate the phase-5 TSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
-- [ ] Run the phase-6 TSP replay-mechanism suite across paired replicate seed offsets.
-- [ ] Aggregate the phase-6 TSP replay-mechanism suite and answer the mechanism questions about diversity, hardness, residual replay, and compression on the winning replay arm.
-- [ ] Run the phase-7 modular operator suite across paired replicate seed offsets.
-- [ ] Aggregate the phase-7 modular operator suite and identify whether any operators survive transplant, ablation, and Pareto validation.
+- [x] Run the phase-6 TSP replay-mechanism suite across paired replicate seed offsets.
+- [x] Aggregate the phase-6 TSP replay-mechanism suite and answer the mechanism questions about diversity, hardness, residual replay, and compression on the winning replay arm.
+- [x] Run the phase-7 modular operator suite across paired replicate seed offsets.
+- [x] Aggregate the phase-7 modular operator suite and identify whether any operators survive transplant, ablation, and Pareto validation.
 - [x] Run the phase-5B ATSP suite across paired replicate seed offsets.
 - [x] Aggregate the phase-5B ATSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
 - [x] Run the phase-5C CVRP suite across paired replicate seed offsets.
@@ -213,8 +213,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] At least 5 replicated suite runs for the factorial holdout comparison.
 - [x] At least 5 replicated suite runs for the cross-environment transfer comparison.
 - [x] At least 5 replicated suite runs for the phase-5 TSP benchmark comparison.
-- [ ] At least 5 replicated suite runs for the phase-6 TSP replay-mechanism comparison.
-- [ ] At least 5 replicated suite runs for the phase-7 modular operator comparison.
+- [x] At least 5 replicated suite runs for the phase-6 TSP replay-mechanism comparison.
+- [x] At least 5 replicated suite runs for the phase-7 modular operator comparison.
 - [x] At least 5 replicated suite runs for the phase-5B ATSP benchmark comparison.
 - [x] At least 5 replicated suite runs for the phase-5C CVRP benchmark comparison.
 
@@ -226,8 +226,9 @@ This checklist is the fixed research protocol for the project. It separates infr
 - The project is now evidence-complete for the first routing-benchmark pass across TSP, ATSP, and CVRP: the official 20-offset suites were run, aggregated, and interpreted with paired bootstrap deltas.
 - The current phase-5 routing evidence is mixed: TSP favors `random_replay`, ATSP is weakly favorable to `failure_replay_compression` on combined transfer only, and CVRP favors `no_replay`.
 - The routing interpretation note is tracked in [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md).
-- The project is now engineering-complete and smoke-verified for phase 6: the TSP replay-mechanism suite, descriptor logging, residual-failure replay, and mechanism aggregate/report path exist.
-- The project is now engineering-complete and smoke-verified for phase 7: the modular operator suite, transplant/family/Pareto/ablation validation pipeline, and operator aggregate/report path exist.
-- Phase-6 and phase-7 evidence is not complete until their official paired-offset campaigns are run and aggregated.
+- The project is now evidence-complete for phase 6: the official 20-offset mechanism campaign was run and aggregated, naive raw-failure replay did not beat random replay, archive hardness tracked held-out TSPLIB gap better than archive diversity, and compression hurt the winning replay arms.
+- The project is now evidence-complete for phase 7: the official 20-offset modular operator campaign was run and aggregated, the repaired modular path showed real operator diversity without fallback collapse, and no operator survived transplant/ablation/Pareto validation.
+- The current phase-6 interpretation note is tracked in [docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md).
+- The current phase-7 interpretation note is tracked in [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md).
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
 - Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).

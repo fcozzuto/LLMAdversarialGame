@@ -64,7 +64,9 @@ The design stays intentionally small:
 - `docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md`: phase-4 protocol for paired transfer replication, opponent failure modes, and functional-adaptation analysis.
 - `docs/TSP_PHASE_5_PROTOCOL.md`: phase-5A protocol for the initial symmetric-TSPLIB transfer step.
 - `docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md`: phase-6 protocol for the focused TSP replay-mechanism study.
+- `docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md`: official phase-6 mechanism-study result note.
 - `docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md`: phase-7 protocol for modular TSP operator discovery and validation.
+- `docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md`: official phase-7 operator-discovery result note.
 - `docs/ROUTING_PHASE_5B_5C_PROTOCOL.md`: phase-5B/5C protocol for the ATSP and CVRP extensions.
 - `docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md`: first replicated routing-benchmark results note across TSP, ATSP, and CVRP.
 - `docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md`: deferred checklist for metric validation, stronger evaluation, replication discipline, and broader generalization claims.
@@ -124,7 +126,9 @@ Expected keys:
 - Use [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) when you are working on the next causal-interpretation phase after the initial transfer result.
 - Use [docs/TSP_PHASE_5_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/TSP_PHASE_5_PROTOCOL.md) when you are moving the replay-aware machinery onto symmetric TSPLIB95 and the constrained TSP heuristic scaffold.
 - Use [docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md) when you are running the focused mechanism study on why `random_replay` beat `failure_replay` on symmetric TSP.
+- Use [docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md) when you need the current evidence readout for the completed phase-6 mechanism campaign.
 - Use [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md) when you are running the modular operator-discovery track and its transplant/ablation pipeline.
+- Use [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md) when you need the current evidence readout for the completed phase-7 operator-discovery campaign.
 - Use [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md) when you are extending the benchmark-transfer study to TSPLIB95 ATSP or CVRPLIB.
 - Use [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md) when you need the current evidence readout for the completed 20-offset routing campaign.
 - Use `configs/research_ablations_suite.json` when you want causal comparisons on feedback visibility or the generation scaffold.
@@ -205,6 +209,7 @@ For the phase-7 modular operator suite, it writes:
 - The phase-5 TSP smoke suite writes to `DO NOT COMMIT/tsp_suite/smoke`; official TSP study runs remain under `runs/tsp_suite/...`.
 - The phase-6 TSP smoke suite writes to `DO NOT COMMIT/tsp_phase6_suite/smoke`; official mechanism-study runs remain under `runs/tsp_phase6_suite/...`.
 - The phase-7 TSP smoke suite writes to `DO NOT COMMIT/tsp_phase7_suite/smoke`; official operator-discovery runs remain under `runs/tsp_phase7_suite/...`.
+- The official phase-6 artifact archive is tagged as `phase-6-replay-mechanism` on branch `replay-mechanism`; the `operator-discovery` branch starts from the phase-6 implementation state rather than the archived phase-6 run tree.
 - The phase-5 ATSP smoke suite writes to `DO NOT COMMIT/atsp_suite/smoke`; official ATSP study runs remain under `runs/atsp_suite/...`.
 - The phase-5 CVRP smoke suite writes to `DO NOT COMMIT/cvrp_suite/smoke`; official CVRP study runs remain under `runs/cvrp_suite/...`.
 - The transfer workflow assumes the factorial study identifies a winning recipe first; use `build_transfer_suite.py` to stamp that recipe into the cross-environment suite before running official transfer experiments.
