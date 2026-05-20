@@ -144,16 +144,16 @@ Goal: reduce the chance that a phase-7 "discovered operator" is only a renamed s
 Why this matters:
 - The main scientific value of phase 7 is interpretability, so false-positive "discoveries" are especially costly.
 
-## 10. Add A High-Probability Closeout Phase
+## 10. Phase 8 High-Probability Closeout Phase
 
 Goal: land one more bounded, positive result that is easier to defend than another open-ended operator-invention campaign.
 
-- [ ] Replace open-ended operator invention with feature-based selection or configuration over a fixed library of known operators and solver scaffolds.
-- [ ] Freeze a library of candidate low-level operators and host scaffolds before the study begins.
-- [ ] Reuse the phase-6 descriptor basis and add lightweight online search-state features for selector context.
-- [ ] Compare against the single-best fixed scaffold, full-solver evolution, and random operator selection.
-- [ ] Treat a statistically reliable held-out TSPLIB gain or a clean Pareto gain over the single-best fixed baseline as the success criterion.
-- [ ] Keep the operator library interpretable enough that any win can be explained as selection, scheduling, or parameter control rather than hidden solver invention.
+- [x] Replace open-ended operator invention with feature-based selection or configuration over a fixed library of known operators and solver scaffolds.
+- [x] Freeze a library of candidate low-level operators and host scaffolds before the study begins.
+- [x] Reuse the phase-6 descriptor basis and add lightweight online search-state features for selector context.
+- [x] Compare against the single-best fixed scaffold, full-solver evolution, and random operator selection.
+- [x] Treat a statistically reliable held-out TSPLIB gain or a clean Pareto gain over the single-best fixed baseline as the success criterion in the protocol.
+- [x] Keep the operator library interpretable enough that any win can be explained as selection, scheduling, or parameter control rather than hidden solver invention.
 
 Research basis:
 - Rice-style per-instance algorithm selection, as summarized in [Algorithm selection on a meta level](https://link.springer.com/article/10.1007/s10994-022-06161-4), is a better fit when instance descriptors already exist and whole-solver discovery is unstable.
@@ -164,6 +164,10 @@ Research basis:
 Why this matters:
 - The current evidence suggests the system is stronger at curation, scheduling, and tuning than at inventing wholly new reusable operators.
 - That makes a selector/configurator phase the most plausible way to end with a positive, interpretable claim without pretending that phase 7 already discovered a reusable primitive.
+
+Current status:
+- Phase 8 is now implemented on branch `adaptive-portfolio`.
+- The official evidence campaign is still outstanding, so this remains the live closeout path rather than a completed result.
 
 ## Exit Condition
 

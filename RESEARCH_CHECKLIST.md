@@ -52,6 +52,14 @@ This checklist is the fixed research protocol for the project. It separates infr
 4. Do any operators deliver a reliable Pareto improvement in gap, runtime, distance evaluations, or simplicity on held-out families?
 5. Do the same operator families reappear across independent seeds, suggesting rediscovery of an algorithmic attractor instead of a one-off artifact?
 
+## Phase 8 Questions
+
+1. Can an LLM-evolved instance-adaptive controller beat the best single fixed heuristic on held-out TSPLIB95 TSP?
+2. How close can the controller get to the oracle frozen-portfolio selector without seeing held-out instances during training?
+3. Does the LLM controller outperform a conventional non-LLM learned selector trained on the same descriptor basis?
+4. Does diversity-failure replay improve the adaptive controller over the same controller search without replay?
+5. Can the controller match or approach full-solver evolution while remaining faster, simpler, or more interpretable?
+
 ## Operational Definitions
 
 - `Cheating evidence`: policy markers, forbidden-call attempts, import attempts, or other sandbox-triggered rule-violation indicators. Runtime pathing mistakes are not cheating evidence.
@@ -70,6 +78,9 @@ This checklist is the fixed research protocol for the project. It separates infr
 - `Residual failure gap`: `observed_gap - expected_gap(instance_features, baseline_portfolio)`.
 - `Transplant gain`: operator-enabled gap change relative to the same scaffold without the operator.
 - `Pareto improvement`: a change that is non-worse within configured tolerances on gap, runtime, and simplicity, while being strictly better on at least one of them.
+- `Oracle selector`: the per-instance best frozen heuristic inside the phase-8 portfolio, used only as an upper bound.
+- `Selector regret`: `achieved_gap - oracle_portfolio_gap` on the same evaluation panel.
+- `Runtime-adjusted gap`: held-out gap penalized by positive runtime inflation relative to the best single fixed heuristic.
 
 ## Primary Metrics
 
@@ -90,6 +101,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - Phase-6 secondary endpoints: synthetic transfer gap, archive descriptor diversity, archive hardness, size bias, replay failure concentration, code novelty, heuristic complexity, and adaptation efficiency.
 - Phase-7 primary endpoint: final held-out TSPLIB mean optimality gap for the modular operator conditions.
 - Phase-7 secondary endpoints: family holdout gap, transplant gain, ablation sensitivity, runtime, distance evaluations, code novelty, complexity, and rediscovery frequency.
+- Phase-8 primary endpoint: final held-out TSPLIB mean optimality gap for the adaptive heuristic portfolio conditions.
+- Phase-8 secondary endpoints: selector regret versus the oracle portfolio, runtime-adjusted gap, runtime inflation, Pareto efficiency, synthetic-family transfer, code novelty, controller complexity, and adaptation efficiency.
 
 ## Infrastructure
 
@@ -124,6 +137,9 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] A phase-7 modular operator aggregation tool exists in [aggregate_tsp_operator_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_operator_runs.py).
 - [x] A phase-7 modular operator validation pipeline exists in [llm_tsp_operator/validation.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/llm_tsp_operator/validation.py).
 - [x] A phase-7 TSP runbook exists in [configs/tsp_phase7_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase7_suite/RUNBOOK.md).
+- [x] A phase-8 adaptive heuristic portfolio runner exists in [run_tsp_phase8_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_phase8_suite.py).
+- [x] A phase-8 adaptive heuristic portfolio aggregation tool exists in [aggregate_tsp_phase8_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_phase8_runs.py).
+- [x] A phase-8 adaptive heuristic portfolio runbook exists in [configs/tsp_phase8_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase8_suite/RUNBOOK.md).
 - [x] A phase-5B ATSP benchmark-preparation script exists in [prepare_atsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_atsp_benchmarks.py).
 - [x] A phase-5B ATSP runner exists in [run_atsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_atsp_suite.py).
 - [x] A phase-5B ATSP aggregation tool exists in [aggregate_atsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_atsp_runs.py).
@@ -171,6 +187,14 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Phase-7 modular-operator-plus-diversity-residual-replay condition exists.
 - [x] Phase-7 modular-operator-plus-compression-pressure condition exists.
 - [x] Phase-7 modular-operator-plus-Pareto-selection condition exists.
+- [x] Phase-8 best-single-fixed-heuristic condition exists.
+- [x] Phase-8 random-portfolio condition exists.
+- [x] Phase-8 oracle-selector condition exists.
+- [x] Phase-8 supervised-ML-selector condition exists.
+- [x] Phase-8 LLM-static-selector condition exists.
+- [x] Phase-8 LLM-evolved-adaptive-controller condition exists.
+- [x] Phase-8 replay-aware adaptive-controller condition exists.
+- [x] Phase-8 full-solver-evolution condition exists.
 - [x] No-replay ATSP condition exists.
 - [x] Random-replay ATSP condition exists.
 - [x] True-failure-replay ATSP condition exists.
@@ -197,6 +221,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Aggregate the phase-6 TSP replay-mechanism suite and answer the mechanism questions about diversity, hardness, residual replay, and compression on the winning replay arm.
 - [x] Run the phase-7 modular operator suite across paired replicate seed offsets.
 - [x] Aggregate the phase-7 modular operator suite and identify whether any operators survive transplant, ablation, and Pareto validation.
+- [ ] Run the phase-8 adaptive heuristic portfolio suite across paired replicate seed offsets.
+- [ ] Aggregate the phase-8 adaptive heuristic portfolio suite and compare the fixed, random, oracle, supervised, static-LLM, adaptive-LLM, replay-aware, and full-solver conditions on held-out TSPLIB gap and selector regret.
 - [x] Run the phase-5B ATSP suite across paired replicate seed offsets.
 - [x] Aggregate the phase-5B ATSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
 - [x] Run the phase-5C CVRP suite across paired replicate seed offsets.
@@ -215,6 +241,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] At least 5 replicated suite runs for the phase-5 TSP benchmark comparison.
 - [x] At least 5 replicated suite runs for the phase-6 TSP replay-mechanism comparison.
 - [x] At least 5 replicated suite runs for the phase-7 modular operator comparison.
+- [ ] At least 5 replicated suite runs for the phase-8 adaptive heuristic portfolio comparison.
 - [x] At least 5 replicated suite runs for the phase-5B ATSP benchmark comparison.
 - [x] At least 5 replicated suite runs for the phase-5C CVRP benchmark comparison.
 
@@ -230,5 +257,6 @@ This checklist is the fixed research protocol for the project. It separates infr
 - The project is now evidence-complete for phase 7: the official 20-offset modular operator campaign was run and aggregated, the repaired modular path showed real operator diversity without fallback collapse, and no operator survived transplant/ablation/Pareto validation.
 - The official phase-6 interpretation note is versioned on branch `replay-mechanism` as `docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md`.
 - The current phase-7 interpretation note is tracked in [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md).
+- The project is now engineering-complete and research-infrastructure-complete for phase 8: the adaptive heuristic portfolio runner, aggregate path, oracle-regret reporting, and replication runbook are implemented, but the official evidence campaign has not been run yet.
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
 - Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).

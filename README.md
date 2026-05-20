@@ -7,6 +7,7 @@ The repository now also includes routing-benchmark follow-on phases. Those phase
 - phase 5: symmetric TSPLIB95 Euclidean TSP, TSPLIB95 ATSP, and CVRPLIB CVRP
 - phase 6: a TSP-only replay-mechanism study that asks why `random_replay` beat `failure_replay`
 - phase 7: a modular operator-discovery track that evolves one reusable TSP heuristic operator at a time instead of a whole solver
+- phase 8: an adaptive heuristic portfolio track that evolves an interpretable controller over a frozen library of known TSP heuristics
 
 The design stays intentionally small:
 
@@ -32,6 +33,7 @@ The design stays intentionally small:
 - `configs/tsp_suite/`: phase-5 symmetric TSP replay-transfer suite.
 - `configs/tsp_phase6_suite/`: phase-6 TSP replay-mechanism suite.
 - `configs/tsp_phase7_suite/`: phase-7 modular operator-discovery suite.
+- `configs/tsp_phase8_suite/`: phase-8 adaptive heuristic portfolio suite.
 - `configs/atsp_suite/`: phase-5B ATSP replay-transfer suite.
 - `configs/cvrp_suite/`: phase-5C CVRP replay-transfer suite.
 - `build_transfer_suite.py`: generate a transfer suite from the winning factorial recipe.
@@ -43,6 +45,8 @@ The design stays intentionally small:
 - `aggregate_tsp_phase6_runs.py`: aggregate repeated phase-6 TSP replay-mechanism runs into one cross-run report.
 - `run_tsp_operator_suite.py`: run the phase-7 modular operator-discovery suite.
 - `aggregate_tsp_operator_runs.py`: aggregate repeated phase-7 operator-discovery runs into one cross-run report.
+- `run_tsp_phase8_suite.py`: run the phase-8 adaptive heuristic portfolio suite.
+- `aggregate_tsp_phase8_runs.py`: aggregate repeated phase-8 adaptive-portfolio runs into one cross-run report.
 - `prepare_atsp_benchmarks.py`: download the phase-5B TSPLIB95 ATSP subset and write the benchmark manifest with official best-known costs.
 - `run_atsp_suite.py`: run the constrained replay-aware ATSP benchmark suite.
 - `aggregate_atsp_runs.py`: aggregate repeated ATSP-suite runs into one cross-run report.
@@ -52,6 +56,7 @@ The design stays intentionally small:
 - `llm_grid_battle/`: game engine, sandbox, prompt builder, analysis, and SVG output.
 - `llm_tsp/`: TSP benchmark loader, heuristic scaffold, replay archive logic, reporting, and runner support.
 - `llm_tsp_operator/`: modular operator schema, scaffold engine, validation pipeline, reporting, and runner support for phase 7.
+- `llm_tsp_portfolio/`: frozen heuristic portfolio, controller schema, prompt builder, reporting, and runner support for phase 8.
 - `llm_atsp/`: ATSP benchmark loader, constrained asymmetric heuristic scaffold, replay archive logic, reporting, and runner support.
 - `llm_cvrp/`: CVRP benchmark loader, constrained routing heuristic scaffold, replay archive logic, reporting, and runner support.
 - `benchmarks/tsp/`: prepared TSPLIB95 symmetric benchmark subset plus synthetic geometric manifests.
@@ -65,6 +70,7 @@ The design stays intentionally small:
 - `docs/TSP_PHASE_5_PROTOCOL.md`: phase-5A protocol for the initial symmetric-TSPLIB transfer step.
 - `docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md`: phase-6 protocol for the focused TSP replay-mechanism study.
 - `docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md`: phase-7 protocol for modular TSP operator discovery and validation.
+- `docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_PROTOCOL.md`: phase-8 protocol for adaptive heuristic portfolio control over a frozen TSP library.
 - `docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md`: official phase-7 operator-discovery result note.
 - `docs/ROUTING_PHASE_5B_5C_PROTOCOL.md`: phase-5B/5C protocol for the ATSP and CVRP extensions.
 - `docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md`: first replicated routing-benchmark results note across TSP, ATSP, and CVRP.
@@ -128,6 +134,7 @@ Expected keys:
 - The official phase-6 evidence readout is versioned on branch `replay-mechanism` in `docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md`.
 - Use [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md) when you are running the modular operator-discovery track and its transplant/ablation pipeline.
 - Use [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md) when you need the current evidence readout for the completed phase-7 operator-discovery campaign.
+- Use [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_PROTOCOL.md) when you are running the adaptive heuristic portfolio phase and comparing fixed, random, oracle, supervised, static-LLM, adaptive-LLM, replay-aware, and full-solver conditions.
 - Use [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md) when you are extending the benchmark-transfer study to TSPLIB95 ATSP or CVRPLIB.
 - Use [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md) when you need the current evidence readout for the completed 20-offset routing campaign.
 - Use `configs/research_ablations_suite.json` when you want causal comparisons on feedback visibility or the generation scaffold.
@@ -141,6 +148,7 @@ Expected keys:
 - Use [configs/tsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_suite/RUNBOOK.md) when you want the replay-aware TSP benchmark suite, its replication workflow, and the phase-5 aggregation commands.
 - Use [configs/tsp_phase6_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase6_suite/RUNBOOK.md) when you want the TSP replay-mechanism suite, its 20-offset workflow, and the mechanism-study aggregation commands.
 - Use [configs/tsp_phase7_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase7_suite/RUNBOOK.md) when you want the modular operator-discovery suite and its validation-heavy replication workflow.
+- Use [configs/tsp_phase8_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase8_suite/RUNBOOK.md) when you want the adaptive heuristic portfolio suite and its paired-offset replication workflow.
 - Use [configs/atsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/atsp_suite/RUNBOOK.md) when you want the replay-aware ATSP benchmark suite and its replication workflow.
 - Use [configs/cvrp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_suite/RUNBOOK.md) when you want the replay-aware CVRP benchmark suite and its replication workflow.
 - After collecting repeated runs, aggregate them with:
@@ -200,6 +208,14 @@ For the phase-7 modular operator suite, it writes:
 - `suite_summary.json`, `run_metadata.json`, `report.md`, and `report.pdf`
 - final operator validation summaries covering transplant, family, Pareto, and ablation checks
 
+For the phase-8 adaptive heuristic portfolio suite, it writes:
+
+- `condition_summary.json` for every baseline and controller condition
+- `training_gap.svg/png` and `transfer_gap.svg/png` for the adaptive-controller conditions
+- `suite_summary.json`, `run_metadata.json`, `report.md`, and `report.pdf`
+- selector-regret, runtime-adjusted-gap, runtime-inflation, and Pareto-efficiency summaries
+- held-out TSPLIB and synthetic-validation-family summaries using a common final evaluation path across fixed, oracle, supervised, controller, and full-solver conditions
+
 ## Notes
 
 - The OpenAI backend uses the Responses API with low verbosity and a reasoning-effort fallback that retries with supported values when a model rejects the initial setting. It also retries transient upstream failures such as HTTP 502/503/504 with exponential backoff, which reduces the chance that a single provider glitch contaminates a run.
@@ -208,6 +224,7 @@ For the phase-7 modular operator suite, it writes:
 - The phase-5 TSP smoke suite writes to `DO NOT COMMIT/tsp_suite/smoke`; official TSP study runs remain under `runs/tsp_suite/...`.
 - The phase-6 TSP smoke suite writes to `DO NOT COMMIT/tsp_phase6_suite/smoke`; official mechanism-study runs remain under `runs/tsp_phase6_suite/...`.
 - The phase-7 TSP smoke suite writes to `DO NOT COMMIT/tsp_phase7_suite/smoke`; official operator-discovery runs remain under `runs/tsp_phase7_suite/...`.
+- The phase-8 TSP smoke suite writes to `DO NOT COMMIT/tsp_phase8_suite/smoke`; official adaptive-portfolio runs remain under `runs/tsp_phase8_suite/...`.
 - The official phase-6 artifact archive is tagged as `phase-6-replay-mechanism` on branch `replay-mechanism`; the `operator-discovery` branch starts from the phase-6 implementation state rather than the archived phase-6 run tree.
 - The phase-5 ATSP smoke suite writes to `DO NOT COMMIT/atsp_suite/smoke`; official ATSP study runs remain under `runs/atsp_suite/...`.
 - The phase-5 CVRP smoke suite writes to `DO NOT COMMIT/cvrp_suite/smoke`; official CVRP study runs remain under `runs/cvrp_suite/...`.
