@@ -40,8 +40,9 @@ class AgentConfig:
 @dataclass
 class GenerationConfig:
     repair_invalid_submissions: bool = True
-    timeout_seconds: float = 120.0
-    max_non_empty_lines: int = 220
+    llm_timeout_seconds: float = 120.0
+    solver_timeout_seconds: float = 180.0
+    max_non_empty_lines: int = 260
     max_characters: int = 12000
 
 
@@ -85,13 +86,18 @@ class Phase9ConditionConfig:
 
     @staticmethod
     def from_dict(data: dict[str, Any]) -> "Phase9ConditionConfig":
+        generation_data = dict(data.get("generation", {}))
+        legacy_timeout = generation_data.pop("timeout_seconds", None)
+        if legacy_timeout is not None:
+            generation_data.setdefault("llm_timeout_seconds", legacy_timeout)
+            generation_data.setdefault("solver_timeout_seconds", legacy_timeout)
         return Phase9ConditionConfig(
             name=str(data["name"]),
             seed=int(data["seed"]),
             output_root=str(data.get("output_root", "runs/cvrp_phase9_suite")),
             execution=ExecutionConfig(**data.get("execution", {})),
             agent=AgentConfig(**data["agent"]),
-            generation=GenerationConfig(**data.get("generation", {})),
+            generation=GenerationConfig(**generation_data),
             benchmark=BenchmarkConfig(**data["benchmark"]),
             optimization=OptimizationConfig(**data.get("optimization", {})),
             judge=JudgeConfig(**data.get("judge", {})),

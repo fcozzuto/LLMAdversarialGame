@@ -16,6 +16,7 @@ class GenerationResult:
     error: str | None = None
     validation_issues: list[str] = field(default_factory=list)
     repair_attempted: bool = False
+    salvage_attempted: bool = False
     used_fallback: bool = False
 
 
@@ -39,6 +40,49 @@ def extract_code(text: str) -> str:
     if start != -1:
         return source[start:].strip().strip("`")
     return source.strip().strip("`")
+
+
+def salvage_code_candidate(
+    code: str,
+    *,
+    max_non_empty_lines: int,
+    max_characters: int,
+) -> tuple[str | None, list[str]]:
+    original = (code or "").strip()
+    if not original:
+        return None, []
+    attempts: list[str] = []
+    candidate = original
+    if len(candidate) > max_characters:
+        attempts.append("trimmed to max_characters budget")
+        candidate = candidate[:max_characters]
+    lines = candidate.splitlines()
+    while sum(1 for line in lines if line.strip()) > max_non_empty_lines and lines:
+        lines.pop()
+    candidate = "\n".join(lines).strip()
+    if candidate != original:
+        attempts.append("trimmed trailing lines to fit line budget")
+    issues = validate_code(candidate, max_non_empty_lines=max_non_empty_lines, max_characters=max_characters)
+    if not issues:
+        return candidate, attempts
+
+    trimmed_lines = candidate.splitlines()
+    for _ in range(min(80, len(trimmed_lines))):
+        if not trimmed_lines:
+            break
+        trimmed_lines.pop()
+        shortened = "\n".join(trimmed_lines).strip()
+        if "def solve_cvrp" not in shortened:
+            break
+        issues = validate_code(
+            shortened,
+            max_non_empty_lines=max_non_empty_lines,
+            max_characters=max_characters,
+        )
+        if not issues:
+            attempts.append("salvaged by trimming incomplete trailing block")
+            return shortened, attempts
+    return None, attempts
 
 
 def generate_code(
@@ -81,6 +125,19 @@ def generate_code(
     issues = validate_code(code, max_non_empty_lines=max_non_empty_lines, max_characters=max_characters)
     if not issues:
         return GenerationResult(raw_text=text, code=code, submitted_code=code)
+    salvaged_code, salvage_notes = salvage_code_candidate(
+        code,
+        max_non_empty_lines=max_non_empty_lines,
+        max_characters=max_characters,
+    )
+    if salvaged_code is not None:
+        return GenerationResult(
+            raw_text=text,
+            code=salvaged_code,
+            submitted_code=code,
+            validation_issues=salvage_notes,
+            salvage_attempted=bool(salvage_notes),
+        )
     if not repair_invalid_submissions:
         return GenerationResult(
             raw_text=text,
@@ -113,6 +170,21 @@ def generate_code(
         )
     repaired_code = extract_code(repaired_text)
     repaired_issues = validate_code(repaired_code, max_non_empty_lines=max_non_empty_lines, max_characters=max_characters)
+    if repaired_issues:
+        salvaged_repair, salvage_notes = salvage_code_candidate(
+            repaired_code,
+            max_non_empty_lines=max_non_empty_lines,
+            max_characters=max_characters,
+        )
+        if salvaged_repair is not None:
+            return GenerationResult(
+                raw_text=combined_raw,
+                code=salvaged_repair,
+                submitted_code=repaired_code,
+                validation_issues=salvage_notes,
+                repair_attempted=True,
+                salvage_attempted=True,
+            )
     if repaired_issues:
         return GenerationResult(
             raw_text=combined_raw,

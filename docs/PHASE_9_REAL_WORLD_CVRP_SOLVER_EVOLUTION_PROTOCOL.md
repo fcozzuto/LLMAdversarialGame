@@ -71,6 +71,7 @@ Scoring outputs for each solver are:
 The phase uses a penalized-gap selection score so infeasible solvers cannot win by returning partial or broken solutions.
 
 Per-instance solver-worker timeouts are also treated as failed evaluations under this penalized-gap rule; they should not abort a whole suite run.
+The model-call timeout and solver-worker timeout are tracked separately. In the official bounded suite, the solver-worker timeout is intentionally looser than the model-call timeout because generated heuristic code can be slower than the API response path even when it is still semantically valid.
 
 ## Baselines
 
@@ -118,6 +119,7 @@ The solver may not use:
 This is intentionally more open than the phase-5 scaffold track, but still bounded enough to keep the resulting code interpretable and auditable.
 
 Invalid or fallback generations are still logged for diagnostic purposes, but they are not eligible to replace the incumbent solver in the evolutionary loop. Only generations that pass the bounded code-validation path may be accepted.
+The evolutionary prompt is mutation-oriented rather than rewrite-oriented: the model sees the incumbent solver and is instructed to make a few focused edits instead of replacing the whole design from scratch. The runtime also applies deterministic tail-salvage to oversized or obviously truncated submissions before falling back to a full repair call. This keeps the search closer to local heuristic mutation, which is a better fit for the project's replay-and-evolution framing than unconstrained whole-program regeneration at every epoch.
 
 ## Inputs Available To The Solver
 

@@ -128,7 +128,7 @@ def _evaluate_code_panel(code: str, instances: list[CVRPInstance], config: Phase
         run_result = run_solver(
             code,
             payload,
-            timeout_seconds=float(config.generation.timeout_seconds),
+            timeout_seconds=float(config.generation.solver_timeout_seconds),
         )
         if not run_result["ok"]:
             validation = validate_solution(
@@ -263,7 +263,7 @@ def _evolution_condition_payload(config: Phase9ConditionConfig, condition_dir: P
             temperature=float(config.agent.temperature),
             max_tokens=int(config.agent.max_tokens),
             repair_invalid_submissions=bool(config.generation.repair_invalid_submissions),
-            timeout=float(config.generation.timeout_seconds),
+            timeout=float(config.generation.llm_timeout_seconds),
             max_non_empty_lines=int(config.generation.max_non_empty_lines),
             max_characters=int(config.generation.max_characters),
         )
@@ -290,6 +290,7 @@ def _evolution_condition_payload(config: Phase9ConditionConfig, condition_dir: P
             "generation_fallback_used": bool(generation_result.used_fallback),
             "generation_valid_for_acceptance": bool(generation_valid),
             "repair_attempted": bool(generation_result.repair_attempted),
+            "salvage_attempted": bool(generation_result.salvage_attempted),
             "validation_issues": list(generation_result.validation_issues),
             "raw_text": generation_result.raw_text,
             "submitted_code": generation_result.submitted_code,

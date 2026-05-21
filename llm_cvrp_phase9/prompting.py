@@ -10,6 +10,7 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
     worst_cases = context.get("worst_cases", [])
     prompt_lines = [
         "Design a deterministic CVRP solver in raw Python.",
+        "Treat this as mutation-based solver evolution, not a fresh rewrite.",
         "Return only raw Python source code.",
         "The first line must be exactly: def solve_cvrp(instance):",
         "Do not use markdown fences.",
@@ -18,6 +19,9 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
         f"- Stay within {max_non_empty_lines} non-empty lines when feasible.",
         f"- Stay within {max_characters} characters when feasible.",
         "- Oversized submissions are rejected; prefer a compact solver with only a few short helper functions.",
+        "- Prefer 1 to 3 focused edits to the incumbent instead of a whole new design.",
+        "- Preserve the incumbent structure, helper functions, and return path unless a specific change is necessary.",
+        "- If you are unsure how to improve the solver safely, return the incumbent unchanged rather than emitting broken code.",
         "",
         "Your solver must return a full solution as a list of routes.",
         "Each route must be a Python list of zero-based customer node ids.",
@@ -74,6 +78,7 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
                 "- training feasibility {feasibility_rate}, penalized gap {mean_penalized_gap}, feasible gap {mean_feasible_gap}, runtime ms {mean_runtime_ms}".format(
                     **incumbent
                 ),
+                "- Make small, targeted changes that improve the worst training cases without destabilizing the rest of the solver.",
             ]
         )
     previous_code = str(context.get("incumbent_code", "")).strip()
@@ -100,6 +105,7 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
             "Target behavior:",
             "- maximize feasibility first",
             "- then reduce objective gap on the training instances",
+            "- keep edits small enough that the code stays syntactically complete",
             "- keep the solver interpretable and deterministic",
             "",
             "Return only Python source code for solve_cvrp(instance).",

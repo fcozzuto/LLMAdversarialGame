@@ -94,3 +94,10 @@ The intended phase-9 claim shape is narrower:
 If an official offset crashes or is manually interrupted after creating a partial `run_*` directory, delete that partial run directory before rerunning the same `--seed-offset` and `--replicate-label`. Do not aggregate mixed partial and complete official runs.
 
 If a generated solver times out on an instance, the runner now records that as a failed candidate evaluation with a penalized gap instead of aborting the whole suite run.
+
+The official phase-9 config now separates:
+
+- `generation.llm_timeout_seconds` for learner API calls
+- `generation.solver_timeout_seconds` for sandboxed solver execution
+
+The official bounded suite also uses a slightly looser code budget than the earliest draft, because real CVRP whole-solver logic needs more room than the earlier toy and TSP operator phases. The prompt remains mutation-oriented and still favors compact, local edits over unconstrained rewrites.
