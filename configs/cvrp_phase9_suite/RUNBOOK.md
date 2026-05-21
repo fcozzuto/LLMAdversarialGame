@@ -2,7 +2,7 @@
 
 This runbook covers the bounded real-world CVRP solver-evolution phase on branch `real-world-vrp`.
 
-The chosen benchmark family is the official `CVRPLIB` Uchoa `X` set, using a moderate-size curated subset so the study stays feasible while still testing true capacity-feasible solver synthesis.
+The chosen benchmark family is the official `CVRPLIB` Uchoa `X` set, using a moderate-size curated subset so the study stays feasible while still testing true capacity-feasible solver synthesis. The committed subset includes both two-cluster and grid-like regimes under the project descriptor basis, rather than only one geometric mode.
 
 For this bounded `X`-instance phase, feasibility follows the unrestricted-route CVRP interpretation used in the DIMACS CVRP challenge. The `k` in instance names is logged as contextual metadata, but solutions are not rejected solely for using more than `k` routes.
 
@@ -32,9 +32,9 @@ The bounded official suite compares:
 - regret-insertion plus local search
 - full solver-code evolution
 
-Suggested initial replication target: `10` paired offsets.
+Recommended official replication target: `20` paired offsets.
 
-Stronger replication target if cost/time allow: `20` paired offsets.
+If you want a quicker pilot before the full campaign, use `10` paired offsets and then extend to `20` without changing the config or benchmark pack.
 
 Example PowerShell loop:
 

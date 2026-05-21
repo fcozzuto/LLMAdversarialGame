@@ -19,14 +19,15 @@ TRAIN_INSTANCES = [
     "X-n110-k13",
     "X-n125-k30",
     "X-n134-k13",
-    "X-n148-k46",
     "X-n157-k13",
+    "X-n214-k11",
 ]
 HOLDOUT_INSTANCES = [
     "X-n176-k26",
     "X-n190-k8",
-    "X-n214-k11",
     "X-n223-k34",
+    "X-n247-k50",
+    "X-n275-k28",
 ]
 
 
@@ -134,7 +135,8 @@ def main() -> None:
     manifest = {
         "description": (
             "Phase-9 bounded real-world CVRP benchmark built from the official CVRPLIB Uchoa X family. "
-            "The split keeps a moderate-size training subset and a held-out subset for frozen final evaluation."
+            "The split keeps a moderate-size training subset and a held-out subset for frozen final evaluation, "
+            "while ensuring descriptor-level coverage of both two-cluster and grid-like regimes."
         ),
         "sources": [
             {

@@ -26,7 +26,7 @@ Primary sources:
 - Uchoa et al. 2017: [New benchmark instances for the capacitated vehicle routing problem](https://doi.org/10.1016/j.ejor.2016.08.012)
 - DIMACS CVRP challenge overview: [DIMACS Capacitated VRP](https://dimacs.rutgers.edu/programs/challenge/vrp/cvrp/)
 
-The bounded benchmark subset for this phase is a curated moderate-size slice of the `X` set. The intent is to expose real feasibility logic while keeping official runs affordable.
+The bounded benchmark subset for this phase is a curated moderate-size slice of the `X` set. The intent is to expose real feasibility logic while keeping official runs affordable, while also covering both two-cluster and grid-like regimes under the project descriptor basis.
 
 ## Parser, Validator, and Scorer
 

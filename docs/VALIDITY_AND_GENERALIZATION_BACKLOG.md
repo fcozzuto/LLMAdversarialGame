@@ -182,6 +182,7 @@ Goal: test autonomous solver-code evolution on a real-world benchmark family wit
 - [x] Define a bounded baseline set with 2-3 explicit solver heuristics.
 - [x] Specify exactly what the LLM is allowed to evolve in code.
 - [x] Match the bounded phase-9 validator to the unrestricted-route semantics used for the chosen Uchoa `X` instances, treating `k` as contextual metadata rather than a hard feasibility limit.
+- [x] Curate the bounded phase-9 `X` subset so the committed train/holdout split includes both two-cluster and grid-like descriptor regimes, rather than only a single geometric mode.
 - [x] Keep held-out evaluation frozen until the final solver is selected.
 - [ ] Run the official replicated phase-9 campaign.
 

@@ -64,7 +64,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 
 1. Can the LLM-evolution loop generate feasible CVRP solver code more reliably than naive constructive baselines on held-out CVRPLIB X instances under the standard unrestricted-route CVRP interpretation?
 2. Does the evolved solver improve objective gap over nearest-neighbor, Clarke-Wright, and regret-insertion-plus-local-search baselines?
-3. Does the evolved solver remain robust across held-out CVRP structure families instead of only one narrow instance regime?
+3. Does the evolved solver remain robust across held-out CVRP structure families, including both two-cluster and grid-like `X` regimes under the project descriptor basis, instead of only one narrow instance regime?
 4. Can the system synthesize interpretable constructive, repair, local-search, or restart logic rather than only brittle code churn?
 
 ## Operational Definitions
