@@ -424,7 +424,8 @@ def main() -> None:
         judge_note = judge_text(
             provider=judge_cfg.provider,
             model=judge_cfg.model,
-            prompt=build_judge_prompt(suite_summary),
+            system_prompt="You are a careful research assistant. Answer in concise markdown.",
+            user_prompt=build_judge_prompt(suite_summary),
             temperature=judge_cfg.temperature,
             max_tokens=judge_cfg.max_tokens,
             timeout=judge_cfg.timeout_seconds,
