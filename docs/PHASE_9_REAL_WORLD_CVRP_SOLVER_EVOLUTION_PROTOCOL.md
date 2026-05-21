@@ -131,6 +131,8 @@ The runtime `instance` payload includes:
 
 This gives the solver enough information to build constructive, repair, and restart logic without depending on hidden benchmark metadata.
 
+To reduce direct benchmark-identifier overfitting, the runtime payload does not expose instance names, and the generation prompt refers to anonymous training-case summaries rather than named benchmark instances.
+
 ## Evaluation Discipline
 
 - The evolutionary loop trains only on the training subset.

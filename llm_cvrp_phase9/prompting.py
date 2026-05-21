@@ -50,10 +50,11 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
         "",
         "Training instances:",
     ]
-    for item in instance_summaries:
+    for index, item in enumerate(instance_summaries, start=1):
         prompt_lines.append(
-            "- {name}: {customer_count} customers, vehicle hint {vehicle_count_hint}, demand pressure {demand_pressure}, "
+            "- train_case_{index}: {customer_count} customers, vehicle hint {vehicle_count_hint}, demand pressure {demand_pressure}, "
             "structure {structure_class}, corridor {corridor_score}, clusteredness {clusteredness_score}, trap {nearest_neighbor_trap_score}".format(
+                index=index,
                 **item
             )
         )
@@ -85,9 +86,10 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
         )
     if worst_cases:
         prompt_lines.extend(["", "Worst current training cases to fix:"])
-        for item in worst_cases[:5]:
+        for index, item in enumerate(worst_cases[:5], start=1):
             prompt_lines.append(
-                "- {instance_name}: feasible={feasible}, penalized gap {penalized_gap}, errors={errors}".format(
+                "- train_case_issue_{index}: family={family}, feasible={feasible}, penalized gap {penalized_gap}, errors={errors}".format(
+                    index=index,
                     **item
                 )
             )
