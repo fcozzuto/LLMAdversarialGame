@@ -167,7 +167,10 @@ Why this matters:
 
 Current status:
 - Phase 8 is now implemented on branch `adaptive-portfolio`.
-- The official evidence campaign is still outstanding, so this remains the live closeout path rather than a completed result.
+- The official evidence campaign is now complete on branch `adaptive-portfolio`.
+- The adaptive controller beat the one-shot static LLM selector, but it did not beat the best fixed heuristic or the supervised selector on held-out TSPLIB.
+- The oracle selector tied the best fixed heuristic on the primary held-out TSPLIB endpoint, so the current frozen portfolio has almost no single-best-versus-oracle headroom there.
+- That means any further selector-focused work should first create portfolio complementarity or shift the main endpoint toward regimes where the oracle already improves over the single best heuristic.
 
 ## Exit Condition
 
