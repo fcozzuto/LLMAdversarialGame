@@ -90,3 +90,5 @@ The intended phase-9 claim shape is narrower:
 - objective gap improves over naive baselines
 - held-out robustness remains acceptable across derived instance families
 - the generated solver logic is interpretable enough to inspect as constructive, repair, local-search, or restart behavior
+
+If an official offset crashes or is manually interrupted after creating a partial `run_*` directory, delete that partial run directory before rerunning the same `--seed-offset` and `--replicate-label`. Do not aggregate mixed partial and complete official runs.

@@ -17,6 +17,7 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
         "Do not access files, network, environment variables, or instance names.",
         f"- Stay within {max_non_empty_lines} non-empty lines when feasible.",
         f"- Stay within {max_characters} characters when feasible.",
+        "- Oversized submissions are rejected; prefer a compact solver with only a few short helper functions.",
         "",
         "Your solver must return a full solution as a list of routes.",
         "Each route must be a Python list of zero-based customer node ids.",

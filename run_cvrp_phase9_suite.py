@@ -271,10 +271,13 @@ def _evolution_condition_payload(config: Phase9ConditionConfig, condition_dir: P
         candidate_train_summary = summarize_panel(candidate_train_results, panel_name="train")
         candidate_score = _epoch_score(candidate_train_summary)
         incumbent_score = _epoch_score(incumbent_train_summary)
-        accepted = candidate_score < incumbent_score or (
-            abs(candidate_score[1] - incumbent_score[1]) <= float(config.optimization.acceptance_tolerance)
-            and candidate_score[0] < incumbent_score[0]
-        )
+        generation_valid = generation_result.error is None and not bool(generation_result.used_fallback)
+        accepted = False
+        if generation_valid:
+            accepted = candidate_score < incumbent_score or (
+                abs(candidate_score[1] - incumbent_score[1]) <= float(config.optimization.acceptance_tolerance)
+                and candidate_score[0] < incumbent_score[0]
+            )
         if accepted:
             incumbent_code = generation_result.code
             incumbent_train_results = candidate_train_results
@@ -285,6 +288,7 @@ def _evolution_condition_payload(config: Phase9ConditionConfig, condition_dir: P
             "accepted": bool(accepted),
             "generation_error": generation_result.error,
             "generation_fallback_used": bool(generation_result.used_fallback),
+            "generation_valid_for_acceptance": bool(generation_valid),
             "repair_attempted": bool(generation_result.repair_attempted),
             "validation_issues": list(generation_result.validation_issues),
             "raw_text": generation_result.raw_text,

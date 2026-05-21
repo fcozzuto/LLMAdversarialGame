@@ -115,6 +115,8 @@ The solver may not use:
 
 This is intentionally more open than the phase-5 scaffold track, but still bounded enough to keep the resulting code interpretable and auditable.
 
+Invalid or fallback generations are still logged for diagnostic purposes, but they are not eligible to replace the incumbent solver in the evolutionary loop. Only generations that pass the bounded code-validation path may be accepted.
+
 ## Inputs Available To The Solver
 
 The runtime `instance` payload includes:
