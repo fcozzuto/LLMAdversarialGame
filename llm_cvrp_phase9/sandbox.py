@@ -14,14 +14,23 @@ def _project_root() -> Path:
 
 def run_solver(code: str, instance_payload: dict[str, Any], *, timeout_seconds: float) -> dict[str, Any]:
     started = perf_counter()
-    process = subprocess.run(
-        [sys.executable, "-m", "llm_cvrp_phase9.solver_worker"],
-        input=json.dumps({"code": code, "instance": instance_payload}),
-        capture_output=True,
-        text=True,
-        cwd=str(_project_root()),
-        timeout=timeout_seconds,
-    )
+    try:
+        process = subprocess.run(
+            [sys.executable, "-m", "llm_cvrp_phase9.solver_worker"],
+            input=json.dumps({"code": code, "instance": instance_payload}),
+            capture_output=True,
+            text=True,
+            cwd=str(_project_root()),
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        elapsed_ms = round((perf_counter() - started) * 1000.0, 6)
+        return {
+            "ok": False,
+            "runtime_ms": elapsed_ms,
+            "error": f"solver worker timed out after {timeout_seconds:.1f} seconds",
+            "routes": [],
+        }
     elapsed_ms = round((perf_counter() - started) * 1000.0, 6)
     if process.returncode != 0:
         stderr = (process.stderr or "").strip()

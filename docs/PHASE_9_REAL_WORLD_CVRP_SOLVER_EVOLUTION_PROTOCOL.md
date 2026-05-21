@@ -70,6 +70,8 @@ Scoring outputs for each solver are:
 
 The phase uses a penalized-gap selection score so infeasible solvers cannot win by returning partial or broken solutions.
 
+Per-instance solver-worker timeouts are also treated as failed evaluations under this penalized-gap rule; they should not abort a whole suite run.
+
 ## Baselines
 
 The bounded official baseline set is:

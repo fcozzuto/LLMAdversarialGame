@@ -92,3 +92,5 @@ The intended phase-9 claim shape is narrower:
 - the generated solver logic is interpretable enough to inspect as constructive, repair, local-search, or restart behavior
 
 If an official offset crashes or is manually interrupted after creating a partial `run_*` directory, delete that partial run directory before rerunning the same `--seed-offset` and `--replicate-label`. Do not aggregate mixed partial and complete official runs.
+
+If a generated solver times out on an instance, the runner now records that as a failed candidate evaluation with a penalized gap instead of aborting the whole suite run.
