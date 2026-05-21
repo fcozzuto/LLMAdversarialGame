@@ -172,6 +172,30 @@ Current status:
 - The oracle selector tied the best fixed heuristic on the primary held-out TSPLIB endpoint, so the current frozen portfolio has almost no single-best-versus-oracle headroom there.
 - That means any further selector-focused work should first create portfolio complementarity or shift the main endpoint toward regimes where the oracle already improves over the single best heuristic.
 
+## 11. Phase 9 Real-World Solver Evolution
+
+Goal: test autonomous solver-code evolution on a real-world benchmark family with explicit feasibility logic, instead of another selector or operator-selection loop.
+
+- [x] Pick one practical benchmark family with official public instances and best-known solutions.
+- [x] Keep the first real-world phase on `CVRP`, not `VRPTW`, to reuse existing parsing/scoring infrastructure while still introducing real route-feasibility complexity.
+- [x] Implement a strict parser, validator, and scorer for full returned solutions.
+- [x] Define a bounded baseline set with 2-3 explicit solver heuristics.
+- [x] Specify exactly what the LLM is allowed to evolve in code.
+- [x] Match the bounded phase-9 validator to the unrestricted-route semantics used for the chosen Uchoa `X` instances, treating `k` as contextual metadata rather than a hard feasibility limit.
+- [x] Keep held-out evaluation frozen until the final solver is selected.
+- [ ] Run the official replicated phase-9 campaign.
+
+Research basis:
+
+- CVRPLIB is the standard public benchmark repository for CVRP instances and best-known solutions; see [CVRPLIB](https://galgos.inf.puc-rio.br/cvrplib/en/instances).
+- The Uchoa `X` set was designed to expose a wide range of structurally diverse CVRP behaviors and remains a standard benchmark for heuristic and exact evaluation; see [Uchoa et al. 2017](https://doi.org/10.1016/j.ejor.2016.08.012).
+- DIMACS explicitly treats CVRP as a benchmark family where algorithm engineering, feasibility validation, and fair scoring matter; see [DIMACS CVRP](https://dimacs.rutgers.edu/programs/challenge/vrp/cvrp/).
+
+Why this matters:
+
+- It is a stronger test of autonomous solver-code evolution than TSP portfolio selection.
+- It keeps the claim bounded and scorable: progress toward feasible, competitive, interpretable solver logic on held-out CVRP.
+
 ## Exit Condition
 
 These items are reduced enough for a stronger publication push when:

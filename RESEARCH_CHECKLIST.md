@@ -60,6 +60,13 @@ This checklist is the fixed research protocol for the project. It separates infr
 4. Does diversity-failure replay improve the adaptive controller over the same controller search without replay?
 5. Can the controller match or approach full-solver evolution while remaining faster, simpler, or more interpretable?
 
+## Phase 9 Questions
+
+1. Can the LLM-evolution loop generate feasible CVRP solver code more reliably than naive constructive baselines on held-out CVRPLIB X instances under the standard unrestricted-route CVRP interpretation?
+2. Does the evolved solver improve objective gap over nearest-neighbor, Clarke-Wright, and regret-insertion-plus-local-search baselines?
+3. Does the evolved solver remain robust across held-out CVRP structure families instead of only one narrow instance regime?
+4. Can the system synthesize interpretable constructive, repair, local-search, or restart logic rather than only brittle code churn?
+
 ## Operational Definitions
 
 - `Cheating evidence`: policy markers, forbidden-call attempts, import attempts, or other sandbox-triggered rule-violation indicators. Runtime pathing mistakes are not cheating evidence.
@@ -81,6 +88,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - `Oracle selector`: the per-instance best frozen heuristic inside the phase-8 portfolio, used only as an upper bound.
 - `Selector regret`: `achieved_gap - oracle_portfolio_gap` on the same evaluation panel.
 - `Runtime-adjusted gap`: held-out gap penalized by positive runtime inflation relative to the best single fixed heuristic.
+- `Penalized gap`: per-instance selection score that equals objective gap when feasible and adds a fixed infeasibility penalty plus violation surcharges otherwise.
 
 ## Primary Metrics
 
@@ -103,6 +111,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - Phase-7 secondary endpoints: family holdout gap, transplant gain, ablation sensitivity, runtime, distance evaluations, code novelty, complexity, and rediscovery frequency.
 - Phase-8 primary endpoint: final held-out TSPLIB mean optimality gap for the adaptive heuristic portfolio conditions.
 - Phase-8 secondary endpoints: selector regret versus the oracle portfolio, runtime-adjusted gap, runtime inflation, Pareto efficiency, synthetic-family transfer, code novelty, controller complexity, and adaptation efficiency.
+- Phase-9 primary endpoint: final held-out CVRPLIB mean penalized gap for the whole-solver evolution condition.
+- Phase-9 secondary endpoints: held-out feasibility rate, held-out feasible-instance objective gap, runtime, robustness across held-out structure families, code novelty, and solver complexity.
 
 ## Infrastructure
 
@@ -140,6 +150,10 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] A phase-8 adaptive heuristic portfolio runner exists in [run_tsp_phase8_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_phase8_suite.py).
 - [x] A phase-8 adaptive heuristic portfolio aggregation tool exists in [aggregate_tsp_phase8_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_phase8_runs.py).
 - [x] A phase-8 adaptive heuristic portfolio runbook exists in [configs/tsp_phase8_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase8_suite/RUNBOOK.md).
+- [x] A phase-9 bounded CVRP whole-solver runner exists in [run_cvrp_phase9_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_cvrp_phase9_suite.py).
+- [x] A phase-9 bounded CVRP benchmark-preparation script exists in [prepare_cvrp_phase9_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_cvrp_phase9_benchmarks.py).
+- [x] A phase-9 bounded CVRP aggregation tool exists in [aggregate_cvrp_phase9_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_cvrp_phase9_runs.py).
+- [x] A phase-9 bounded CVRP runbook exists in [configs/cvrp_phase9_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_suite/RUNBOOK.md).
 - [x] A phase-5B ATSP benchmark-preparation script exists in [prepare_atsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_atsp_benchmarks.py).
 - [x] A phase-5B ATSP runner exists in [run_atsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_atsp_suite.py).
 - [x] A phase-5B ATSP aggregation tool exists in [aggregate_atsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_atsp_runs.py).
@@ -195,6 +209,10 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Phase-8 LLM-evolved-adaptive-controller condition exists.
 - [x] Phase-8 replay-aware adaptive-controller condition exists.
 - [x] Phase-8 full-solver-evolution condition exists.
+- [x] Phase-9 nearest-neighbor constructive baseline exists.
+- [x] Phase-9 Clarke-Wright savings baseline exists.
+- [x] Phase-9 regret-insertion plus local-search baseline exists.
+- [x] Phase-9 whole-solver evolution condition exists.
 - [x] No-replay ATSP condition exists.
 - [x] Random-replay ATSP condition exists.
 - [x] True-failure-replay ATSP condition exists.
@@ -223,6 +241,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Aggregate the phase-7 modular operator suite and identify whether any operators survive transplant, ablation, and Pareto validation.
 - [x] Run the phase-8 adaptive heuristic portfolio suite across paired replicate seed offsets.
 - [x] Aggregate the phase-8 adaptive heuristic portfolio suite and compare the fixed, random, oracle, supervised, static-LLM, adaptive-LLM, replay-aware, and full-solver conditions on held-out TSPLIB gap and selector regret.
+- [ ] Run the phase-9 bounded CVRP whole-solver suite across paired replicate seed offsets.
+- [ ] Aggregate the phase-9 bounded CVRP whole-solver suite and compare solver evolution against the explicit CVRP baselines on held-out feasibility, penalized gap, and runtime.
 - [x] Run the phase-5B ATSP suite across paired replicate seed offsets.
 - [x] Aggregate the phase-5B ATSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
 - [x] Run the phase-5C CVRP suite across paired replicate seed offsets.
@@ -242,6 +262,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] At least 5 replicated suite runs for the phase-6 TSP replay-mechanism comparison.
 - [x] At least 5 replicated suite runs for the phase-7 modular operator comparison.
 - [x] At least 5 replicated suite runs for the phase-8 adaptive heuristic portfolio comparison.
+- [ ] At least 5 replicated suite runs for the phase-9 bounded CVRP whole-solver comparison.
 - [x] At least 5 replicated suite runs for the phase-5B ATSP benchmark comparison.
 - [x] At least 5 replicated suite runs for the phase-5C CVRP benchmark comparison.
 
@@ -259,5 +280,6 @@ This checklist is the fixed research protocol for the project. It separates infr
 - The current phase-7 interpretation note is tracked in [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md).
 - The project is now evidence-complete for phase 8: the official 20-offset adaptive-portfolio campaign was run and aggregated, the adaptive LLM controller beat the one-shot static LLM selector, but it did not beat the best fixed heuristic or the supervised selector on held-out TSPLIB.
 - The current phase-8 interpretation note is tracked in [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md).
+- The project is now engineering-complete and research-infrastructure-complete for phase 9: the bounded real-world CVRP whole-solver runner, strict validator, benchmark-preparation script, baseline set, and runbook are implemented, but the official evidence campaign has not been run yet.
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
 - Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).
