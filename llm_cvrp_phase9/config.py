@@ -50,7 +50,7 @@ class BenchmarkConfig:
     manifest_path: str
     train_instance_limit: int = 0
     holdout_instance_limit: int = 0
-    enforce_vehicle_count: bool = True
+    enforce_vehicle_count: bool = False
     infeasible_gap_penalty: float = 2.0
 
 

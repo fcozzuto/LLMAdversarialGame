@@ -121,6 +121,18 @@ def _fetch_instance(name: str, catalog: dict[str, dict[str, int | float]], outpu
     }
 
 
+def _prune_obsolete_downloads(output_root: Path) -> None:
+    expected_names = set(TRAIN_INSTANCES + HOLDOUT_INSTANCES)
+    cvrp_dir = output_root / "cvrplib_x"
+    if not cvrp_dir.exists():
+        return
+    for path in cvrp_dir.iterdir():
+        if path.suffix.lower() not in {".vrp", ".sol"}:
+            continue
+        if path.stem not in expected_names:
+            path.unlink()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Download and prepare the phase-9 CVRPLIB X benchmark subset.")
     parser.add_argument("--output-root", default="benchmarks/cvrp_phase9", help="Benchmark root directory.")
@@ -129,6 +141,7 @@ def main() -> None:
 
     root = Path(args.output_root)
     root.mkdir(parents=True, exist_ok=True)
+    _prune_obsolete_downloads(root)
     catalog = _fetch_catalog(force=args.force, root=root)
     train = [_fetch_instance(name, catalog, root, force=args.force) for name in TRAIN_INSTANCES]
     holdout = [_fetch_instance(name, catalog, root, force=args.force) for name in HOLDOUT_INSTANCES]

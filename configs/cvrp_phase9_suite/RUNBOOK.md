@@ -6,6 +6,11 @@ The chosen benchmark family is the official `CVRPLIB` Uchoa `X` set, using a mod
 
 For this bounded `X`-instance phase, feasibility follows the unrestricted-route CVRP interpretation used in the DIMACS CVRP challenge. The `k` in instance names is logged as contextual metadata, but solutions are not rejected solely for using more than `k` routes.
 
+The committed split is:
+
+- train: `X-n101-k25`, `X-n110-k13`, `X-n125-k30`, `X-n134-k13`, `X-n157-k13`, `X-n214-k11`
+- holdout: `X-n176-k26`, `X-n190-k8`, `X-n223-k34`, `X-n247-k50`, `X-n275-k28`
+
 ## Setup
 
 ```powershell
@@ -49,7 +54,17 @@ $replicates = @(
   @{ offset = 6000; label = "g" },
   @{ offset = 7000; label = "h" },
   @{ offset = 8000; label = "i" },
-  @{ offset = 9000; label = "j" }
+  @{ offset = 9000; label = "j" },
+  @{ offset = 10000; label = "k" },
+  @{ offset = 11000; label = "l" },
+  @{ offset = 12000; label = "m" },
+  @{ offset = 13000; label = "n" },
+  @{ offset = 14000; label = "o" },
+  @{ offset = 15000; label = "p" },
+  @{ offset = 16000; label = "q" },
+  @{ offset = 17000; label = "r" },
+  @{ offset = 18000; label = "s" },
+  @{ offset = 19000; label = "t" }
 )
 
 foreach ($r in $replicates) {

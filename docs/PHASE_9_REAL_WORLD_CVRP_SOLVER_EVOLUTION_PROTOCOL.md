@@ -28,6 +28,25 @@ Primary sources:
 
 The bounded benchmark subset for this phase is a curated moderate-size slice of the `X` set. The intent is to expose real feasibility logic while keeping official runs affordable, while also covering both two-cluster and grid-like regimes under the project descriptor basis.
 
+Committed train instances:
+
+- `X-n101-k25`
+- `X-n110-k13`
+- `X-n125-k30`
+- `X-n134-k13`
+- `X-n157-k13`
+- `X-n214-k11`
+
+Committed held-out instances:
+
+- `X-n176-k26`
+- `X-n190-k8`
+- `X-n223-k34`
+- `X-n247-k50`
+- `X-n275-k28`
+
+Under the current descriptor classifier, this split yields train coverage of five `two_cluster_bottleneck` instances plus one `grid_like` instance, and held-out coverage of three `two_cluster_bottleneck` instances plus two `grid_like` instances.
+
 ## Parser, Validator, and Scorer
 
 Phase 9 requires a strict CVRP pipeline:
