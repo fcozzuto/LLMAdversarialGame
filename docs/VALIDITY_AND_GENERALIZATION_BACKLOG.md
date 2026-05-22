@@ -184,7 +184,7 @@ Goal: test autonomous solver-code evolution on a real-world benchmark family wit
 - [x] Match the bounded phase-9 validator to the unrestricted-route semantics used for the chosen Uchoa `X` instances, treating `k` as contextual metadata rather than a hard feasibility limit.
 - [x] Curate the bounded phase-9 `X` subset so the committed train/holdout split includes both two-cluster and grid-like descriptor regimes, rather than only a single geometric mode.
 - [x] Keep held-out evaluation frozen until the final solver is selected.
-- [ ] Run the official replicated phase-9 campaign.
+- [x] Run the official replicated phase-9 campaign.
 
 Research basis:
 
@@ -196,6 +196,12 @@ Why this matters:
 
 - It is a stronger test of autonomous solver-code evolution than TSP portfolio selection.
 - It keeps the claim bounded and scorable: progress toward feasible, competitive, interpretable solver logic on held-out CVRP.
+
+Current status:
+- Phase 9 is now evidence-complete on branch `real-world-vrp`.
+- The official 20-offset campaign was technically valid: all runs completed, all solver-evolution final incumbents were feasible on both train and held-out panels, and the accepted path contained no fallback, generation-error, or solver-timeout contamination.
+- Solver evolution beat the weaker nearest-neighbor and regret-insertion baselines on held-out CVRPLIB X instances, but it did not beat the strongest fixed Clarke-Wright baseline on the primary endpoint.
+- That makes the next sensible step a cross-family synthesis across the simple-game, benchmark-routing, and real-world-CVRP phases rather than another immediate phase-9 engineering extension.
 
 ## Exit Condition
 

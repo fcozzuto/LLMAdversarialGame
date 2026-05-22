@@ -78,6 +78,7 @@ The design stays intentionally small:
 - `docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md`: phase-7 protocol for modular TSP operator discovery and validation.
 - `docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_PROTOCOL.md`: phase-8 protocol for adaptive heuristic portfolio control over a frozen TSP library.
 - `docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_PROTOCOL.md`: phase-9 protocol for bounded real-world CVRP whole-solver evolution.
+- `docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md`: official phase-9 real-world CVRP solver-evolution result note.
 - `docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md`: official phase-7 operator-discovery result note.
 - `docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md`: official phase-8 adaptive-portfolio result note.
 - `docs/ROUTING_PHASE_5B_5C_PROTOCOL.md`: phase-5B/5C protocol for the ATSP and CVRP extensions.
@@ -145,6 +146,7 @@ Expected keys:
 - Use [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_PROTOCOL.md) when you are running the adaptive heuristic portfolio phase and comparing fixed, random, oracle, supervised, static-LLM, adaptive-LLM, replay-aware, and full-solver conditions.
 - Use [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md) when you need the current evidence readout for the completed phase-8 adaptive-portfolio campaign.
 - Use [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_PROTOCOL.md) when you are scoping or running the bounded real-world CVRP whole-solver evolution phase.
+- Use [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md) when you need the current evidence readout for the completed phase-9 real-world CVRP campaign.
 - Use [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md) when you are extending the benchmark-transfer study to TSPLIB95 ATSP or CVRPLIB.
 - Use [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md) when you need the current evidence readout for the completed 20-offset routing campaign.
 - Use `configs/research_ablations_suite.json` when you want causal comparisons on feedback visibility or the generation scaffold.

@@ -241,8 +241,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Aggregate the phase-7 modular operator suite and identify whether any operators survive transplant, ablation, and Pareto validation.
 - [x] Run the phase-8 adaptive heuristic portfolio suite across paired replicate seed offsets.
 - [x] Aggregate the phase-8 adaptive heuristic portfolio suite and compare the fixed, random, oracle, supervised, static-LLM, adaptive-LLM, replay-aware, and full-solver conditions on held-out TSPLIB gap and selector regret.
-- [ ] Run the phase-9 bounded CVRP whole-solver suite across paired replicate seed offsets.
-- [ ] Aggregate the phase-9 bounded CVRP whole-solver suite and compare solver evolution against the explicit CVRP baselines on held-out feasibility, penalized gap, and runtime.
+- [x] Run the phase-9 bounded CVRP whole-solver suite across paired replicate seed offsets.
+- [x] Aggregate the phase-9 bounded CVRP whole-solver suite and compare solver evolution against the explicit CVRP baselines on held-out feasibility, penalized gap, and runtime.
 - [x] Run the phase-5B ATSP suite across paired replicate seed offsets.
 - [x] Aggregate the phase-5B ATSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
 - [x] Run the phase-5C CVRP suite across paired replicate seed offsets.
@@ -262,7 +262,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] At least 5 replicated suite runs for the phase-6 TSP replay-mechanism comparison.
 - [x] At least 5 replicated suite runs for the phase-7 modular operator comparison.
 - [x] At least 5 replicated suite runs for the phase-8 adaptive heuristic portfolio comparison.
-- [ ] At least 5 replicated suite runs for the phase-9 bounded CVRP whole-solver comparison.
+- [x] At least 5 replicated suite runs for the phase-9 bounded CVRP whole-solver comparison.
 - [x] At least 5 replicated suite runs for the phase-5B ATSP benchmark comparison.
 - [x] At least 5 replicated suite runs for the phase-5C CVRP benchmark comparison.
 
@@ -280,6 +280,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - The current phase-7 interpretation note is tracked in [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md).
 - The project is now evidence-complete for phase 8: the official 20-offset adaptive-portfolio campaign was run and aggregated, the adaptive LLM controller beat the one-shot static LLM selector, but it did not beat the best fixed heuristic or the supervised selector on held-out TSPLIB.
 - The current phase-8 interpretation note is tracked in [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md).
-- The project is now engineering-complete and research-infrastructure-complete for phase 9: the bounded real-world CVRP whole-solver runner, strict validator, benchmark-preparation script, baseline set, and runbook are implemented, but the official evidence campaign has not been run yet.
+- The project is now evidence-complete for phase 9: the official 20-offset bounded real-world CVRP whole-solver campaign was run and aggregated, solver evolution stayed fully feasible and beat the weaker nearest-neighbor and regret-insertion baselines, but it did not beat the strongest fixed Clarke-Wright baseline on held-out CVRPLIB X instances.
+- The current phase-9 interpretation note is tracked in [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md).
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
 - Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).

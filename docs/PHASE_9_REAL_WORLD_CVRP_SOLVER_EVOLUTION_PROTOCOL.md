@@ -167,3 +167,4 @@ That keeps the phase bounded and directly answers the supervisor's request witho
 - run the suite with [run_cvrp_phase9_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_cvrp_phase9_suite.py)
 - aggregate repeated runs with [aggregate_cvrp_phase9_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_cvrp_phase9_runs.py)
 - use [configs/cvrp_phase9_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_suite/RUNBOOK.md) for smoke and official commands
+- the official evidence readout is tracked in [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md)
