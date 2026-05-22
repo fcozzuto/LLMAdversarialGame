@@ -71,7 +71,7 @@ Scoring outputs for each solver are:
 The phase uses a penalized-gap selection score so infeasible solvers cannot win by returning partial or broken solutions.
 
 Per-instance solver-worker timeouts are also treated as failed evaluations under this penalized-gap rule; they should not abort a whole suite run.
-The model-call timeout and solver-worker timeout are tracked separately. In the official bounded suite, the solver-worker timeout is intentionally looser than the model-call timeout because generated heuristic code can be slower than the API response path even when it is still semantically valid.
+The model-call timeout and solver-worker timeout are tracked separately. In the official bounded suite, the solver-worker timeout is intentionally much larger than observed baseline runtimes but still finite (`60` seconds) so pathological generated code is penalized quickly rather than dominating wall-clock time for the whole campaign.
 
 ## Baselines
 

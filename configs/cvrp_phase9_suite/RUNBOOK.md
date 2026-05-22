@@ -101,3 +101,5 @@ The official phase-9 config now separates:
 - `generation.solver_timeout_seconds` for sandboxed solver execution
 
 The official bounded suite also uses a slightly looser code budget than the earliest draft, because real CVRP whole-solver logic needs more room than the earlier toy and TSP operator phases. The prompt remains mutation-oriented and still favors compact, local edits over unconstrained rewrites.
+
+The current official solver-worker timeout is `60` seconds per instance. That is intentionally far above observed baseline and preflight runtimes, but much lower than the earlier overly loose setting so obviously pathological candidates are penalized without stalling the full campaign for long periods.

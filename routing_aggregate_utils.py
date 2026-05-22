@@ -107,11 +107,11 @@ def paired_bootstrap_delta(
         ci_low = ci_high = float(deltas[0])
     else:
         rng = random.Random(seed)
-        sample_size = len(paired)
+        sample_size = len(deltas)
         draws: list[float] = []
         for _ in range(bootstrap_samples):
-            sample = [paired[rng.randrange(sample_size)] for _ in range(sample_size)]
-            draws.append(statistics.fmean(candidate - reference for candidate, reference in sample))
+            sampled_deltas = [deltas[rng.randrange(sample_size)] for _ in range(sample_size)]
+            draws.append(statistics.fmean(sampled_deltas))
         draws.sort()
         ci_low = _quantile(draws, 0.025)
         ci_high = _quantile(draws, 0.975)

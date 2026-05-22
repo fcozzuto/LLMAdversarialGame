@@ -41,7 +41,7 @@ class AgentConfig:
 class GenerationConfig:
     repair_invalid_submissions: bool = True
     llm_timeout_seconds: float = 120.0
-    solver_timeout_seconds: float = 180.0
+    solver_timeout_seconds: float = 60.0
     max_non_empty_lines: int = 260
     max_characters: int = 12000
 

@@ -23,13 +23,14 @@ def write_metric_plot_svg(
     colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#8c564b"]
     values = [point for line in series.values() for point in line]
     max_value = max(values) if values else 1.0
+    scale_max = max(max_value, 1.0)
     x_count = max((len(line) for line in series.values()), default=1)
 
     def project_x(index: int) -> float:
         return left_margin + (index / max(1, x_count - 1)) * (width - left_margin - right_margin)
 
     def project_y(value: float) -> float:
-        return height - bottom_margin - (value / max_value) * (height - top_margin - bottom_margin)
+        return height - bottom_margin - (value / scale_max) * (height - top_margin - bottom_margin)
 
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
@@ -55,9 +56,9 @@ def write_metric_plot_svg(
 
     y_tick_count = 5
     for tick_index in range(y_tick_count + 1):
-        value = (max_value * tick_index) / y_tick_count
+        value = (scale_max * tick_index) / y_tick_count
         y_pos = project_y(value)
-        label = f"{value:.3f}" if max_value <= 1.0 else f"{value:.2f}"
+        label = f"{value:.3f}" if scale_max <= 1.0 else f"{value:.2f}"
         parts.extend(
             [
                 f'<line x1="{left_margin - 6}" y1="{y_pos}" x2="{left_margin}" y2="{y_pos}" stroke="#666666"/>',
@@ -101,13 +102,14 @@ def write_metric_plot_png(
     colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#8c564b"]
     values = [point for line in series.values() for point in line]
     max_value = max(values) if values else 1.0
+    scale_max = max(max_value, 1.0)
     x_count = max((len(line) for line in series.values()), default=1)
 
     def project_x(index: int) -> float:
         return left_margin + (index / max(1, x_count - 1)) * (width - left_margin - right_margin)
 
     def project_y(value: float) -> float:
-        return height - bottom_margin - (value / max_value) * (height - top_margin - bottom_margin)
+        return height - bottom_margin - (value / scale_max) * (height - top_margin - bottom_margin)
 
     def hex_to_rgb(color: str) -> tuple[int, int, int]:
         color = color.lstrip("#")
@@ -141,11 +143,11 @@ def write_metric_plot_png(
 
     y_tick_count = 5
     for tick_index in range(y_tick_count + 1):
-        value = (max_value * tick_index) / y_tick_count
+        value = (scale_max * tick_index) / y_tick_count
         y_pos = project_y(value)
         draw.line([(left_margin - 6, y_pos), (left_margin, y_pos)], fill=(102, 102, 102), width=1)
         draw.line([(left_margin, y_pos), (width - right_margin, y_pos)], fill=(230, 230, 230), width=1)
-        label = f"{value:.3f}" if max_value <= 1.0 else f"{value:.2f}"
+        label = f"{value:.3f}" if scale_max <= 1.0 else f"{value:.2f}"
         label_width, label_height = text_size(draw, body_font, label)
         draw.text((left_margin - 10 - label_width, y_pos - (label_height / 2)), label, fill=(85, 85, 85), font=body_font)
 
