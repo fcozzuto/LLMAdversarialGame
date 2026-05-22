@@ -203,6 +203,28 @@ Current status:
 - Solver evolution beat the weaker nearest-neighbor and regret-insertion baselines on held-out CVRPLIB X instances, but it did not beat the strongest fixed Clarke-Wright baseline on the primary endpoint.
 - That makes the next sensible step a cross-family synthesis across the simple-game, benchmark-routing, and real-world-CVRP phases rather than another immediate phase-9 engineering extension.
 
+## 12. Cross-Family Code-Evolution Synthesis
+
+Goal: turn the completed simple-game, TSP, and real-world CVRP evidence into a unified capabilities-and-limitations framework instead of adding another open-ended benchmark phase.
+
+- [x] Normalize endpoint performance, code novelty, reliability, update/acceptance rate, and train-time trend signals across the completed official archives.
+- [x] Keep train-time dynamics separate from held-out endpoint results.
+- [x] Add a direct Codex-authored CVRP solver baseline that is evaluated through the phase-9 validator without API calls.
+- [x] State the direct Codex result as descriptive unless a future protocol freezes and replicates it.
+- [x] Preserve conservative wording: the synthesis supports capability-bounded adaptation, not a broad claim that LLM evolution beats mature optimization solvers.
+
+Research basis:
+
+- Replicated run summaries, uncertainty-aware reporting, and avoiding best-run-only interpretation follow the reproducibility concerns raised in [Deep Reinforcement Learning That Matters](https://arxiv.org/abs/1709.06560) and [Deep RL at the Edge of the Statistical Precipice](https://arxiv.org/abs/2108.13264).
+- The selector and portfolio phases remain naturally connected to Rice-style algorithm selection; see [The Algorithm Selection Problem](https://doi.org/10.1016/S0065-2458(08)60520-3).
+- The CVRP real-world endpoint remains scoped to the standard CVRPLIB Uchoa X benchmark source used in phase 9; see [CVRPLIB](https://galgos.inf.puc-rio.br/cvrplib/en/instances).
+
+Current status:
+- Cross-family synthesis is now implemented on branch `cross-family-synthesis`.
+- The official synthesis artifact is under `runs/cross_family_synthesis/meta_patterns_20260522_165500`.
+- The permanent report is [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md).
+- The direct Codex CVRP solver was feasible on all phase-9 train and held-out instances and descriptively beat the fixed Clarke-Wright baseline on mean held-out penalized gap, but this remains a single-shot descriptive baseline rather than replicated stochastic evidence.
+
 ## Exit Condition
 
 These items are reduced enough for a stronger publication push when:

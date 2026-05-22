@@ -67,6 +67,13 @@ This checklist is the fixed research protocol for the project. It separates infr
 3. Does the evolved solver remain robust across held-out CVRP structure families, including both two-cluster and grid-like `X` regimes under the project descriptor basis, instead of only one narrow instance regime?
 4. Can the system synthesize interpretable constructive, repair, local-search, or restart logic rather than only brittle code churn?
 
+## Cross-Family Synthesis Questions
+
+1. Do comparable LLM-driven code-evolution loops show recurring improvement, churn, or failure-mode patterns across simple games, TSP, and real-world CVRP?
+2. Does syntactic code novelty predict held-out improvement across problem families, or mainly show that the loop can produce variants?
+3. Do stronger validators and stronger classical baselines reduce apparent LLM-evolution wins in predictable ways?
+4. What happens when Codex is asked to solve the bounded CVRP problem directly, without the API evolution loop?
+
 ## Operational Definitions
 
 - `Cheating evidence`: policy markers, forbidden-call attempts, import attempts, or other sandbox-triggered rule-violation indicators. Runtime pathing mistakes are not cheating evidence.
@@ -89,6 +96,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - `Selector regret`: `achieved_gap - oracle_portfolio_gap` on the same evaluation panel.
 - `Runtime-adjusted gap`: held-out gap penalized by positive runtime inflation relative to the best single fixed heuristic.
 - `Penalized gap`: per-instance selection score that equals objective gap when feasible and adds a fixed infeasibility penalty plus violation surcharges otherwise.
+- `Cross-family meta-pattern`: a recurring capability or limitation observed in at least two completed experiment families after separating train-time dynamics from held-out endpoint evidence.
+- `Direct Codex baseline`: a single-shot solver artifact authored interactively by Codex and evaluated through the same validator as the relevant benchmark family, not a replicated API-loop condition.
 
 ## Primary Metrics
 
@@ -113,6 +122,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - Phase-8 secondary endpoints: selector regret versus the oracle portfolio, runtime-adjusted gap, runtime inflation, Pareto efficiency, synthetic-family transfer, code novelty, controller complexity, and adaptation efficiency.
 - Phase-9 primary endpoint: final held-out CVRPLIB mean penalized gap for the whole-solver evolution condition.
 - Phase-9 secondary endpoints: held-out feasibility rate, held-out feasible-instance objective gap, runtime, robustness across held-out structure families, code novelty, and solver complexity.
+- Cross-family synthesis endpoints: normalized endpoint performance, code novelty, generation reliability, accepted/update rate where available, train-time trend direction, and domain-specific failure-mode counts across the simple-game, TSP, and CVRP archives.
+- Direct Codex endpoint: phase-9 CVRP held-out feasibility rate, held-out penalized gap, feasible-instance gap, and runtime for the single-shot direct solver.
 
 ## Infrastructure
 
@@ -154,6 +165,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] A phase-9 bounded CVRP benchmark-preparation script exists in [prepare_cvrp_phase9_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_cvrp_phase9_benchmarks.py).
 - [x] A phase-9 bounded CVRP aggregation tool exists in [aggregate_cvrp_phase9_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_cvrp_phase9_runs.py).
 - [x] A phase-9 bounded CVRP runbook exists in [configs/cvrp_phase9_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_suite/RUNBOOK.md).
+- [x] A cross-family synthesis analyzer exists in [analyze_cross_family_evolution.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/analyze_cross_family_evolution.py).
+- [x] A cross-family synthesis runbook exists in [configs/cross_family_synthesis/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cross_family_synthesis/RUNBOOK.md).
 - [x] A phase-5B ATSP benchmark-preparation script exists in [prepare_atsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_atsp_benchmarks.py).
 - [x] A phase-5B ATSP runner exists in [run_atsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_atsp_suite.py).
 - [x] A phase-5B ATSP aggregation tool exists in [aggregate_atsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_atsp_runs.py).
@@ -213,6 +226,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Phase-9 Clarke-Wright savings baseline exists.
 - [x] Phase-9 regret-insertion plus local-search baseline exists.
 - [x] Phase-9 whole-solver evolution condition exists.
+- [x] Direct Codex CVRP single-shot baseline exists as a descriptive non-API artifact.
 - [x] No-replay ATSP condition exists.
 - [x] Random-replay ATSP condition exists.
 - [x] True-failure-replay ATSP condition exists.
@@ -247,6 +261,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Aggregate the phase-5B ATSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
 - [x] Run the phase-5C CVRP suite across paired replicate seed offsets.
 - [x] Aggregate the phase-5C CVRP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
+- [x] Produce the cross-family synthesis over the completed simple-game, TSP, and real-world CVRP official archives.
+- [x] Evaluate a direct Codex-authored CVRP solver through the phase-9 validator as a single-shot descriptive baseline.
 
 ## Recommended Minimum Evidence Target
 
@@ -282,5 +298,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - The current phase-8 interpretation note is tracked in [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md).
 - The project is now evidence-complete for phase 9: the official 20-offset bounded real-world CVRP whole-solver campaign was run and aggregated, solver evolution stayed fully feasible and beat the weaker nearest-neighbor and regret-insertion baselines, but it did not beat the strongest fixed Clarke-Wright baseline on held-out CVRPLIB X instances.
 - The current phase-9 interpretation note is tracked in [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md).
+- The project now has a cross-family synthesis over the simple-game, TSP, and real-world CVRP loops: the current unified story is capability-bounded adaptation, with code novelty common across families but held-out wins constrained by validator pressure, baseline strength, and benchmark headroom.
+- The cross-family synthesis note is tracked in [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md).
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
 - Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).
