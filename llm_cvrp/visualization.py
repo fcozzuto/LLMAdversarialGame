@@ -23,7 +23,7 @@ def write_metric_plot_svg(
     colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#8c564b"]
     values = [point for line in series.values() for point in line]
     max_value = max(values) if values else 1.0
-    scale_max = max(max_value, 1.0)
+    scale_max = max_value if max_value > 0 else 1.0
     x_count = max((len(line) for line in series.values()), default=1)
 
     def project_x(index: int) -> float:
@@ -102,7 +102,7 @@ def write_metric_plot_png(
     colors = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#8c564b"]
     values = [point for line in series.values() for point in line]
     max_value = max(values) if values else 1.0
-    scale_max = max(max_value, 1.0)
+    scale_max = max_value if max_value > 0 else 1.0
     x_count = max((len(line) for line in series.values()), default=1)
 
     def project_x(index: int) -> float:

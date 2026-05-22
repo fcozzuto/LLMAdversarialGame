@@ -34,7 +34,6 @@ class AgentConfig:
     )
     temperature: float = 0.2
     max_tokens: int = 3600
-    regenerate_each_epoch: bool = True
 
 
 @dataclass
