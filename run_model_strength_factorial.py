@@ -476,9 +476,11 @@ def _run_cell(
     previous_code: str | None = None
     incumbent_code: str | None = None
     incumbent_train_score: float | None = None
+    first_train_score: float | None = None
     accepted_epochs = 0
     generation_success_count = 0
     novelty_values: list[float] = []
+    accepted_novelty_values: list[float] = []
     candidate_payloads = []
     replay_rng = random.Random(seed + (17 * len(task_family)) + (31 * len(technique)))
 
@@ -520,6 +522,8 @@ def _run_cell(
             cvrp_config, train_instances, _holdout_instances = task_state
             train_summary = _evaluate_cvrp_train(candidate_code, train_instances, cvrp_config)
             train_score_for_minimization = float(train_summary["train_score_for_minimization"])
+        if first_train_score is None:
+            first_train_score = train_score_for_minimization
 
         accept = False
         if technique == "single_shot":
@@ -530,6 +534,8 @@ def _run_cell(
             incumbent_code = candidate_code
             incumbent_train_score = train_score_for_minimization
             accepted_epochs += 1
+            if candidate_index > 1:
+                accepted_novelty_values.append(novelty)
 
         failure_note = ""
         if task_family == "simple_games":
@@ -587,11 +593,14 @@ def _run_cell(
         secondary_raw = -float(final_eval["final_transfer_gap"])
         feasibility_rate = None
         runtime_ms = None
-        adaptation_efficiency = (
-            (0.0 - float(final_eval["final_tsplib_gap"])) / max(1e-9, sum(novelty_values))
-            if novelty_values
-            else None
-        )
+        cumulative_accepted_novelty = sum(accepted_novelty_values)
+        adaptation_efficiency = 0.0
+        if (
+            first_train_score is not None
+            and incumbent_train_score is not None
+            and cumulative_accepted_novelty >= 1e-9
+        ):
+            adaptation_efficiency = (first_train_score - incumbent_train_score) / cumulative_accepted_novelty
         extra_metrics = {
             "primary_holdout_win_rate": None,
             "primary_holdout_score_margin": None,
@@ -676,11 +685,16 @@ def _format_duration(seconds: float) -> str:
     return f"{hours:02d}:{remainder:02d}"
 
 
-def _selected(items: list[str], requested: str | None) -> list[str]:
+def _selected(items: list[str], requested: str | None, *, label: str) -> list[str]:
     if not requested:
         return items
     requested_items = [item.strip() for item in requested.split(",") if item.strip()]
-    return [item for item in items if item in requested_items]
+    unknown = [item for item in requested_items if item not in items]
+    if unknown:
+        raise SystemExit(f"Unknown {label}: {', '.join(unknown)}. Valid values: {', '.join(items)}")
+    if not requested_items:
+        raise SystemExit(f"No {label} values were provided.")
+    return requested_items
 
 
 def _model_specs(config: dict[str, Any], requested: str | None) -> list[dict[str, Any]]:
@@ -688,8 +702,27 @@ def _model_specs(config: dict[str, Any], requested: str | None) -> list[dict[str
     by_tier = {item["model_tier"]: item for item in specs}
     if requested:
         tiers = [item.strip() for item in requested.split(",") if item.strip()]
+        unknown = [tier for tier in tiers if tier not in by_tier]
+        if unknown:
+            raise SystemExit(f"Unknown model-tier: {', '.join(unknown)}. Valid values: {', '.join(by_tier)}")
+        if not tiers:
+            raise SystemExit("No model-tier values were provided.")
         specs = [by_tier[tier] for tier in tiers]
     return specs
+
+
+def _validate_config(config: dict[str, Any]) -> None:
+    model_tiers = [str(item.get("model_tier", "")) for item in config.get("model_tiers", [])]
+    if len(model_tiers) != len(set(model_tiers)):
+        raise SystemExit("model_tiers must contain unique model_tier values.")
+    if "task_families" not in config or not isinstance(config["task_families"], dict):
+        raise SystemExit("Config must contain a task_families object.")
+    unknown_tasks = [task for task in config["task_families"] if task not in TASK_FAMILIES]
+    if unknown_tasks:
+        raise SystemExit(f"Unknown configured task families: {', '.join(unknown_tasks)}")
+    if str(config.get("output_root", "")).replace("\\", "/").startswith("runs/") and set(config["task_families"]) == set(TASK_FAMILIES):
+        if model_tiers != MODEL_TIERS:
+            raise SystemExit(f"Official factorial config must define model tiers in order: {', '.join(MODEL_TIERS)}")
 
 
 def _seed_values(task_cfg: dict[str, Any], requested_seed: int | None) -> list[int]:
@@ -730,6 +763,7 @@ def main() -> None:
     project_root = Path(__file__).resolve().parent
     load_env_files(project_root)
     config = load_jsonish_config(args.config)
+    _validate_config(config)
     timestamp = args.timestamp or datetime.now().strftime("%Y%m%d_%H%M%S")
     output_root = Path(config.get("output_root", "runs/cross_family_model_x_evolution_factorial"))
     output_dir = output_root / timestamp
@@ -737,8 +771,9 @@ def main() -> None:
     write_json(output_dir / "factorial_config_snapshot.json", config)
     _write_model_strength_table(config, output_dir)
 
-    task_families = _selected(TASK_FAMILIES, args.task_family)
-    techniques = _selected(TECHNIQUES, args.technique)
+    configured_task_families = [task for task in TASK_FAMILIES if task in config["task_families"]]
+    task_families = _selected(configured_task_families, args.task_family, label="task-family")
+    techniques = _selected(TECHNIQUES, args.technique, label="technique")
     model_specs = _model_specs(config, args.model_tier)
     all_rows = []
     for task_family in task_families:

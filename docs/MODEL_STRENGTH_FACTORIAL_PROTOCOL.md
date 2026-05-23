@@ -63,6 +63,8 @@ Task-specific primary performance uses the supervisor-specified signs:
 
 For CVRP rows, `heldout_feasible_gap` and `secondary_performance_raw` remain blank if no held-out solution is feasible; infeasible solvers are still ranked by the penalized primary endpoint.
 
+For TSP rows, `adaptation_efficiency` is the training-panel gap improvement from the first candidate to the final accepted incumbent, divided by cumulative accepted code novelty after the first candidate. It is exploratory and should not override the held-out `final_tsplib_gap` endpoint.
+
 `performance_z` is computed within each task family so pooled analyses are not dominated by metric scale.
 
 ## Analysis
