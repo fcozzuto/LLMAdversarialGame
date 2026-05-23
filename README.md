@@ -10,11 +10,12 @@ The repository now also includes routing-benchmark follow-on phases. Those phase
 - phase 8: an adaptive heuristic portfolio track that evolves an interpretable controller over a frozen library of known TSP heuristics
 - phase 9: a bounded real-world CVRP solver-evolution track over the official CVRPLIB Uchoa X family
 - cross-family synthesis: a final normalized analysis over the simple-game, TSP, and real-world CVRP code-evolution loops, plus a direct Codex-authored CVRP solver sanity baseline
+- model-strength factorial: a crossed final experiment separating base model coding strength from evolution technique across simple games, TSP, and real-world CVRP
 
 The design stays intentionally small:
 
 - One package, one runner, one JSON suite config.
-- Minimal third-party dependencies for report/chart artifacts: `Pillow` and `reportlab`.
+- Minimal third-party dependencies for report/chart/statistical artifacts: `numpy`, `Pillow`, and `reportlab`.
 - Artifacts are written as JSON, Markdown, SVG, PNG, and PDF so you can inspect them without extra tooling.
 - The same runner supports same-model vs cross-model experiments, feedback ablations, obstacles, fixed vs resampled maps, and a final low-cost report pass.
 
@@ -38,6 +39,9 @@ The design stays intentionally small:
 - `configs/tsp_phase8_suite/`: phase-8 adaptive heuristic portfolio suite.
 - `configs/cvrp_phase9_suite/`: phase-9 bounded real-world CVRP whole-solver evolution suite.
 - `configs/cross_family_synthesis/`: runbook for the cross-family code-evolution synthesis artifact.
+- `configs/model_strength_factorial.yaml`: full model-strength x evolution-technique factorial config.
+- `configs/model_strength_factorial_smoke.yaml`: no-cost schema smoke for the factorial phase.
+- `configs/model_strength_factorial/`: runbook for the final crossed model-strength factorial campaign.
 - `configs/atsp_suite/`: phase-5B ATSP replay-transfer suite.
 - `configs/cvrp_suite/`: phase-5C CVRP replay-transfer suite.
 - `build_transfer_suite.py`: generate a transfer suite from the winning factorial recipe.
@@ -55,6 +59,8 @@ The design stays intentionally small:
 - `run_cvrp_phase9_suite.py`: run the bounded phase-9 CVRP whole-solver evolution suite.
 - `aggregate_cvrp_phase9_runs.py`: aggregate repeated phase-9 CVRP whole-solver runs into one cross-run report.
 - `analyze_cross_family_evolution.py`: synthesize meta-patterns across the simple-game, TSP, and real-world CVRP loops, and evaluate a direct Codex CVRP solver through the phase-9 validator.
+- `run_model_strength_factorial.py`: run the final crossed factorial cells over task family, model tier, and evolution technique.
+- `aggregate_model_strength_factorial.py`: aggregate the final crossed factorial campaign into matrices, effect sizes, variance decomposition, figures, and a report.
 - `prepare_atsp_benchmarks.py`: download the phase-5B TSPLIB95 ATSP subset and write the benchmark manifest with official best-known costs.
 - `run_atsp_suite.py`: run the constrained replay-aware ATSP benchmark suite.
 - `aggregate_atsp_runs.py`: aggregate repeated ATSP-suite runs into one cross-run report.
@@ -83,6 +89,7 @@ The design stays intentionally small:
 - `docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_PROTOCOL.md`: phase-9 protocol for bounded real-world CVRP whole-solver evolution.
 - `docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md`: official phase-9 real-world CVRP solver-evolution result note.
 - `docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md`: cross-family synthesis over the simple-game, TSP, and real-world CVRP code-evolution evidence.
+- `docs/MODEL_STRENGTH_FACTORIAL_PROTOCOL.md`: final crossed protocol disentangling model strength from evolution technique.
 - `docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md`: official phase-7 operator-discovery result note.
 - `docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md`: official phase-8 adaptive-portfolio result note.
 - `docs/ROUTING_PHASE_5B_5C_PROTOCOL.md`: phase-5B/5C protocol for the ATSP and CVRP extensions.
@@ -152,6 +159,7 @@ Expected keys:
 - Use [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_PROTOCOL.md) when you are scoping or running the bounded real-world CVRP whole-solver evolution phase.
 - Use [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md) when you need the current evidence readout for the completed phase-9 real-world CVRP campaign.
 - Use [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md) when you need the current unified story across the simple-game, TSP, and real-world CVRP code-evolution campaigns.
+- Use [docs/MODEL_STRENGTH_FACTORIAL_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/MODEL_STRENGTH_FACTORIAL_PROTOCOL.md) and [configs/model_strength_factorial/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/model_strength_factorial/RUNBOOK.md) when running the final crossed campaign that separates base model strength from evolution technique.
 - Use [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md) when you are extending the benchmark-transfer study to TSPLIB95 ATSP or CVRPLIB.
 - Use [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md) when you need the current evidence readout for the completed 20-offset routing campaign.
 - Use `configs/research_ablations_suite.json` when you want causal comparisons on feedback visibility or the generation scaffold.

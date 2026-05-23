@@ -74,6 +74,14 @@ This checklist is the fixed research protocol for the project. It separates infr
 3. Do stronger validators and stronger classical baselines reduce apparent LLM-evolution wins in predictable ways?
 4. What happens when Codex is asked to solve the bounded CVRP problem directly, without the API evolution loop?
 
+## Model Strength Factorial Questions
+
+1. How much cross-family performance variance is explained by base model coding strength?
+2. How much variance is explained by evolutionary technique after accounting for model tier?
+3. Is there a model strength x technique interaction, especially larger evolutionary gains for weaker models?
+4. Do replay, failure replay, or compressed failure replay beat the budget-matched no-replay control, not only single-shot generation?
+5. Does the conclusion hold across simple games, symmetric TSP, and real-world CVRP, or only in task/model-specific regimes?
+
 ## Operational Definitions
 
 - `Cheating evidence`: policy markers, forbidden-call attempts, import attempts, or other sandbox-triggered rule-violation indicators. Runtime pathing mistakes are not cheating evidence.
@@ -98,6 +106,9 @@ This checklist is the fixed research protocol for the project. It separates infr
 - `Penalized gap`: per-instance selection score that equals objective gap when feasible and adds a fixed infeasibility penalty plus violation surcharges otherwise.
 - `Cross-family meta-pattern`: a recurring capability or limitation observed in at least two completed experiment families after separating train-time dynamics from held-out endpoint evidence.
 - `Direct Codex baseline`: a single-shot solver artifact authored interactively by Codex and evaluated through the same validator as the relevant benchmark family, not a replicated API-loop condition.
+- `Budget-matched no-replay`: independent candidate generation with the same candidate budget as replay conditions, selected only by the train validator and given no replay memory, failure memory, or compression summary.
+- `Model strength factorial`: the final crossed design over task family, model tier, and evolution technique used to separate base-model coding ability from search technique.
+- `Performance z-score`: within-task standardized primary performance, used only for pooled cross-family analyses where raw metrics have different scales.
 
 ## Primary Metrics
 
@@ -124,6 +135,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - Phase-9 secondary endpoints: held-out feasibility rate, held-out feasible-instance objective gap, runtime, robustness across held-out structure families, code novelty, and solver complexity.
 - Cross-family synthesis endpoints: normalized endpoint performance, code novelty, generation reliability, accepted/update rate where available, train-time trend direction, and domain-specific failure-mode counts across the simple-game, TSP, and CVRP archives.
 - Direct Codex endpoint: phase-9 CVRP held-out feasibility rate, held-out penalized gap, feasible-instance gap, and runtime for the single-shot direct solver.
+- Model-strength factorial endpoints: `performance_raw`, within-task `performance_z`, `secondary_performance_raw`, generation success, code novelty, accepted epochs, acceptance rate, feasibility where applicable, runtime where applicable, model x evolution matrices, variance decomposition, and effect sizes against both `single_shot` and `budget_matched_no_replay`.
 
 ## Infrastructure
 
@@ -167,6 +179,9 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] A phase-9 bounded CVRP runbook exists in [configs/cvrp_phase9_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_suite/RUNBOOK.md).
 - [x] A cross-family synthesis analyzer exists in [analyze_cross_family_evolution.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/analyze_cross_family_evolution.py).
 - [x] A cross-family synthesis runbook exists in [configs/cross_family_synthesis/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cross_family_synthesis/RUNBOOK.md).
+- [x] A final model-strength x evolution factorial runner exists in [run_model_strength_factorial.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_model_strength_factorial.py).
+- [x] A final model-strength x evolution factorial aggregator exists in [aggregate_model_strength_factorial.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_model_strength_factorial.py).
+- [x] A final model-strength x evolution factorial runbook exists in [configs/model_strength_factorial/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/model_strength_factorial/RUNBOOK.md).
 - [x] A phase-5B ATSP benchmark-preparation script exists in [prepare_atsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_atsp_benchmarks.py).
 - [x] A phase-5B ATSP runner exists in [run_atsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_atsp_suite.py).
 - [x] A phase-5B ATSP aggregation tool exists in [aggregate_atsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_atsp_runs.py).
@@ -222,6 +237,11 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Phase-8 LLM-evolved-adaptive-controller condition exists.
 - [x] Phase-8 replay-aware adaptive-controller condition exists.
 - [x] Phase-8 full-solver-evolution condition exists.
+- [x] Model-strength factorial `single_shot` condition exists.
+- [x] Model-strength factorial `budget_matched_no_replay` condition exists.
+- [x] Model-strength factorial `random_replay` condition exists.
+- [x] Model-strength factorial `failure_replay` condition exists.
+- [x] Model-strength factorial `failure_replay_compression` condition exists.
 - [x] Phase-9 nearest-neighbor constructive baseline exists.
 - [x] Phase-9 Clarke-Wright savings baseline exists.
 - [x] Phase-9 regret-insertion plus local-search baseline exists.

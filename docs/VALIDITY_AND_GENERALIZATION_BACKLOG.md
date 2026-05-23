@@ -225,6 +225,28 @@ Current status:
 - The permanent report is [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md).
 - The direct Codex CVRP solver was feasible on all phase-9 train and held-out instances and descriptively beat the fixed Clarke-Wright baseline on mean held-out penalized gap, but this remains a single-shot descriptive baseline rather than replicated stochastic evidence.
 
+## 13. Model Strength Versus Evolution Technique
+
+Goal: separate base LLM coding strength from the added value of evolutionary code search, replay, and compressed failure memory.
+
+- [x] Define a crossed design over simple games, symmetric TSP, and real-world CVRP.
+- [x] Add exactly three model-strength tiers and record a transparent benchmark-strength score source.
+- [x] Add the key `budget_matched_no_replay` control so replay is not credited for extra API budget alone.
+- [x] Preserve fixed train/held-out splits and existing validators.
+- [x] Aggregate into model x evolution matrices, within-task z-scores, variance decomposition, and effect sizes against both single-shot and budget-matched controls.
+- [ ] Run the full paid campaign and interpret replay/failure/compression only when they beat `budget_matched_no_replay`.
+
+Research basis:
+
+- Stochastic adaptive systems need replicated seeds, uncertainty intervals, and effect sizes rather than best-run-only evidence; see Henderson et al. 2018, `Deep Reinforcement Learning That Matters`, and Agarwal et al. 2021, `Deep RL at the Edge of the Statistical Precipice`.
+- Factorial designs and ANOVA-style variance decomposition are appropriate when the scientific question is whether one experimental factor, here base model strength, explains more variance than another factor, here evolution technique.
+- Budget matching is required because otherwise replay and iterative evolution can be confounded with simply buying more candidate generations.
+
+Current status:
+- The implementation is on branch `model-strength-factorial`.
+- The no-cost smoke artifacts are intentionally written under `DO NOT COMMIT/`.
+- The official campaign should be run only after the smoke test passes and model access is confirmed.
+
 ## Exit Condition
 
 These items are reduced enough for a stronger publication push when:
