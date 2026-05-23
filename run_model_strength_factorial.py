@@ -715,14 +715,46 @@ def _validate_config(config: dict[str, Any]) -> None:
     model_tiers = [str(item.get("model_tier", "")) for item in config.get("model_tiers", [])]
     if len(model_tiers) != len(set(model_tiers)):
         raise SystemExit("model_tiers must contain unique model_tier values.")
+    required_model_fields = {"model_tier", "provider", "model_name", "benchmark_strength_score", "benchmark_score_source"}
+    for spec in config.get("model_tiers", []):
+        missing_fields = sorted(required_model_fields - set(spec))
+        if missing_fields:
+            raise SystemExit(f"Model tier {spec.get('model_tier', '<unknown>')} is missing: {', '.join(missing_fields)}")
     if "task_families" not in config or not isinstance(config["task_families"], dict):
         raise SystemExit("Config must contain a task_families object.")
     unknown_tasks = [task for task in config["task_families"] if task not in TASK_FAMILIES]
     if unknown_tasks:
         raise SystemExit(f"Unknown configured task families: {', '.join(unknown_tasks)}")
-    if str(config.get("output_root", "")).replace("\\", "/").startswith("runs/") and set(config["task_families"]) == set(TASK_FAMILIES):
+    for task, task_cfg in config["task_families"].items():
+        for key in ("seeds", "epochs"):
+            try:
+                value = int(task_cfg[key])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise SystemExit(f"Task family {task} must define integer {key}.") from exc
+            if value < 1:
+                raise SystemExit(f"Task family {task} must define {key} >= 1.")
+        if "seed_base" in task_cfg:
+            try:
+                int(task_cfg["seed_base"])
+            except (TypeError, ValueError) as exc:
+                raise SystemExit(f"Task family {task} must define integer seed_base.") from exc
+    official_full_config = str(config.get("output_root", "")).replace("\\", "/").startswith("runs/") and set(config["task_families"]) == set(TASK_FAMILIES)
+    if official_full_config:
         if model_tiers != MODEL_TIERS:
             raise SystemExit(f"Official factorial config must define model tiers in order: {', '.join(MODEL_TIERS)}")
+        expected_budgets = {
+            "simple_games": {"seeds": 10, "epochs": 100},
+            "tsp": {"seeds": 20, "epochs": 8},
+            "cvrp_phase9_real_world": {"seeds": 20, "epochs": 8},
+        }
+        for task, expected in expected_budgets.items():
+            task_cfg = config["task_families"][task]
+            for key, expected_value in expected.items():
+                actual_value = int(task_cfg[key])
+                if actual_value != expected_value:
+                    raise SystemExit(
+                        f"Official factorial config must define {task}.{key}={expected_value}, found {actual_value}."
+                    )
 
 
 def _seed_values(task_cfg: dict[str, Any], requested_seed: int | None) -> list[int]:

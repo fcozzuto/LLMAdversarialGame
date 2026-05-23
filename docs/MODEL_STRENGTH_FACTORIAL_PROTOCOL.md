@@ -82,6 +82,13 @@ The aggregator writes:
 - effect sizes against `budget_matched_no_replay`,
 - model x evolution matrices and heatmaps.
 
+Variance-decomposition formulas:
+
+- Task continuous: `performance_z ~ benchmark_strength_score + C(evolution_technique) + benchmark_strength_score:C(evolution_technique)`.
+- Task categorical: `performance_z ~ C(model_tier) * C(evolution_technique)`.
+- Pooled continuous: `performance_z ~ C(task_family) * benchmark_strength_score * C(evolution_technique)`.
+- Pooled categorical: `performance_z ~ C(task_family) * C(model_tier) * C(evolution_technique)`.
+
 Effect-size comparisons are paired by seed when both conditions share the same seed. In paired comparisons, Cohen's d is standardized by the standard deviation of seed-paired deltas; otherwise, it uses the pooled standard deviation of candidate and reference values.
 
 The main report must explicitly answer:

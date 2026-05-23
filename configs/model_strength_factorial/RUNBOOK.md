@@ -70,12 +70,13 @@ This is intentionally expensive because it separates base model tier from search
 
 ## Required Outputs
 
-The aggregator writes:
+The runner and aggregator together write:
 
 - `all_runs_long.csv`
 - `cell_means.csv`
 - `model_strength_table.csv`
 - `model_x_evolution_matrices/*.csv`
+- `model_x_evolution_matrices/*.png`
 - `variance_decomposition/task_specific_anova.csv`
 - `variance_decomposition/pooled_anova.csv`
 - `variance_decomposition/variance_partition_summary.csv`

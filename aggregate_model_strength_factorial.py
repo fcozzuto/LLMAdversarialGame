@@ -18,6 +18,7 @@ from model_strength_factorial_common import (
     TECHNIQUES,
     bootstrap_ci,
     mean_or_none,
+    model_strength_columns,
     performance_columns,
     read_csv_dicts,
     safe_float,
@@ -39,6 +40,52 @@ def _load_rows(run_root: Path) -> list[dict[str, Any]]:
     if not rows and (run_root / "all_runs_long.raw.csv").exists():
         rows = list(read_csv_dicts(run_root / "all_runs_long.raw.csv"))
     return rows
+
+
+def _write_model_strength_table_if_missing(run_root: Path, rows: list[dict[str, Any]]) -> None:
+    path = run_root / "model_strength_table.csv"
+    if path.exists():
+        return
+    observed_tiers = {str(row.get("model_tier")) for row in rows}
+    table_rows = []
+    config_path = run_root / "factorial_config_snapshot.json"
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            config = {}
+        for spec in config.get("model_tiers", []):
+            if str(spec.get("model_tier")) not in observed_tiers:
+                continue
+            table_rows.append(
+                {
+                    "model_tier": spec.get("model_tier", ""),
+                    "provider": spec.get("provider", ""),
+                    "model_name": spec.get("model_name", ""),
+                    "benchmark_strength_score": spec.get("benchmark_strength_score", ""),
+                    "benchmark_score_source": spec.get("benchmark_score_source", ""),
+                    "benchmark_name": spec.get("benchmark_name", ""),
+                    "benchmark_source_url": spec.get("benchmark_source_url", ""),
+                    "notes": spec.get("notes", ""),
+                }
+            )
+    if not table_rows:
+        by_tier = {}
+        for row in rows:
+            tier = str(row.get("model_tier", ""))
+            if tier and tier not in by_tier:
+                by_tier[tier] = {
+                    "model_tier": tier,
+                    "provider": "",
+                    "model_name": row.get("model_name", ""),
+                    "benchmark_strength_score": row.get("benchmark_strength_score", ""),
+                    "benchmark_score_source": row.get("benchmark_score_source", ""),
+                    "benchmark_name": "",
+                    "benchmark_source_url": "",
+                    "notes": "Reconstructed by aggregate_model_strength_factorial.py from all_runs_long rows.",
+                }
+        table_rows = [by_tier[tier] for tier in MODEL_TIERS if tier in by_tier]
+    write_csv_dicts(path, table_rows, model_strength_columns())
 
 
 def _add_performance_z(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -150,6 +197,11 @@ def _write_matrices(rows: list[dict[str, Any]], run_root: Path) -> None:
             matrix_rows.append(row_payload)
         path = matrix_dir / f"{_task_slug(task)}_model_x_evolution.csv"
         write_csv_dicts(path, matrix_rows, ["model_tier", *TECHNIQUES])
+        _write_heatmap(
+            matrix_rows,
+            path=matrix_dir / f"{_task_slug(task)}_model_x_evolution.png",
+            title=f"{task} model x evolution",
+        )
         _write_heatmap(
             matrix_rows,
             path=figure_dir / f"heatmap_{_task_slug(task)}_model_x_evolution.png",
@@ -728,9 +780,16 @@ def _final_report(
         "",
         "## Model x evolution matrices",
         "",
-        "CSV matrices are in `model_x_evolution_matrices/`; heatmaps are in `figures/`.",
+        "CSV matrices and matching matrix heatmaps are in `model_x_evolution_matrices/`; duplicated report heatmaps are in `figures/`.",
         "",
         "## Variance decomposition",
+        "",
+        "Formulas:",
+        "",
+        "- Task continuous: `performance_z ~ benchmark_strength_score + C(evolution_technique) + benchmark_strength_score:C(evolution_technique)`.",
+        "- Task categorical: `performance_z ~ C(model_tier) * C(evolution_technique)`.",
+        "- Pooled continuous: `performance_z ~ C(task_family) * benchmark_strength_score * C(evolution_technique)`.",
+        "- Pooled categorical: `performance_z ~ C(task_family) * C(model_tier) * C(evolution_technique)`.",
         "",
         _variance_answer(variance_summary, full_design_complete=full_design_complete),
         "",
@@ -860,12 +919,12 @@ def _required_questions(
         by_tier[str(row["model_tier"])] = by_tier.get(str(row["model_tier"]), 0) + 1
     return "\n".join(
         [
-            f"1. Model strength variance explained: {model_r2 or 'insufficient data'}.",
-            f"2. Evolutionary technique variance explained: {evo_r2 or 'insufficient data'}.",
-            f"3. Model strength x technique interaction: {interaction_r2 or 'insufficient data'}.",
-            f"4. Budget-control wins: {len(positive_budget)} replay/failure/compression comparisons beat budget-matched no-replay with positive bootstrap support.",
-            f"5. Weak-vs-strong gain pattern: {by_tier if by_tier else 'insufficient or no positive budget-control gains'}.",
-            f"6. Strongest conclusion: {_main_conclusion(summary, effects_budget, full_design_complete=full_design_complete)}",
+            f"1. How much variance is explained by model strength? {model_r2 or 'insufficient data'}.",
+            f"2. How much variance is explained by evolutionary technique? {evo_r2 or 'insufficient data'}.",
+            f"3. Is there a model strength x technique interaction? {interaction_r2 or 'insufficient data'}.",
+            f"4. Do replay/failure/compression techniques beat a budget-matched no-replay control? {len(positive_budget)} comparisons beat budget-matched no-replay with positive bootstrap support.",
+            f"5. Are evolutionary gains larger for weak models than strong models? {by_tier if by_tier else 'insufficient or no positive budget-control gains'}.",
+            f"6. Is the strongest conclusion model strength dominates, evolution adds independent value, or evolution only helps under certain task/model regimes? {_main_conclusion(summary, effects_budget, full_design_complete=full_design_complete)}",
         ]
     )
 
@@ -878,6 +937,7 @@ def main() -> None:
     rows = _add_performance_z(_load_rows(run_root))
     if not rows:
         raise SystemExit(f"No run summaries found under {run_root}")
+    _write_model_strength_table_if_missing(run_root, rows)
     write_csv_dicts(run_root / "all_runs_long.csv", rows, performance_columns())
     cell_means = _cell_means(rows)
     write_csv_dicts(
