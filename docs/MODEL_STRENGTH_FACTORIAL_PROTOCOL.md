@@ -61,6 +61,8 @@ Task-specific primary performance uses the supervisor-specified signs:
 - TSP: `performance_raw = -final_tsplib_gap`.
 - CVRP: `performance_raw = -heldout_penalized_gap`.
 
+For CVRP rows, `heldout_feasible_gap` and `secondary_performance_raw` remain blank if no held-out solution is feasible; infeasible solvers are still ranked by the penalized primary endpoint.
+
 `performance_z` is computed within each task family so pooled analyses are not dominated by metric scale.
 
 ## Analysis
@@ -77,6 +79,8 @@ The aggregator writes:
 - effect sizes against `single_shot`,
 - effect sizes against `budget_matched_no_replay`,
 - model x evolution matrices and heatmaps.
+
+Effect-size comparisons are paired by seed when both conditions share the same seed. In paired comparisons, Cohen's d is standardized by the standard deviation of seed-paired deltas; otherwise, it uses the pooled standard deviation of candidate and reference values.
 
 The main report must explicitly answer:
 

@@ -607,8 +607,10 @@ def _run_cell(
         cvrp_config, train_instances, holdout_instances = task_state
         final_eval = _evaluate_cvrp_holdout(final_code, train_instances, holdout_instances, cvrp_config)
         summary = final_eval["summary"]
+        holdout_panel = final_eval["payload"]["final_evaluation"]["holdout"]
+        heldout_feasible_gap = holdout_panel.get("mean_feasible_gap")
         performance_raw = -float(summary["heldout_penalized_gap"])
-        secondary_raw = -float(summary["heldout_feasible_gap"]) if summary["heldout_feasible_gap"] is not None else performance_raw
+        secondary_raw = -float(heldout_feasible_gap) if heldout_feasible_gap is not None else None
         feasibility_rate = float(summary["heldout_feasibility_rate"])
         runtime_ms = float(summary["heldout_runtime_ms"])
         extra_metrics = {
@@ -619,7 +621,7 @@ def _run_cell(
             "adaptation_efficiency": None,
             "heldout_feasibility_rate": feasibility_rate,
             "heldout_penalized_gap": float(summary["heldout_penalized_gap"]),
-            "heldout_feasible_gap": summary["heldout_feasible_gap"],
+            "heldout_feasible_gap": heldout_feasible_gap,
             "heldout_runtime_ms": runtime_ms,
         }
 

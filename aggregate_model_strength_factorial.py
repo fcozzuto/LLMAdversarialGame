@@ -101,10 +101,10 @@ def _cell_means(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _is_full_factorial(rows: list[dict[str, Any]]) -> bool:
-    expected_counts = {
-        "simple_games": 3 * 5 * 10,
-        "tsp": 3 * 5 * 20,
-        "cvrp_phase9_real_world": 3 * 5 * 20,
+    expected_seed_counts = {
+        "simple_games": 10,
+        "tsp": 20,
+        "cvrp_phase9_real_world": 20,
     }
     if {str(row.get("task_family")) for row in rows} != set(TASK_FAMILIES):
         return False
@@ -112,9 +112,20 @@ def _is_full_factorial(rows: list[dict[str, Any]]) -> bool:
         return False
     if {str(row.get("evolution_technique")) for row in rows} != set(TECHNIQUES):
         return False
-    for task, expected in expected_counts.items():
-        if sum(1 for row in rows if str(row.get("task_family")) == task) < expected:
-            return False
+    if len(rows) != sum(expected_seed_counts[task] * len(MODEL_TIERS) * len(TECHNIQUES) for task in TASK_FAMILIES):
+        return False
+    for task, expected_seed_count in expected_seed_counts.items():
+        for tier in MODEL_TIERS:
+            for technique in TECHNIQUES:
+                seeds = [
+                    str(row.get("seed"))
+                    for row in rows
+                    if str(row.get("task_family")) == task
+                    and str(row.get("model_tier")) == tier
+                    and str(row.get("evolution_technique")) == technique
+                ]
+                if len(seeds) != expected_seed_count or len(set(seeds)) != expected_seed_count:
+                    return False
     return True
 
 
@@ -523,7 +534,10 @@ def _compare_effect(
     mean_candidate = mean_or_none(candidate_values)
     mean_reference = mean_or_none(reference_values)
     mean_delta = mean_or_none(deltas)
-    pooled_sd = math.sqrt((std_or_zero(candidate_values) ** 2 + std_or_zero(reference_values) ** 2) / 2.0)
+    if test_type == "paired_by_seed":
+        pooled_sd = std_or_zero(deltas)
+    else:
+        pooled_sd = math.sqrt((std_or_zero(candidate_values) ** 2 + std_or_zero(reference_values) ** 2) / 2.0)
     stable_seed = 9001 + sum(ord(char) for char in f"{task}|{tier}|{technique}|{reference}")
     ci_low, ci_high = bootstrap_ci(deltas, seed=stable_seed)
     return {
@@ -757,7 +771,7 @@ def _final_report(
 
 def _markdown_cell_table(rows: list[dict[str, Any]]) -> str:
     lines = ["| task | model | technique | n | mean performance_z | mean raw | mean novelty |", "| --- | --- | --- | ---: | ---: | ---: | ---: |"]
-    for row in rows[:40]:
+    for row in rows:
         lines.append(
             f"| {row['task_family']} | {row['model_tier']} | {row['evolution_technique']} | {row['n_runs']} | "
             f"{_fmt(row.get('mean_performance_z'))} | {_fmt(row.get('mean_performance_raw'))} | {_fmt(row.get('mean_novelty'))} |"
