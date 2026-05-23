@@ -100,6 +100,24 @@ def _cell_means(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return output
 
 
+def _is_full_factorial(rows: list[dict[str, Any]]) -> bool:
+    expected_counts = {
+        "simple_games": 3 * 5 * 10,
+        "tsp": 3 * 5 * 20,
+        "cvrp_phase9_real_world": 3 * 5 * 20,
+    }
+    if {str(row.get("task_family")) for row in rows} != set(TASK_FAMILIES):
+        return False
+    if {str(row.get("model_tier")) for row in rows} != set(MODEL_TIERS):
+        return False
+    if {str(row.get("evolution_technique")) for row in rows} != set(TECHNIQUES):
+        return False
+    for task, expected in expected_counts.items():
+        if sum(1 for row in rows if str(row.get("task_family")) == task) < expected:
+            return False
+    return True
+
+
 def _write_matrices(rows: list[dict[str, Any]], run_root: Path) -> None:
     matrix_dir = run_root / "model_x_evolution_matrices"
     matrix_dir.mkdir(exist_ok=True)
@@ -668,6 +686,7 @@ def _final_report(
     effects_budget: list[dict[str, Any]],
     run_root: Path,
 ) -> str:
+    full_design_complete = _is_full_factorial(rows)
     lines = [
         "# Model Strength Dominates but Does Not Fully Explain LLM Code Evolution Performance",
         "",
@@ -699,7 +718,7 @@ def _final_report(
         "",
         "## Variance decomposition",
         "",
-        _variance_answer(variance_summary),
+        _variance_answer(variance_summary, full_design_complete=full_design_complete),
         "",
         "## Effect sizes relative to single-shot",
         "",
@@ -711,11 +730,11 @@ def _final_report(
         "",
         "## Cross-family interpretation",
         "",
-        _interpretation(rows, variance_summary, effects_budget),
+        _interpretation(rows, variance_summary, effects_budget, full_design_complete=full_design_complete),
         "",
         "## Main conclusion",
         "",
-        _main_conclusion(variance_summary, effects_budget),
+        _main_conclusion(variance_summary, effects_budget, full_design_complete=full_design_complete),
         "",
         "## Limitations",
         "",
@@ -726,7 +745,7 @@ def _final_report(
         "",
         "## Required Questions",
         "",
-        _required_questions(variance_summary, effects_budget),
+        _required_questions(variance_summary, effects_budget, full_design_complete=full_design_complete),
         "",
         "## Artifact Paths",
         "",
@@ -751,13 +770,13 @@ def _fmt(value: Any) -> str:
     return "" if parsed is None else f"{parsed:.4g}"
 
 
-def _variance_answer(summary: list[dict[str, Any]]) -> str:
+def _variance_answer(summary: list[dict[str, Any]], *, full_design_complete: bool) -> str:
     pooled = [row for row in summary if str(row["analysis_scope"]) == "pooled:continuous"]
     if not pooled:
         return "Insufficient data for pooled variance decomposition."
     row = pooled[0]
-    if int(row.get("n") or 0) < 10:
-        return "Insufficient data for a scientific pooled variance conclusion; this output validates the schema only."
+    if not full_design_complete:
+        return "Incomplete factorial data: this output validates the schema and analysis pipeline only. Scientific variance conclusions require the full 750-row crossed campaign."
     return (
         f"Pooled continuous model: model-strength R2={_fmt(row.get('model_strength_r2'))}, "
         f"evolution-technique R2={_fmt(row.get('evolution_technique_r2'))}, "
@@ -770,22 +789,37 @@ def _effect_answer(effects: list[dict[str, Any]], label: str) -> str:
     return f"{len(beating)} comparisons have bootstrap CIs above zero relative to {label}."
 
 
-def _interpretation(rows: list[dict[str, Any]], summary: list[dict[str, Any]], effects_budget: list[dict[str, Any]]) -> str:
-    del rows
+def _interpretation(
+    rows: list[dict[str, Any]],
+    summary: list[dict[str, Any]],
+    effects_budget: list[dict[str, Any]],
+    *,
+    full_design_complete: bool,
+) -> str:
+    if not full_design_complete:
+        return (
+            f"Incomplete factorial data: {len(rows)} rows are present. "
+            "Use this report for schema validation only; do not interpret replay, model-strength, or interaction effects until the full paid campaign is aggregated."
+        )
     positive_budget = [row for row in effects_budget if str(row.get("beats_reference")).lower() == "true"]
     return (
         "The interpretation should focus on the budget control. "
         f"Replay/failure/compression techniques beat budget-matched no-replay in {len(positive_budget)} tested task/model comparisons with positive bootstrap support. "
-        + _variance_answer(summary)
+        + _variance_answer(summary, full_design_complete=full_design_complete)
     )
 
 
-def _main_conclusion(summary: list[dict[str, Any]], effects_budget: list[dict[str, Any]]) -> str:
+def _main_conclusion(
+    summary: list[dict[str, Any]],
+    effects_budget: list[dict[str, Any]],
+    *,
+    full_design_complete: bool,
+) -> str:
     pooled = next((row for row in summary if str(row["analysis_scope"]) == "pooled:continuous"), None)
     if pooled is None:
         return "Smoke data validate the schema, but the full paid campaign is required for the empirical conclusion."
-    if int(pooled.get("n") or 0) < 10:
-        return "Smoke or partial data validate the schema, but the full paid campaign is required for the empirical conclusion."
+    if not full_design_complete:
+        return "Smoke or partial data validate the schema, but the full 750-row paid campaign is required for the empirical conclusion."
     model_r2 = float(pooled.get("model_strength_r2") or 0.0)
     evo_r2 = float(pooled.get("evolution_technique_r2") or 0.0)
     positive_budget = [row for row in effects_budget if str(row.get("beats_reference")).lower() == "true"]
@@ -796,11 +830,16 @@ def _main_conclusion(summary: list[dict[str, Any]], effects_budget: list[dict[st
     return "Evolutionary technique explains variance comparable to or larger than model strength in the current data; inspect task-specific interactions before making a broad claim."
 
 
-def _required_questions(summary: list[dict[str, Any]], effects_budget: list[dict[str, Any]]) -> str:
+def _required_questions(
+    summary: list[dict[str, Any]],
+    effects_budget: list[dict[str, Any]],
+    *,
+    full_design_complete: bool,
+) -> str:
     pooled = next((row for row in summary if str(row["analysis_scope"]) == "pooled:continuous"), {})
-    model_r2 = _fmt(pooled.get("model_strength_r2"))
-    evo_r2 = _fmt(pooled.get("evolution_technique_r2"))
-    interaction_r2 = _fmt(pooled.get("interaction_r2"))
+    model_r2 = _fmt(pooled.get("model_strength_r2")) if full_design_complete else "requires full campaign"
+    evo_r2 = _fmt(pooled.get("evolution_technique_r2")) if full_design_complete else "requires full campaign"
+    interaction_r2 = _fmt(pooled.get("interaction_r2")) if full_design_complete else "requires full campaign"
     positive_budget = [row for row in effects_budget if str(row.get("beats_reference")).lower() == "true"]
     by_tier: dict[str, int] = {}
     for row in positive_budget:
@@ -812,7 +851,7 @@ def _required_questions(summary: list[dict[str, Any]], effects_budget: list[dict
             f"3. Model strength x technique interaction: {interaction_r2 or 'insufficient data'}.",
             f"4. Budget-control wins: {len(positive_budget)} replay/failure/compression comparisons beat budget-matched no-replay with positive bootstrap support.",
             f"5. Weak-vs-strong gain pattern: {by_tier if by_tier else 'insufficient or no positive budget-control gains'}.",
-            f"6. Strongest conclusion: {_main_conclusion(summary, effects_budget)}",
+            f"6. Strongest conclusion: {_main_conclusion(summary, effects_budget, full_design_complete=full_design_complete)}",
         ]
     )
 
@@ -887,7 +926,7 @@ def main() -> None:
     print(f"final_report.md: {run_root / 'final_report.md'}")
     print(f"all_runs_long.csv: {run_root / 'all_runs_long.csv'}")
     print(f"variance_partition_summary.csv: {run_root / 'variance_decomposition' / 'variance_partition_summary.csv'}")
-    print(_main_conclusion(variance_summary, effects_budget))
+    print(_main_conclusion(variance_summary, effects_budget, full_design_complete=_is_full_factorial(rows)))
 
 
 if __name__ == "__main__":

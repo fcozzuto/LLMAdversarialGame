@@ -573,6 +573,13 @@ def _run_cell(
         extra_metrics = {
             "primary_holdout_win_rate": performance_raw,
             "primary_holdout_score_margin": secondary_raw,
+            "final_tsplib_gap": None,
+            "final_transfer_gap": None,
+            "adaptation_efficiency": None,
+            "heldout_feasibility_rate": None,
+            "heldout_penalized_gap": None,
+            "heldout_feasible_gap": None,
+            "heldout_runtime_ms": None,
         }
     elif task_family == "tsp":
         final_eval = _evaluate_tsp_holdout(final_code, task_state, seed=seed + int(task_cfg.get("seed_base", 0)) + 900_000)
@@ -586,9 +593,15 @@ def _run_cell(
             else None
         )
         extra_metrics = {
+            "primary_holdout_win_rate": None,
+            "primary_holdout_score_margin": None,
             "final_tsplib_gap": float(final_eval["final_tsplib_gap"]),
             "final_transfer_gap": float(final_eval["final_transfer_gap"]),
             "adaptation_efficiency": adaptation_efficiency,
+            "heldout_feasibility_rate": None,
+            "heldout_penalized_gap": None,
+            "heldout_feasible_gap": None,
+            "heldout_runtime_ms": None,
         }
     else:
         cvrp_config, train_instances, holdout_instances = task_state
@@ -599,6 +612,11 @@ def _run_cell(
         feasibility_rate = float(summary["heldout_feasibility_rate"])
         runtime_ms = float(summary["heldout_runtime_ms"])
         extra_metrics = {
+            "primary_holdout_win_rate": None,
+            "primary_holdout_score_margin": None,
+            "final_tsplib_gap": None,
+            "final_transfer_gap": None,
+            "adaptation_efficiency": None,
             "heldout_feasibility_rate": feasibility_rate,
             "heldout_penalized_gap": float(summary["heldout_penalized_gap"]),
             "heldout_feasible_gap": summary["heldout_feasible_gap"],
@@ -625,6 +643,15 @@ def _run_cell(
         "accepted_epochs": accepted_epochs,
         "acceptance_rate": accepted_epochs / max(1, candidate_budget),
         "mean_code_novelty": fmean(novelty_values) if novelty_values else 0.0,
+        "primary_holdout_win_rate": extra_metrics.get("primary_holdout_win_rate"),
+        "primary_holdout_score_margin": extra_metrics.get("primary_holdout_score_margin"),
+        "final_tsplib_gap": extra_metrics.get("final_tsplib_gap"),
+        "final_transfer_gap": extra_metrics.get("final_transfer_gap"),
+        "adaptation_efficiency": extra_metrics.get("adaptation_efficiency"),
+        "heldout_feasibility_rate": extra_metrics.get("heldout_feasibility_rate"),
+        "heldout_penalized_gap": extra_metrics.get("heldout_penalized_gap"),
+        "heldout_feasible_gap": extra_metrics.get("heldout_feasible_gap"),
+        "heldout_runtime_ms": extra_metrics.get("heldout_runtime_ms"),
         "artifact_path": str(cell_dir),
     }
     run_summary = {

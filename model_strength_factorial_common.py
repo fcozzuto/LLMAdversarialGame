@@ -158,6 +158,15 @@ def performance_columns() -> list[str]:
         "accepted_epochs",
         "acceptance_rate",
         "mean_code_novelty",
+        "primary_holdout_win_rate",
+        "primary_holdout_score_margin",
+        "final_tsplib_gap",
+        "final_transfer_gap",
+        "adaptation_efficiency",
+        "heldout_feasibility_rate",
+        "heldout_penalized_gap",
+        "heldout_feasible_gap",
+        "heldout_runtime_ms",
         "artifact_path",
     ]
 

@@ -52,6 +52,7 @@ The runner writes one row per run with:
 - `accepted_epochs`
 - `acceptance_rate`
 - `mean_code_novelty`
+- task-specific primary metrics: `primary_holdout_win_rate`, `primary_holdout_score_margin`, `final_tsplib_gap`, `final_transfer_gap`, `adaptation_efficiency`, `heldout_feasibility_rate`, `heldout_penalized_gap`, `heldout_feasible_gap`, and `heldout_runtime_ms`
 - `artifact_path`
 
 Task-specific primary performance uses the supervisor-specified signs:

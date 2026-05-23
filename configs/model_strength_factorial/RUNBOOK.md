@@ -48,6 +48,12 @@ python aggregate_model_strength_factorial.py --run-root "runs/cross_family_model
 
 ## Planned Scale
 
+The committed model tiers are:
+
+- `weak_model`: `gpt-5-nano`
+- `medium_model`: `gpt-5.4-nano`
+- `strong_model`: `gpt-5.5`
+
 The planned full design produces 750 run rows:
 
 - `simple_games`: `3 models x 5 techniques x 10 seeds = 150` rows.
