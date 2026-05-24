@@ -224,6 +224,11 @@ def _generate_candidate(
             max_non_empty_lines=int(generation_cfg.get("max_non_empty_lines", 260)),
             max_characters=int(generation_cfg.get("max_characters", 12000)),
         )
+    if _fatal_generation_error(result.error):
+        raise SystemExit(
+            f"Fatal generation error for {provider}/{model} during {task_family} {technique} "
+            f"candidate {candidate_index}: {result.error}"
+        )
     return {
         "provider": provider,
         "model_name": model,
@@ -236,6 +241,20 @@ def _generate_candidate(
         "used_fallback": bool(result.used_fallback),
         "repair_attempted": bool(getattr(result, "repair_attempted", False)),
     }
+
+
+def _fatal_generation_error(error: str | None) -> bool:
+    if not error:
+        return False
+    normalized = error.lower()
+    fatal_markers = [
+        "insufficient_quota",
+        "exceeded your current quota",
+        "billing details",
+        "rate_limit_exceeded",
+        "http 429",
+    ]
+    return any(marker in normalized for marker in fatal_markers)
 
 
 def _simple_game_configs(path: str | Path) -> list[Any]:
