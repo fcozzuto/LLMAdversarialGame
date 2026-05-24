@@ -50,8 +50,8 @@ python aggregate_model_strength_factorial.py --run-root "runs/cross_family_model
 
 The committed model tiers are:
 
-- `weak_model`: `gpt-5-nano`
-- `medium_model`: `gpt-5.4-nano`
+- `weak_model`: `gpt-4.1-nano`
+- `medium_model`: `gpt-5-nano`
 - `strong_model`: `gpt-5.4-mini`
 
 The planned full design produces 750 run rows:

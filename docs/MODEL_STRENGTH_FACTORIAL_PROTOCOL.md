@@ -106,7 +106,7 @@ The protocol follows standard replication and uncertainty discipline for stochas
 
 The model-tier factor is analyzed both categorically and continuously because the project-specific model aliases may not have comparable public coding-benchmark scores. The committed default uses transparent ordinal scores and records `benchmark_score_source=ordinal_proxy`; if comparable HumanEval, MBPP, LiveCodeBench, or SWE-bench Verified scores are confirmed for all three tiers, those can replace the ordinal proxy before the official run.
 
-The model ladder is budget-feasible rather than maximal-cost: the strong tier should be interpreted as the strongest affordable model in the committed three-level ladder, not necessarily the strongest model available in the account.
+The committed model ladder is budget-feasible rather than maximal-cost: `gpt-4.1-nano` as `weak_model`, `gpt-5-nano` as `medium_model`, and `gpt-5.4-mini` as `strong_model`. The strong tier should be interpreted as the strongest affordable model in the committed three-level ladder, not necessarily the strongest model available in the account.
 
 ## Interpretation Rule
 
