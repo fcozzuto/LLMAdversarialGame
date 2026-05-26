@@ -9,6 +9,11 @@ import sys
 import threading
 from typing import Any
 
+from .heuristic_engine import canonicalize_heuristic_spec, default_heuristic_code
+
+
+DEFAULT_MATERIALIZATION_TIMEOUT_SECONDS = 10.0
+
 
 @dataclass
 class HeuristicMaterialization:
@@ -37,7 +42,21 @@ def _reader_thread(stream: Any, sink: queue.Queue[dict[str, Any]]) -> None:
             pass
 
 
-def materialize_heuristic(code: str) -> HeuristicMaterialization:
+def _fallback_materialization(issue: str, init_error: str) -> HeuristicMaterialization:
+    return HeuristicMaterialization(
+        issues=[issue],
+        used_fallback=True,
+        init_error=init_error,
+        executed_code=default_heuristic_code(),
+        heuristic_spec=canonicalize_heuristic_spec(None),
+    )
+
+
+def materialize_heuristic(
+    code: str,
+    *,
+    timeout_seconds: float = DEFAULT_MATERIALIZATION_TIMEOUT_SECONDS,
+) -> HeuristicMaterialization:
     response_queue: queue.Queue[dict[str, Any]] = queue.Queue()
     process = subprocess.Popen(
         [sys.executable, "-m", "llm_tsp.heuristic_worker"],
@@ -54,7 +73,12 @@ def materialize_heuristic(code: str) -> HeuristicMaterialization:
         assert process.stdin is not None
         process.stdin.write(json.dumps({"type": "init", "code": code}) + "\n")
         process.stdin.flush()
-        payload = response_queue.get(timeout=10.0)
+        payload = response_queue.get(timeout=timeout_seconds)
+    except queue.Empty:
+        return _fallback_materialization(
+            "materialization_timeout",
+            f"heuristic_worker_timeout_after_{timeout_seconds:.3f}s",
+        )
     finally:
         try:
             process.wait(timeout=1.0)
