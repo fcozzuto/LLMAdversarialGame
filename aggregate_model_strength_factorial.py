@@ -754,7 +754,7 @@ def _final_report(
 ) -> str:
     full_design_complete = _is_full_factorial(rows)
     lines = [
-        "# Model Strength Dominates but Does Not Fully Explain LLM Code Evolution Performance",
+        "# Budget-Matched Controls Limit Model-Strength and Replay Claims in LLM Code Evolution",
         "",
         "## Purpose",
         "",
@@ -877,7 +877,8 @@ def _interpretation(
     positive_budget = [row for row in effects_budget if str(row.get("beats_reference")).lower() == "true"]
     return (
         "The interpretation should focus on the budget control. "
-        f"Replay/failure/compression techniques beat budget-matched no-replay in {len(positive_budget)} tested task/model comparisons with positive bootstrap support. "
+        f"Replay/failure/compression techniques beat budget-matched no-replay in {len(positive_budget)} tested task/model comparisons with positive bootstrap support; "
+        "therefore, gains over single-shot should be interpreted primarily as effects of extra search budget unless a task-specific budget-control comparison supports a stronger claim. "
         + _variance_answer(summary, full_design_complete=full_design_complete)
     )
 
@@ -895,12 +896,25 @@ def _main_conclusion(
         return "Smoke or partial data validate the schema, but the full 750-row paid campaign is required for the empirical conclusion."
     model_r2 = float(pooled.get("model_strength_r2") or 0.0)
     evo_r2 = float(pooled.get("evolution_technique_r2") or 0.0)
+    interaction_r2 = float(pooled.get("interaction_r2") or 0.0)
     positive_budget = [row for row in effects_budget if str(row.get("beats_reference")).lower() == "true"]
     if model_r2 > evo_r2 and positive_budget:
         return "Model strength explains the largest share of variance, while evolutionary technique adds task/model-dependent value beyond budget-matched search."
     if model_r2 > evo_r2:
         return "Model strength dominates, and replay/failure/compression do not yet show reliable value beyond budget-matched search."
-    return "Evolutionary technique explains variance comparable to or larger than model strength in the current data; inspect task-specific interactions before making a broad claim."
+    if positive_budget:
+        return (
+            "The budget-feasible model ladder does not show clean model-strength dominance; "
+            f"model-strength R2={_fmt(model_r2)}, evolution-technique R2={_fmt(evo_r2)}, "
+            f"and interaction R2={_fmt(interaction_r2)}. Some evolutionary conditions beat the budget control, "
+            "so any positive claim should be restricted to those task/model regimes."
+        )
+    return (
+        "The budget-feasible model ladder does not show clean model-strength dominance, and replay/failure/compression "
+        f"do not beat the budget-matched no-replay control. Pooled model-strength R2={_fmt(model_r2)}, "
+        f"evolution-technique R2={_fmt(evo_r2)}, and interaction R2={_fmt(interaction_r2)}; the strongest conclusion is "
+        "that apparent gains over single-shot mostly reflect search budget and task/model-specific interactions rather than robust replay-specific value."
+    )
 
 
 def _required_questions(

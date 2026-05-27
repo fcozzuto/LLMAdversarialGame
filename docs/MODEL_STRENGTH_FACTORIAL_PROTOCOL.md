@@ -110,6 +110,12 @@ The committed model ladder is budget-feasible rather than maximal-cost: `gpt-4.1
 
 ## Interpretation Rule
 
-Do not overclaim algorithmic discovery. The strongest expected claim is:
+Do not overclaim algorithmic discovery. The analysis should follow the observed variance partition and budget-control effect sizes rather than preserving the expected framing if the data contradict it.
 
-> Across games, TSP, and real-world CVRP, base model strength explains the largest share of performance variance, while evolutionary technique contributes smaller, task-dependent gains. Replay and failure-based techniques add value only if they improve over the budget-matched no-replay control, not merely over single-shot generation.
+The strongest claim should be selected from the supported outcomes:
+
+- If base-model terms dominate the variance decomposition and replay arms beat `budget_matched_no_replay`, report model-strength dominance with independent task/model-dependent evolutionary value.
+- If replay arms improve over `single_shot` but not over `budget_matched_no_replay`, treat the gains as search-budget effects rather than replay-specific evidence.
+- If neither model strength nor replay gives a clean main effect, report task/model interaction structure and benchmark headroom as the dominant limitation.
+
+Replay and failure-based techniques add value only if they improve over the `budget_matched_no_replay` control, not merely over single-shot generation.
