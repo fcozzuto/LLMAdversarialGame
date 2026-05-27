@@ -1,0 +1,1395 @@
+{
+  "accepted": true,
+  "candidate_index": 6,
+  "generation": {
+    "code": "def solve_cvrp(instance):\n    depot = instance[\"depot_index\"]\n    customers = set(instance[\"customer_ids\"])\n    demands = instance[\"demands\"]\n    capacity = instance[\"capacity\"]\n    matrix = instance[\"distance_matrix\"]\n    routes = []\n    while customers:\n        route = []\n        load = 0\n        current = depot\n        while True:\n            feasible = [node for node in customers if load + demands[node] <= capacity]\n            if not feasible:\n                break\n            nxt = min(feasible, key=lambda node: (matrix[current][node], demands[node], node))\n            route.append(nxt)\n            customers.remove(nxt)\n            load += demands[nxt]\n            current = nxt\n        routes.append(route)\n    return routes\n",
+    "error": "Initial submission invalid (submission exceeded 260 non-empty lines, syntax error: '(' was never closed); repair submission invalid (submission exceeded 260 non-empty lines, call to banned builtin getattr())",
+    "model_name": "gpt-5.4-mini",
+    "prompt": "Return only raw Python source code.\nDefine exactly this function:\ndef solve_cvrp(instance):\n    return routes\n\nRules:\n- No imports.\n- Return a list of routes; each route is a list of customer ids and must not include the depot.\n- Visit every customer exactly once and respect vehicle capacity.\n- Build deterministic, interpretable CVRP solver logic using constructive, repair, and local-search ideas.\n- Do not rely on held-out data.\n\nTechnique: budget_matched_no_replay. Candidate 6.\nNo prior candidates, replay memory, failure memory, or compression may be used.",
+    "provider": "openai",
+    "raw_text": "def solve_cvrp(instance):\n    # ---------- basic extraction ----------\n    def get(obj, *keys, default=None):\n        if isinstance(obj, dict):\n            for k in keys:\n                if k in obj:\n                    return obj[k]\n        for k in keys:\n            if hasattr(obj, k):\n                return getattr(obj, k)\n        return default\n\n    depot = get(instance, \"depot\", \"depot_id\", default=0)\n    capacity = get(instance, \"capacity\", \"vehicle_capacity\", default=None)\n\n    customers = get(instance, \"customers\", \"nodes\", default=None)\n    demands_obj = get(instance, \"demands\", \"demand\", default=None)\n    coords_obj = get(instance, \"coords\", \"coordinates\", \"points\", default=None)\n    dist_obj = get(instance, \"distance_matrix\", \"distances\", \"matrix\", default=None)\n\n    # ---------- normalize customer ids ----------\n    cust_ids = []\n    if customers is not None:\n        if isinstance(customers, dict):\n            cust_ids = [k for k in customers.keys() if k != depot]\n        else:\n            cust_ids = [x for x in customers if x != depot]\n    elif isinstance(demands_obj, dict):\n        cust_ids = [k for k in demands_obj.keys() if k != depot]\n    elif isinstance(coords_obj, dict):\n        cust_ids = [k for k in coords_obj.keys() if k != depot]\n    elif isinstance(dist_obj, dict) and \"size\" in dist_obj:\n        n = dist_obj[\"size\"]\n        cust_ids = [i for i in range(n) if i != depot]\n    elif isinstance(dist_obj, list):\n        n = len(dist_obj)\n        cust_ids = [i for i in range(n) if i != depot]\n    else:\n        cust_ids = []\n\n    cust_ids = list(cust_ids)\n    cust_ids.sort()\n\n    # ---------- demand access ----------\n    def demand(i):\n        if demands_obj is None:\n            return 1\n        if isinstance(demands_obj, dict):\n            return demands_obj.get(i, 1)\n        if isinstance(demands_obj, list) or isinstance(demands_obj, tuple):\n            if isinstance(i, int) and 0 <= i < len(demands_obj):\n                return demands_obj[i]\n            return 1\n        return 1\n\n    if capacity is None:\n        total = 0\n        for i in cust_ids:\n            total += demand(i)\n        capacity = total if total > 0 else 1\n\n    # ---------- coordinates ----------\n    def coord(i):\n        if coords_obj is None:\n            return None\n        if isinstance(coords_obj, dict):\n            return coords_obj.get(i, None)\n        if isinstance(coords_obj, list) or isinstance(coords_obj, tuple):\n            if isinstance(i, int) and 0 <= i < len(coords_obj):\n                return coords_obj[i]\n        return None\n\n    depot_coord = coord(depot)\n\n    # ---------- distance access ----------\n    dist_cache = {}\n\n    def euclid(a, b):\n        ca = coord(a)\n        cb = coord(b)\n        if ca is None or cb is None:\n            return 0\n        dx = ca[0] - cb[0]\n        dy = ca[1] - cb[1]\n        return (dx * dx + dy * dy) ** 0.5\n\n    def dist(a, b):\n        key = (a, b)\n        if key in dist_cache:\n            return dist_cache[key]\n        d = None\n        if dist_obj is not None:\n            if isinstance(dist_obj, dict):\n                if \"values\" in dist_obj:\n                    mat = dist_obj[\"values\"]\n                    if isinstance(mat, list) and isinstance(a, int) and isinstance(b, int):\n                        d = mat[a][b]\n                elif (a, b) in dist_obj:\n                    d = dist_obj[(a, b)]\n                elif str((a, b)) in dist_obj:\n                    d = dist_obj[str((a, b))]\n            elif isinstance(dist_obj, list):\n                if isinstance(a, int) and isinstance(b, int):\n                    d = dist_obj[a][b]\n        if d is None:\n            d = euclid(a, b)\n        dist_cache[key] = d\n        return d\n\n    # ---------- route utilities ----------\n    def route_load(route):\n        s = 0\n        for c in route:\n            s += demand(c)\n        return s\n\n    def route_cost(route):\n        if not route:\n            return 0\n        c = dist(depot, route[0])\n        for i in range(len(route) - 1):\n            c += dist(route[i], route[i + 1])\n        c += dist(route[-1], depot)\n        return c\n\n    def total_cost(routes):\n        s = 0\n        for r in routes:\n            s += route_cost(r)\n        return s\n\n    # ---------- constructive phase ----------\n    unassigned = cust_ids[:]\n    routes = []\n\n    # sweep if coordinates are available, otherwise nearest-neighbor packing\n    if depot_coord is not None:\n        items = []\n        dx0, dy0 = depot_coord[0], depot_coord[1]\n        for i in cust_ids:\n            c = coord(i)\n            if c is None:\n                continue\n            ang = 0.0\n            if c[0] != dx0 or c[1] != dy0:\n                # deterministic polar angle in [0, 2pi)\n                import_angle = None\n                ang = 0.0\n                x = c[0] - dx0\n                y = c[1] - dy0\n                if x > 0:\n                    ang = y / (abs(x) + abs(y) + 1e-12)\n                # fallback to a stable ordering using quadrant-like measure\n                if y >= 0:\n                    if x >= 0:\n                        ang = y / (x + y + 1e-12)\n                    else:\n                        ang = 1.0 - x / ((-x) + y + 1e-12)\n                else:\n                    if x < 0:\n                        ang = 2.0 - y / ((-x) + (-y) + 1e-12)\n                    else:\n                        ang = 3.0 + x / (x + (-y) + 1e-12)\n            items.append((ang, dist(depot, i), i))\n        items.sort()\n        route = []\n        load = 0\n        for _, _, i in items:\n            di = demand(i)\n            if load + di > capacity and route:\n                routes.append(route)\n                route = []\n                load = 0\n            route.append(i)\n            load += di\n        if route:\n            routes.append(route)\n    else:\n        unassigned.sort(key=lambda i: (-demand(i), -dist(depot, i), i))\n        while unassigned:\n            route = []\n            load = 0\n            current = depot\n            # pick first customer: farthest feasible\n            feasible = [i for i in unassigned if demand(i) <= capacity]\n            if not feasible:\n                route.append(unassigned[0])\n                unassigned = unassigned[1:]\n                routes.append(route)\n                continue\n            feasible.sort(key=lambda i: (-dist(depot, i), -demand(i), i))\n            first = feasible[0]\n            route.append(first)\n            load += demand(first)\n            unassigned.remove(first)\n            current = first\n            while True:\n                best = None\n                best_score = None\n                for i in unassigned:\n                    di = demand(i)\n                    if load + di > capacity:\n                        continue\n                    score = (dist(current, i), -di, i)\n                    if best_score is None or score < best_score:\n                        best_score = score\n                        best = i\n                if best is None:\n                    break\n                route.append(best)\n                load += demand(best)\n                unassigned.remove(best)\n                current = best\n            routes.append(route)\n\n    # repair: if any customer missing, insert greedily\n    assigned = {}\n    for r in routes:\n        for c in r:\n            assigned[c] = assigned.get(c, 0) + 1\n    missing = [i for i in cust_ids if assigned.get(i, 0) == 0]\n    if missing:\n        for c in missing:\n            best_r = None\n            best_pos = None\n            best_delta = None\n            for ri, r in enumerate(routes):\n                if route_load(r) + demand(c) > capacity:\n                    continue\n                for pos in range(len(r) + 1):\n                    prev = depot if pos == 0 else r[pos - 1]\n                    nxt = depot if pos == len(r) else r[pos]\n                    delta = dist(prev, c) + dist(c, nxt) - dist(prev, nxt)\n                    if best_delta is None or delta < best_delta:\n                        best_delta = delta\n                        best_r = ri\n                        best_pos = pos\n            if best_r is None:\n                routes.append([c])\n            else:\n                routes[best_r].insert(best_pos, c)\n\n    # ---------- local search ----------\n    def two_opt(route):\n        if len(route) < 4:\n            return route[:]\n        best = route[:]\n        best_cost = route_cost(best)\n        improved = True\n        while improved:\n            improved = False\n            n = len(best)\n            for i in range(n - 2):\n                for j in range(i + 2, n):\n                    if i == 0 and j == n - 1:\n                        continue\n                    cand = best[:i + 1] + best[i + 1:j + 1][::-1] + best[j + 1:]\n                    c = route_cost(cand)\n                    if c + 1e-12 < best_cost:\n                        best = cand\n                        best_cost = c\n                        improved = True\n                        break\n                if improved:\n                    break\n        return best\n\n    for idx in range(len(routes)):\n        routes[idx] = two_opt(routes[idx])\n\n    improved = True\n    while improved:\n        improved = False\n\n        # relocate moves\n        for a in range(len(routes)):\n            ra = routes[a]\n            load_a = route_load(ra)\n            for i in range(len(ra)):\n                c = ra[i]\n                dc = demand(c)\n                for b in range(len(routes)):\n                    if a == b:\n                        continue\n                    rb = routes[b]\n                    load_b = route_load(rb)\n                    if load_b + dc > capacity:\n                        continue\n                    for pos in range(len(rb) + 1):\n                        prev_b = depot if pos == 0 else rb[pos - 1]\n                        next_b = depot if pos == len(rb) else rb[pos]\n                        delta_add = dist(prev_b, c) + dist(c, next_b) - dist(prev_b, next_b)\n\n                        prev_a = depot if i == 0 else ra[i - 1]\n                        next_a = depot if i == len(ra) - 1 else ra[i + 1]\n                        delta_rem = dist(prev_a, next_a) - dist(prev_a, c) - dist(c, next_a)\n\n                        if delta_add + delta_rem < -1e-12:\n                            new_ra = ra[:i] + ra[i + 1:]\n                            new_rb = rb[:pos] + [c] + rb[pos:]\n                            routes[a] = new_ra\n                            routes[b] = two_opt(new_rb)\n                            if not routes[a]:\n                                routes.pop(a)\n                            improved = True\n                            break\n                    if improved:\n                        break\n                if improved:\n                    break\n            if improved:\n                break\n        if improved:\n            continue\n\n        # swap moves\n        for a in range(len(routes)):\n            ra = routes[a]\n            la = route_load(ra)\n            for b in range(a + 1, len(routes)):\n                rb = routes[b]\n                lb = route_load(rb)\n                for i in range(len(ra)):\n                    ca = ra[i]\n                    da = demand(ca)\n                    for j in range(len(rb)):\n                        cb = rb[j]\n                        db = demand(cb)\n                        if la - da + db > capacity or lb - db + da > capacity:\n                            continue\n\n                        pa1 = depot if i == 0 else ra[i - 1]\n                        na1 = depot if i == len(ra) - 1 else ra[i + 1]\n                        pb1 = depot if j == 0 else rb[j - 1]\n                        nb1 = depot if j == len(rb) - 1 else rb[j + 1]\n\n                        old = dist(pa1, ca) + dist(ca, na1) + dist(pb1, cb) + dist(cb, nb1)\n                        new = dist(pa1,\n\n--- REPAIR ATTEMPT ---\n\ndef solve_cvrp(instance):\n    def get(obj, *keys, default=None):\n        if isinstance(obj, dict):\n            for k in keys:\n                if k in obj:\n                    return obj[k]\n        for k in keys:\n            if hasattr(obj, k):\n                return getattr(obj, k)\n        return default\n\n    depot = get(instance, \"depot\", \"depot_id\", default=0)\n    capacity = get(instance, \"capacity\", \"vehicle_capacity\", default=None)\n    customers = get(instance, \"customers\", \"nodes\", default=None)\n    demands = get(instance, \"demands\", \"demand\", default=None)\n    coords = get(instance, \"coords\", \"coordinates\", \"points\", default=None)\n    matrix = get(instance, \"distance_matrix\", \"distances\", \"matrix\", default=None)\n\n    def is_seq(x):\n        return isinstance(x, (list, tuple))\n\n    def demand(i):\n        if demands is None:\n            return 1\n        if isinstance(demands, dict):\n            return demands.get(i, 1)\n        if is_seq(demands) and isinstance(i, int) and 0 <= i < len(demands):\n            return demands[i]\n        return 1\n\n    def coord(i):\n        if coords is None:\n            return None\n        if isinstance(coords, dict):\n            return coords.get(i, None)\n        if is_seq(coords) and isinstance(i, int) and 0 <= i < len(coords):\n            return coords[i]\n        return None\n\n    cust_ids = []\n    if customers is not None:\n        cust_ids = [k for k in customers.keys()] if isinstance(customers, dict) else list(customers)\n    elif isinstance(demands, dict):\n        cust_ids = list(demands.keys())\n    elif isinstance(coords, dict):\n        cust_ids = list(coords.keys())\n    elif is_seq(matrix):\n        cust_ids = list(range(len(matrix)))\n    elif isinstance(matrix, dict) and \"size\" in matrix:\n        cust_ids = list(range(matrix[\"size\"]))\n    cust_ids = [i for i in cust_ids if i != depot]\n    cust_ids.sort()\n\n    if capacity is None:\n        total = 0\n        for i in cust_ids:\n            total += max(0, demand(i))\n        capacity = total if total > 0 else 1\n\n    dist_cache = {}\n    def euclid(a, b):\n        ca, cb = coord(a), coord(b)\n        if ca is None or cb is None:\n            return 0\n        dx = ca[0] - cb[0]\n        dy = ca[1] - cb[1]\n        return (dx * dx + dy * dy) ** 0.5\n\n    def dist(a, b):\n        k = (a, b)\n        if k in dist_cache:\n            return dist_cache[k]\n        d = None\n        if matrix is not None:\n            if is_seq(matrix) and isinstance(a, int) and isinstance(b, int):\n                d = matrix[a][b]\n            elif isinstance(matrix, dict):\n                if \"values\" in matrix and is_seq(matrix[\"values\"]) and isinstance(a, int) and isinstance(b, int):\n                    d = matrix[\"values\"][a][b]\n                elif (a, b) in matrix:\n                    d = matrix[(a, b)]\n                elif str((a, b)) in matrix:\n                    d = matrix[str((a, b))]\n        if d is None:\n            d = euclid(a, b)\n        dist_cache[k] = d\n        return d\n\n    def route_load(r):\n        s = 0\n        for c in r:\n            s += demand(c)\n        return s\n\n    def route_cost(r):\n        if not r:\n            return 0\n        c = dist(depot, r[0])\n        for i in range(len(r) - 1):\n            c += dist(r[i], r[i + 1])\n        c += dist(r[-1], depot)\n        return c\n\n    def total_cost(rs):\n        return sum(route_cost(r) for r in rs)\n\n    def angle_key(i):\n        c = coord(i)\n        d = coord(depot)\n        if c is None or d is None:\n            return (0, dist(depot, i), i)\n        x = c[0] - d[0]\n        y = c[1] - d[1]\n        q = 0 if y >= 0 and x >= 0 else 1 if y >= 0 else 2 if x < 0 else 3\n        return (q, abs(y) / (abs(x) + abs(y) + 1e-12), dist(depot, i), i)\n\n    routes = []\n    unassigned = cust_ids[:]\n    if coord(depot) is not None:\n        for i in sorted(cust_ids, key=angle_key):\n            di = demand(i)\n            placed = False\n            if routes and route_load(routes[-1]) + di <= capacity:\n                routes[-1].append(i)\n                placed = True\n            if not placed:\n                routes.append([i])\n    else:\n        unassigned.sort(key=lambda i: (-demand(i), -dist(depot, i), i))\n        while unassigned:\n            r = []\n            load = 0\n            first = None\n            feas = [i for i in unassigned if demand(i) <= capacity]\n            if feas:\n                first = max(feas, key=lambda i: (dist(depot, i), demand(i), -i))\n            else:\n                first = unassigned[0]\n            r.append(first)\n            load += demand(first)\n            unassigned.remove(first)\n            cur = first\n            while True:\n                best = None\n                best_key = None\n                for i in unassigned:\n                    di = demand(i)\n                    if load + di > capacity:\n                        continue\n                    key = (dist(cur, i), -di, i)\n                    if best_key is None or key < best_key:\n                        best_key = key\n                        best = i\n                if best is None:\n                    break\n                r.append(best)\n                load += demand(best)\n                unassigned.remove(best)\n                cur = best\n            routes.append(r)\n\n    assigned = set()\n    for r in routes:\n        for c in r:\n            assigned.add(c)\n    for c in cust_ids:\n        if c not in assigned:\n            best = None\n            best_r = None\n            best_p = None\n            for ri, r in enumerate(routes):\n                if route_load(r) + demand(c) > capacity:\n                    continue\n                for p in range(len(r) + 1):\n                    a = depot if p == 0 else r[p - 1]\n                    b = depot if p == len(r) else r[p]\n                    delta = dist(a, c) + dist(c, b) - dist(a, b)\n                    if best is None or delta < best:\n                        best = delta\n                        best_r = ri\n                        best_p = p\n            if best_r is None:\n                routes.append([c])\n            else:\n                routes[best_r].insert(best_p, c)\n\n    def two_opt(r):\n        n = len(r)\n        if n < 4:\n            return r[:]\n        best = r[:]\n        improved = True\n        while improved:\n            improved = False\n            for i in range(n - 2):\n                for j in range(i + 2, n):\n                    if i == 0 and j == n - 1:\n                        continue\n                    cand = best[:i + 1] + best[i + 1:j + 1][::-1] + best[j + 1:]\n                    if route_cost(cand) + 1e-12 < route_cost(best):\n                        best = cand\n                        improved = True\n                        break\n                if improved:\n                    break\n        return best\n\n    routes = [two_opt(r) for r in routes if r]\n    changed = True\n    while changed:\n        changed = False\n        for a in range(len(routes)):\n            ra = routes[a]\n            for i, c in enumerate(ra):\n                dc = demand(c)\n                for b in range(len(routes)):\n                    if a == b:\n                        continue\n                    rb = routes[b]\n                    if route_load(rb) + dc > capacity:\n                        continue\n                    for p in range(len(rb) + 1):\n                        pa = depot if i == 0 else ra[i - 1]\n                        na = depot if i == len(ra) - 1 else ra[i + 1]\n                        pb = depot if p == 0 else rb[p - 1]\n                        nb = depot if p == len(rb) else rb[p]\n                        delta = (dist(pa, na) - dist(pa, c) - dist(c, na)) + (dist(pb, c) + dist(c, nb) - dist(pb, nb))\n                        if delta < -1e-12:\n                            new_ra = ra[:i] + ra[i + 1:]\n                            new_rb = rb[:p] + [c] + rb[p:]\n                            routes[a] = new_ra\n                            routes[b] = two_opt(new_rb)\n                            if not routes[a]:\n                                routes.pop(a)\n                            changed = True\n                            break\n                    if changed:\n                        break\n                if changed:\n                    break\n            if changed:\n                break\n        if changed:\n            continue\n        for a in range(len(routes)):\n            ra = routes[a]\n            for b in range(a + 1, len(routes)):\n                rb = routes[b]\n                la = route_load(ra)\n                lb = route_load(rb)\n                for i, ca in enumerate(ra):\n                    da = demand(ca)\n                    for j, cb in enumerate(rb):\n                        db = demand(cb)\n                        if la - da + db > capacity or lb - db + da > capacity:\n                            continue\n                        a1 = depot if i == 0 else ra[i - 1]\n                        a2 = depot if i == len(ra) - 1 else ra[i + 1]\n                        b1 = depot if j == 0 else rb[j - 1]\n                        b2 = depot if j == len(rb) - 1 else rb[j + 1]\n                        old = dist(a1, ca) + dist(ca, a2) + dist(b1, cb) + dist(cb, b2)\n                        new = dist(a1, cb) + dist(cb, a2) + dist(b1, ca) + dist(ca, b2)\n                        if new + 1e-12 < old:\n                            ra2 = ra[:]\n                            rb2 = rb[:]\n                            ra2[i], rb2[j] = rb2[j], ra2[i]\n                            routes[a] = two_opt(ra2)\n                            routes[b] = two_opt(rb2)\n                            changed = True\n                            break\n                    if changed:\n                        break\n                if changed:\n                    break\n            if changed:\n                break\n\n    seen = set()\n    final = []\n    for r in routes:\n        rr = [c for c in r if c != depot and c not in seen]\n        for c in rr:\n            seen.add(c)\n        if rr:\n            final.append(rr)\n    for c in cust_ids:\n        if c not in seen:\n            final.append([c])\n    return final",
+    "repair_attempted": true,
+    "submitted_code": "def solve_cvrp(instance):\n    def get(obj, *keys, default=None):\n        if isinstance(obj, dict):\n            for k in keys:\n                if k in obj:\n                    return obj[k]\n        for k in keys:\n            if hasattr(obj, k):\n                return getattr(obj, k)\n        return default\n\n    depot = get(instance, \"depot\", \"depot_id\", default=0)\n    capacity = get(instance, \"capacity\", \"vehicle_capacity\", default=None)\n    customers = get(instance, \"customers\", \"nodes\", default=None)\n    demands = get(instance, \"demands\", \"demand\", default=None)\n    coords = get(instance, \"coords\", \"coordinates\", \"points\", default=None)\n    matrix = get(instance, \"distance_matrix\", \"distances\", \"matrix\", default=None)\n\n    def is_seq(x):\n        return isinstance(x, (list, tuple))\n\n    def demand(i):\n        if demands is None:\n            return 1\n        if isinstance(demands, dict):\n            return demands.get(i, 1)\n        if is_seq(demands) and isinstance(i, int) and 0 <= i < len(demands):\n            return demands[i]\n        return 1\n\n    def coord(i):\n        if coords is None:\n            return None\n        if isinstance(coords, dict):\n            return coords.get(i, None)\n        if is_seq(coords) and isinstance(i, int) and 0 <= i < len(coords):\n            return coords[i]\n        return None\n\n    cust_ids = []\n    if customers is not None:\n        cust_ids = [k for k in customers.keys()] if isinstance(customers, dict) else list(customers)\n    elif isinstance(demands, dict):\n        cust_ids = list(demands.keys())\n    elif isinstance(coords, dict):\n        cust_ids = list(coords.keys())\n    elif is_seq(matrix):\n        cust_ids = list(range(len(matrix)))\n    elif isinstance(matrix, dict) and \"size\" in matrix:\n        cust_ids = list(range(matrix[\"size\"]))\n    cust_ids = [i for i in cust_ids if i != depot]\n    cust_ids.sort()\n\n    if capacity is None:\n        total = 0\n        for i in cust_ids:\n            total += max(0, demand(i))\n        capacity = total if total > 0 else 1\n\n    dist_cache = {}\n    def euclid(a, b):\n        ca, cb = coord(a), coord(b)\n        if ca is None or cb is None:\n            return 0\n        dx = ca[0] - cb[0]\n        dy = ca[1] - cb[1]\n        return (dx * dx + dy * dy) ** 0.5\n\n    def dist(a, b):\n        k = (a, b)\n        if k in dist_cache:\n            return dist_cache[k]\n        d = None\n        if matrix is not None:\n            if is_seq(matrix) and isinstance(a, int) and isinstance(b, int):\n                d = matrix[a][b]\n            elif isinstance(matrix, dict):\n                if \"values\" in matrix and is_seq(matrix[\"values\"]) and isinstance(a, int) and isinstance(b, int):\n                    d = matrix[\"values\"][a][b]\n                elif (a, b) in matrix:\n                    d = matrix[(a, b)]\n                elif str((a, b)) in matrix:\n                    d = matrix[str((a, b))]\n        if d is None:\n            d = euclid(a, b)\n        dist_cache[k] = d\n        return d\n\n    def route_load(r):\n        s = 0\n        for c in r:\n            s += demand(c)\n        return s\n\n    def route_cost(r):\n        if not r:\n            return 0\n        c = dist(depot, r[0])\n        for i in range(len(r) - 1):\n            c += dist(r[i], r[i + 1])\n        c += dist(r[-1], depot)\n        return c\n\n    def total_cost(rs):\n        return sum(route_cost(r) for r in rs)\n\n    def angle_key(i):\n        c = coord(i)\n        d = coord(depot)\n        if c is None or d is None:\n            return (0, dist(depot, i), i)\n        x = c[0] - d[0]\n        y = c[1] - d[1]\n        q = 0 if y >= 0 and x >= 0 else 1 if y >= 0 else 2 if x < 0 else 3\n        return (q, abs(y) / (abs(x) + abs(y) + 1e-12), dist(depot, i), i)\n\n    routes = []\n    unassigned = cust_ids[:]\n    if coord(depot) is not None:\n        for i in sorted(cust_ids, key=angle_key):\n            di = demand(i)\n            placed = False\n            if routes and route_load(routes[-1]) + di <= capacity:\n                routes[-1].append(i)\n                placed = True\n            if not placed:\n                routes.append([i])\n    else:\n        unassigned.sort(key=lambda i: (-demand(i), -dist(depot, i), i))\n        while unassigned:\n            r = []\n            load = 0\n            first = None\n            feas = [i for i in unassigned if demand(i) <= capacity]\n            if feas:\n                first = max(feas, key=lambda i: (dist(depot, i), demand(i), -i))\n            else:\n                first = unassigned[0]\n            r.append(first)\n            load += demand(first)\n            unassigned.remove(first)\n            cur = first\n            while True:\n                best = None\n                best_key = None\n                for i in unassigned:\n                    di = demand(i)\n                    if load + di > capacity:\n                        continue\n                    key = (dist(cur, i), -di, i)\n                    if best_key is None or key < best_key:\n                        best_key = key\n                        best = i\n                if best is None:\n                    break\n                r.append(best)\n                load += demand(best)\n                unassigned.remove(best)\n                cur = best\n            routes.append(r)\n\n    assigned = set()\n    for r in routes:\n        for c in r:\n            assigned.add(c)\n    for c in cust_ids:\n        if c not in assigned:\n            best = None\n            best_r = None\n            best_p = None\n            for ri, r in enumerate(routes):\n                if route_load(r) + demand(c) > capacity:\n                    continue\n                for p in range(len(r) + 1):\n                    a = depot if p == 0 else r[p - 1]\n                    b = depot if p == len(r) else r[p]\n                    delta = dist(a, c) + dist(c, b) - dist(a, b)\n                    if best is None or delta < best:\n                        best = delta\n                        best_r = ri\n                        best_p = p\n            if best_r is None:\n                routes.append([c])\n            else:\n                routes[best_r].insert(best_p, c)\n\n    def two_opt(r):\n        n = len(r)\n        if n < 4:\n            return r[:]\n        best = r[:]\n        improved = True\n        while improved:\n            improved = False\n            for i in range(n - 2):\n                for j in range(i + 2, n):\n                    if i == 0 and j == n - 1:\n                        continue\n                    cand = best[:i + 1] + best[i + 1:j + 1][::-1] + best[j + 1:]\n                    if route_cost(cand) + 1e-12 < route_cost(best):\n                        best = cand\n                        improved = True\n                        break\n                if improved:\n                    break\n        return best\n\n    routes = [two_opt(r) for r in routes if r]\n    changed = True\n    while changed:\n        changed = False\n        for a in range(len(routes)):\n            ra = routes[a]\n            for i, c in enumerate(ra):\n                dc = demand(c)\n                for b in range(len(routes)):\n                    if a == b:\n                        continue\n                    rb = routes[b]\n                    if route_load(rb) + dc > capacity:\n                        continue\n                    for p in range(len(rb) + 1):\n                        pa = depot if i == 0 else ra[i - 1]\n                        na = depot if i == len(ra) - 1 else ra[i + 1]\n                        pb = depot if p == 0 else rb[p - 1]\n                        nb = depot if p == len(rb) else rb[p]\n                        delta = (dist(pa, na) - dist(pa, c) - dist(c, na)) + (dist(pb, c) + dist(c, nb) - dist(pb, nb))\n                        if delta < -1e-12:\n                            new_ra = ra[:i] + ra[i + 1:]\n                            new_rb = rb[:p] + [c] + rb[p:]\n                            routes[a] = new_ra\n                            routes[b] = two_opt(new_rb)\n                            if not routes[a]:\n                                routes.pop(a)\n                            changed = True\n                            break\n                    if changed:\n                        break\n                if changed:\n                    break\n            if changed:\n                break\n        if changed:\n            continue\n        for a in range(len(routes)):\n            ra = routes[a]\n            for b in range(a + 1, len(routes)):\n                rb = routes[b]\n                la = route_load(ra)\n                lb = route_load(rb)\n                for i, ca in enumerate(ra):\n                    da = demand(ca)\n                    for j, cb in enumerate(rb):\n                        db = demand(cb)\n                        if la - da + db > capacity or lb - db + da > capacity:\n                            continue\n                        a1 = depot if i == 0 else ra[i - 1]\n                        a2 = depot if i == len(ra) - 1 else ra[i + 1]\n                        b1 = depot if j == 0 else rb[j - 1]\n                        b2 = depot if j == len(rb) - 1 else rb[j + 1]\n                        old = dist(a1, ca) + dist(ca, a2) + dist(b1, cb) + dist(cb, b2)\n                        new = dist(a1, cb) + dist(cb, a2) + dist(b1, ca) + dist(ca, b2)\n                        if new + 1e-12 < old:\n                            ra2 = ra[:]\n                            rb2 = rb[:]\n                            ra2[i], rb2[j] = rb2[j], ra2[i]\n                            routes[a] = two_opt(ra2)\n                            routes[b] = two_opt(rb2)\n                            changed = True\n                            break\n                    if changed:\n                        break\n                if changed:\n                    break\n            if changed:\n                break\n\n    seen = set()\n    final = []\n    for r in routes:\n        rr = [c for c in r if c != depot and c not in seen]\n        for c in rr:\n            seen.add(c)\n        if rr:\n            final.append(rr)\n    for c in cust_ids:\n        if c not in seen:\n            final.append([c])\n    return final",
+    "used_fallback": true,
+    "validation_issues": [
+      "submission exceeded 260 non-empty lines",
+      "call to banned builtin getattr()"
+    ]
+  },
+  "novelty": 0.952906,
+  "train_score_for_minimization": 0.337704,
+  "train_summary": {
+    "results": [
+      {
+        "descriptors": {
+          "aspect_ratio": 1.021762,
+          "bottleneck_score": 0.814063,
+          "capacity": 206,
+          "clusteredness_score": 0.907031,
+          "coordinate_spread_norm": 0.925315,
+          "corridor_score": 0.021298,
+          "customer_count": 100,
+          "demand_cv": 0.55785,
+          "demand_max_norm": 0.485437,
+          "demand_mean_norm": 0.249854,
+          "demand_pressure": 0.999417,
+          "distance_cv": 0.498378,
+          "distance_mean_norm": 0.372124,
+          "grid_likeness": 0.11,
+          "nearest_neighbor_trap_score": 0.06403,
+          "nn_distance_cv": 0.688729,
+          "nn_distance_mean_norm": 0.034596,
+          "route_size_hint": 4.0,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 25
+        },
+        "instance_name": "X-n101-k25",
+        "runtime_ms": 116.752,
+        "validation": {
+          "cost": 41944,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.520206,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.520206,
+          "route_count": 26,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              32,
+              24,
+              46,
+              35,
+              15,
+              95,
+              73,
+              64,
+              7
+            ],
+            [
+              50,
+              79,
+              30,
+              85,
+              87
+            ],
+            [
+              5,
+              12,
+              58,
+              29
+            ],
+            [
+              21,
+              100,
+              61,
+              97,
+              34,
+              65
+            ],
+            [
+              23,
+              19,
+              11,
+              81,
+              71,
+              89
+            ],
+            [
+              80,
+              17,
+              56,
+              57
+            ],
+            [
+              8,
+              94,
+              96,
+              76
+            ],
+            [
+              31,
+              53,
+              47
+            ],
+            [
+              75,
+              93,
+              33,
+              43
+            ],
+            [
+              44,
+              40,
+              3,
+              88,
+              14
+            ],
+            [
+              22,
+              41,
+              20,
+              72
+            ],
+            [
+              18,
+              4,
+              39,
+              26
+            ],
+            [
+              59,
+              67,
+              28,
+              45
+            ],
+            [
+              77,
+              63,
+              25
+            ],
+            [
+              27,
+              91,
+              62
+            ],
+            [
+              60,
+              82,
+              78
+            ],
+            [
+              10,
+              42,
+              69
+            ],
+            [
+              38,
+              48,
+              37
+            ],
+            [
+              52,
+              83
+            ],
+            [
+              66,
+              84,
+              90,
+              68
+            ],
+            [
+              1,
+              86,
+              54
+            ],
+            [
+              51,
+              99,
+              13
+            ],
+            [
+              92,
+              9,
+              55
+            ],
+            [
+              6,
+              36,
+              49
+            ],
+            [
+              98,
+              2,
+              74
+            ],
+            [
+              16,
+              70
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.027749,
+          "bottleneck_score": 0.798788,
+          "capacity": 66,
+          "clusteredness_score": 0.899394,
+          "coordinate_spread_norm": 0.930168,
+          "corridor_score": 0.027,
+          "customer_count": 109,
+          "demand_cv": 0.245851,
+          "demand_max_norm": 0.151515,
+          "demand_mean_norm": 0.113428,
+          "demand_pressure": 0.951049,
+          "distance_cv": 0.472398,
+          "distance_mean_norm": 0.368552,
+          "grid_likeness": 0.165138,
+          "nearest_neighbor_trap_score": 0.053669,
+          "nn_distance_cv": 0.533459,
+          "nn_distance_mean_norm": 0.037079,
+          "route_size_hint": 8.384615,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n110-k13",
+        "runtime_ms": 119.0705,
+        "validation": {
+          "cost": 19292,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.288625,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.288625,
+          "route_count": 13,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              14,
+              3,
+              108,
+              91,
+              5,
+              46,
+              89
+            ],
+            [
+              49,
+              19,
+              58,
+              12,
+              41,
+              68,
+              54,
+              50,
+              52
+            ],
+            [
+              6,
+              109,
+              69,
+              18,
+              25,
+              103,
+              24,
+              84,
+              4,
+              101
+            ],
+            [
+              38,
+              105,
+              32,
+              79,
+              1,
+              90,
+              16,
+              70,
+              100
+            ],
+            [
+              71,
+              80,
+              30,
+              56,
+              55,
+              76,
+              83,
+              22,
+              61,
+              60
+            ],
+            [
+              8,
+              62,
+              40,
+              47,
+              86,
+              10,
+              63,
+              72,
+              75
+            ],
+            [
+              77,
+              11,
+              85,
+              51,
+              67,
+              45,
+              34,
+              106,
+              98
+            ],
+            [
+              39,
+              28,
+              31,
+              17,
+              27,
+              65,
+              36,
+              99
+            ],
+            [
+              2,
+              43,
+              93,
+              104,
+              64,
+              59,
+              95,
+              96,
+              35
+            ],
+            [
+              48,
+              57,
+              13,
+              23,
+              82,
+              107,
+              7
+            ],
+            [
+              102,
+              33,
+              9,
+              87,
+              26,
+              53,
+              15,
+              66,
+              42
+            ],
+            [
+              78,
+              29,
+              44,
+              81,
+              94,
+              37,
+              73,
+              21
+            ],
+            [
+              92,
+              20,
+              97,
+              74,
+              88
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.017223,
+          "bottleneck_score": 0.852396,
+          "capacity": 188,
+          "clusteredness_score": 0.926198,
+          "coordinate_spread_norm": 0.89327,
+          "corridor_score": 0.016931,
+          "customer_count": 124,
+          "demand_cv": 0.656149,
+          "demand_max_norm": 0.531915,
+          "demand_mean_norm": 0.237474,
+          "demand_pressure": 0.98156,
+          "distance_cv": 0.598362,
+          "distance_mean_norm": 0.344102,
+          "grid_likeness": 0.193548,
+          "nearest_neighbor_trap_score": 0.077781,
+          "nn_distance_cv": 1.053908,
+          "nn_distance_mean_norm": 0.025395,
+          "route_size_hint": 4.133333,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 30
+        },
+        "instance_name": "X-n125-k30",
+        "runtime_ms": 120.5293,
+        "validation": {
+          "cost": 68937,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.241236,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.241236,
+          "route_count": 32,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              26,
+              93,
+              123,
+              70
+            ],
+            [
+              56,
+              82,
+              49,
+              34
+            ],
+            [
+              24,
+              23,
+              13,
+              97,
+              74,
+              44,
+              90,
+              16,
+              84
+            ],
+            [
+              96,
+              86,
+              42,
+              78
+            ],
+            [
+              31,
+              60,
+              9,
+              2
+            ],
+            [
+              3,
+              102,
+              92
+            ],
+            [
+              111,
+              76,
+              43,
+              95,
+              58
+            ],
+            [
+              14,
+              52,
+              38,
+              15
+            ],
+            [
+              66,
+              116,
+              17,
+              50,
+              124,
+              11
+            ],
+            [
+              81,
+              28,
+              59,
+              19,
+              51,
+              54
+            ],
+            [
+              106,
+              61,
+              48,
+              64
+            ],
+            [
+              108,
+              62,
+              85,
+              117,
+              30,
+              27,
+              55,
+              36,
+              46
+            ],
+            [
+              6,
+              115,
+              88,
+              89,
+              67
+            ],
+            [
+              87,
+              114,
+              105,
+              122
+            ],
+            [
+              83,
+              21,
+              77
+            ],
+            [
+              121,
+              101,
+              20,
+              4,
+              80,
+              65,
+              22
+            ],
+            [
+              109,
+              25,
+              68,
+              47,
+              94,
+              40,
+              118,
+              79
+            ],
+            [
+              73,
+              110,
+              7,
+              104
+            ],
+            [
+              107,
+              41,
+              29,
+              72
+            ],
+            [
+              63,
+              1,
+              71
+            ],
+            [
+              112,
+              91
+            ],
+            [
+              18,
+              10
+            ],
+            [
+              119,
+              45
+            ],
+            [
+              57,
+              120
+            ],
+            [
+              100,
+              35
+            ],
+            [
+              75,
+              32
+            ],
+            [
+              69,
+              53,
+              33
+            ],
+            [
+              5,
+              37
+            ],
+            [
+              98,
+              113,
+              39
+            ],
+            [
+              8,
+              103
+            ],
+            [
+              12
+            ],
+            [
+              99
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.934498,
+          "bottleneck_score": 0.833457,
+          "capacity": 643,
+          "clusteredness_score": 0.916728,
+          "coordinate_spread_norm": 0.689034,
+          "corridor_score": 0.48307,
+          "customer_count": 133,
+          "demand_cv": 0.415926,
+          "demand_max_norm": 0.155521,
+          "demand_mean_norm": 0.096119,
+          "demand_pressure": 0.983371,
+          "distance_cv": 0.622037,
+          "distance_mean_norm": 0.276297,
+          "grid_likeness": 0.233083,
+          "nearest_neighbor_trap_score": 0.074344,
+          "nn_distance_cv": 0.892784,
+          "nn_distance_mean_norm": 0.023008,
+          "route_size_hint": 10.230769,
+          "size_bucket": "medium",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n134-k13",
+        "runtime_ms": 120.9575,
+        "validation": {
+          "cost": 17422,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.596006,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.596006,
+          "route_count": 13,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              132,
+              83,
+              109,
+              78,
+              87,
+              74,
+              50,
+              38,
+              6,
+              97,
+              66
+            ],
+            [
+              40,
+              95,
+              100,
+              128,
+              76,
+              17,
+              19,
+              130,
+              93,
+              94
+            ],
+            [
+              118,
+              91,
+              14,
+              58,
+              60,
+              34,
+              41,
+              105,
+              13
+            ],
+            [
+              122,
+              11,
+              114,
+              131,
+              52,
+              129,
+              116,
+              89,
+              5,
+              121,
+              68
+            ],
+            [
+              125,
+              127,
+              31,
+              92,
+              29,
+              85,
+              12,
+              124,
+              42
+            ],
+            [
+              115,
+              80,
+              82,
+              133,
+              33,
+              86,
+              72,
+              3,
+              103
+            ],
+            [
+              101,
+              112,
+              64,
+              48,
+              117,
+              49,
+              69,
+              1,
+              71,
+              23,
+              70
+            ],
+            [
+              26,
+              35,
+              54,
+              110,
+              123,
+              32,
+              62,
+              10,
+              77
+            ],
+            [
+              56,
+              24,
+              37,
+              88,
+              45,
+              21,
+              46,
+              99,
+              63
+            ],
+            [
+              119,
+              57,
+              61,
+              120,
+              79,
+              111,
+              104,
+              36,
+              108
+            ],
+            [
+              51,
+              16,
+              47,
+              9,
+              2,
+              39,
+              73,
+              53
+            ],
+            [
+              25,
+              113,
+              59,
+              18,
+              96,
+              90,
+              43,
+              106,
+              102,
+              98
+            ],
+            [
+              7,
+              30,
+              8,
+              107,
+              84,
+              44,
+              67,
+              126,
+              55,
+              22,
+              27,
+              4,
+              20,
+              75,
+              28,
+              65,
+              81,
+              15
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.118743,
+          "bottleneck_score": 0.893852,
+          "capacity": 12,
+          "clusteredness_score": 0.946926,
+          "coordinate_spread_norm": 0.884056,
+          "corridor_score": 0.106139,
+          "customer_count": 156,
+          "demand_cv": 0.0,
+          "demand_max_norm": 0.083333,
+          "demand_mean_norm": 0.083333,
+          "demand_pressure": 1.0,
+          "distance_cv": 0.716517,
+          "distance_mean_norm": 0.328337,
+          "grid_likeness": 0.282051,
+          "nearest_neighbor_trap_score": 0.058611,
+          "nn_distance_cv": 1.10432,
+          "nn_distance_mean_norm": 0.017426,
+          "route_size_hint": 12.0,
+          "size_bucket": "medium",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n157-k13",
+        "runtime_ms": 125.4595,
+        "validation": {
+          "cost": 18704,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.10832,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.10832,
+          "route_count": 13,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              101,
+              61,
+              17,
+              41,
+              143,
+              38,
+              122,
+              147,
+              15,
+              118,
+              75,
+              20
+            ],
+            [
+              56,
+              67,
+              4,
+              35,
+              54,
+              6,
+              115,
+              55,
+              95,
+              131,
+              133,
+              50
+            ],
+            [
+              110,
+              121,
+              3,
+              42,
+              32,
+              99,
+              93,
+              16,
+              36,
+              68,
+              103,
+              65
+            ],
+            [
+              69,
+              106,
+              73,
+              135,
+              21,
+              23,
+              31,
+              140,
+              85,
+              144,
+              53,
+              142
+            ],
+            [
+              49,
+              14,
+              120,
+              26,
+              128,
+              62,
+              97,
+              87,
+              154,
+              98,
+              123,
+              105
+            ],
+            [
+              152,
+              37,
+              116,
+              27,
+              149,
+              71,
+              148,
+              151,
+              13,
+              129,
+              91,
+              63
+            ],
+            [
+              59,
+              8,
+              150,
+              96,
+              102,
+              132,
+              111,
+              86,
+              94,
+              66,
+              28,
+              7
+            ],
+            [
+              64,
+              141,
+              43,
+              24,
+              88,
+              47,
+              70,
+              92,
+              139,
+              125,
+              1,
+              117
+            ],
+            [
+              72,
+              48,
+              33,
+              84,
+              82,
+              11,
+              77,
+              45,
+              83,
+              57,
+              5,
+              153
+            ],
+            [
+              100,
+              51,
+              90,
+              113,
+              2,
+              76,
+              136,
+              112,
+              89,
+              81,
+              109,
+              60
+            ],
+            [
+              44,
+              124,
+              130,
+              104,
+              127,
+              145,
+              80,
+              146,
+              78,
+              9,
+              40,
+              108
+            ],
+            [
+              19,
+              46,
+              137,
+              126,
+              119,
+              12,
+              22,
+              30,
+              155,
+              74,
+              79,
+              25
+            ],
+            [
+              34,
+              18,
+              138,
+              52,
+              134,
+              10,
+              39,
+              58,
+              29,
+              114,
+              156,
+              107
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.06015,
+          "bottleneck_score": 0.826299,
+          "capacity": 944,
+          "clusteredness_score": 0.913149,
+          "coordinate_spread_norm": 0.646746,
+          "corridor_score": 0.056738,
+          "customer_count": 213,
+          "demand_cv": 0.595001,
+          "demand_max_norm": 0.105932,
+          "demand_mean_norm": 0.051504,
+          "demand_pressure": 0.997304,
+          "distance_cv": 0.526673,
+          "distance_mean_norm": 0.244639,
+          "grid_likeness": 0.403756,
+          "nearest_neighbor_trap_score": 0.094318,
+          "nn_distance_cv": 1.085984,
+          "nn_distance_mean_norm": 0.021247,
+          "route_size_hint": 19.363636,
+          "size_bucket": "large",
+          "structure_class": "grid_like",
+          "vehicle_count_hint": 11
+        },
+        "instance_name": "X-n214-k11",
+        "runtime_ms": 138.0905,
+        "validation": {
+          "cost": 13807,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.271831,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.271831,
+          "route_count": 11,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              151,
+              84,
+              96,
+              137,
+              47,
+              80,
+              172,
+              193,
+              106,
+              55,
+              65,
+              71,
+              138,
+              4,
+              101,
+              72,
+              36,
+              7,
+              99,
+              124,
+              13,
+              120,
+              33,
+              189,
+              107
+            ],
+            [
+              152,
+              169,
+              143,
+              140,
+              58,
+              158,
+              123,
+              92,
+              210,
+              83,
+              64,
+              200,
+              186,
+              167,
+              135,
+              181,
+              93,
+              82,
+              78,
+              76,
+              27
+            ],
+            [
+              24,
+              208,
+              118,
+              191,
+              206,
+              49,
+              10,
+              149,
+              46,
+              166,
+              180,
+              175,
+              117,
+              53,
+              168,
+              40,
+              187,
+              163,
+              17,
+              63,
+              11,
+              139
+            ],
+            [
+              209,
+              153,
+              190,
+              161,
+              20,
+              205,
+              12,
+              121,
+              32,
+              174,
+              211,
+              202,
+              103,
+              155,
+              21,
+              131,
+              160,
+              162,
+              179,
+              23
+            ],
+            [
+              26,
+              213,
+              148,
+              102,
+              185,
+              6,
+              116,
+              31,
+              70,
+              105,
+              207,
+              35,
+              1,
+              126,
+              198,
+              111,
+              9
+            ],
+            [
+              39,
+              38,
+              73,
+              125,
+              173,
+              50,
+              201,
+              97,
+              136,
+              182,
+              115,
+              59,
+              159,
+              195,
+              56,
+              81,
+              22,
+              212,
+              29,
+              62
+            ],
+            [
+              203,
+              67,
+              154,
+              112,
+              75,
+              28,
+              100,
+              165,
+              128,
+              57,
+              134,
+              79,
+              197,
+              196,
+              3
+            ],
+            [
+              30,
+              199,
+              60,
+              142,
+              87,
+              34,
+              133,
+              98,
+              77,
+              15,
+              18,
+              110,
+              176,
+              108,
+              42,
+              146,
+              90,
+              86,
+              184,
+              145
+            ],
+            [
+              127,
+              109,
+              25,
+              52,
+              85,
+              61,
+              8,
+              170,
+              89,
+              69,
+              14,
+              66,
+              51,
+              164,
+              37,
+              114,
+              122,
+              113,
+              44,
+              194,
+              204
+            ],
+            [
+              45,
+              144,
+              132,
+              68,
+              129,
+              5,
+              41,
+              157,
+              104,
+              48,
+              91,
+              147,
+              2,
+              156,
+              177,
+              130
+            ],
+            [
+              150,
+              95,
+              16,
+              54,
+              119,
+              178,
+              171,
+              19,
+              141,
+              188,
+              88,
+              74,
+              94,
+              43,
+              192,
+              183
+            ]
+          ]
+        }
+      }
+    ],
+    "summary": {
+      "enabled": true,
+      "family_means": [
+        {
+          "count": 1,
+          "family": "grid_like",
+          "feasibility_rate": 1.0,
+          "mean_feasible_gap": 0.271831,
+          "mean_penalized_gap": 0.271831
+        },
+        {
+          "count": 5,
+          "family": "two_cluster_bottleneck",
+          "feasibility_rate": 1.0,
+          "mean_feasible_gap": 0.350879,
+          "mean_penalized_gap": 0.350879
+        }
+      ],
+      "feasibility_rate": 1.0,
+      "instance_count": 6,
+      "mean_feasible_gap": 0.337704,
+      "mean_penalized_gap": 0.337704,
+      "mean_runtime_ms": 123.47655,
+      "panel_name": "train",
+      "worst_instances": [
+        {
+          "errors": [],
+          "family": "two_cluster_bottleneck",
+          "feasible": true,
+          "instance_name": "X-n134-k13",
+          "optimality_gap": 0.596006,
+          "penalized_gap": 0.596006,
+          "runtime_ms": 120.9575
+        },
+        {
+          "errors": [],
+          "family": "two_cluster_bottleneck",
+          "feasible": true,
+          "instance_name": "X-n101-k25",
+          "optimality_gap": 0.520206,
+          "penalized_gap": 0.520206,
+          "runtime_ms": 116.752
+        },
+        {
+          "errors": [],
+          "family": "two_cluster_bottleneck",
+          "feasible": true,
+          "instance_name": "X-n110-k13",
+          "optimality_gap": 0.288625,
+          "penalized_gap": 0.288625,
+          "runtime_ms": 119.0705
+        },
+        {
+          "errors": [],
+          "family": "grid_like",
+          "feasible": true,
+          "instance_name": "X-n214-k11",
+          "optimality_gap": 0.271831,
+          "penalized_gap": 0.271831,
+          "runtime_ms": 138.0905
+        },
+        {
+          "errors": [],
+          "family": "two_cluster_bottleneck",
+          "feasible": true,
+          "instance_name": "X-n125-k30",
+          "optimality_gap": 0.241236,
+          "penalized_gap": 0.241236,
+          "runtime_ms": 120.5293
+        }
+      ]
+    },
+    "train_score_for_minimization": 0.337704
+  }
+}

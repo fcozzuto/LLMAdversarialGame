@@ -1,0 +1,278 @@
+{
+  "archive": [
+    {
+      "accepted": true,
+      "candidate_index": 1,
+      "failure_examples": [
+        {
+          "errors": [
+            "missing 213 customers"
+          ],
+          "family": "grid_like",
+          "feasible": false,
+          "instance_name": "X-n214-k11",
+          "penalized_gap": 12.65
+        },
+        {
+          "errors": [
+            "missing 156 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n157-k13",
+          "penalized_gap": 9.8
+        },
+        {
+          "errors": [
+            "missing 133 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n134-k13",
+          "penalized_gap": 8.65
+        }
+      ],
+      "failure_note": "mean_train_penalized_gap=8.958333",
+      "novelty": 0.0,
+      "train_score_for_minimization": 8.958333
+    }
+  ],
+  "candidate_count": 1,
+  "duration_hhmm": "00:00",
+  "duration_seconds": 11.463,
+  "extra_metrics": {
+    "adaptation_efficiency": null,
+    "final_transfer_gap": null,
+    "final_tsplib_gap": null,
+    "heldout_feasibility_rate": 0.0,
+    "heldout_feasible_gap": null,
+    "heldout_penalized_gap": 13.06,
+    "heldout_runtime_ms": 133.1598,
+    "primary_holdout_score_margin": null,
+    "primary_holdout_win_rate": null
+  },
+  "final_code_path": "runs\\cross_family_model_x_evolution_factorial\\20260524_172130\\cell_artifacts\\cvrp_phase9_real_world\\medium_model\\single_shot\\seed_31000\\final_code.py",
+  "final_evaluation": {
+    "payload": {
+      "condition_name": "factorial_cvrp_candidate",
+      "epochs": [],
+      "execution_mode": "direct_factorial_candidate",
+      "final_code": "def solve_cvrp(instance):\n    # instance is expected to be a dict-like with:\n    # - 'customers': a list of dicts with keys 'id', 'demand'\n    # - 'depot': an id or index (not to be included in routes)\n    # - 'capacity': vehicle capacity\n    # The function returns a list of routes, each route is a list of customer ids (no depot),\n    # visiting every customer exactly once, and with total demand per route <= capacity.\n    #\n    # Deterministic constructive + repair + local-search style:\n    # 1) Sort customers by non-increasing demand (largest first) for stable, interpretable batching.\n    # 2) Build routes by adding customers greedily until capacity would be exceeded, then start new route.\n    # 3) Repair: if any route is empty (shouldn't happen) skip; ensure all customers covered.\n    # 4) Local adjustment: try to swap a customer from a loaded route to an earlier route if it keeps feasibility.\n    #\n    # This is a single-shot, deterministic solver with no external data dependencies.\n\n    # Extract data with safe fallbacks\n    customers = instance.get('customers', [])\n    depot_id = instance.get('depot', None)\n    capacity = instance.get('capacity', None)\n\n    # Quick validation / defaults\n    if capacity is None:\n        # If capacity missing, assume 1 to avoid division by zero; but also ensure integer\n        capacity = 1\n\n    # Build a simple mapping of id -> demand\n    custs = []\n    for c in customers:\n        cid = c.get('id', None)\n        demand = c.get('demand', 0)\n        custs.append({'id': cid, 'demand': int(demand)})\n\n    # If there are no customers, return empty list\n    if not custs:\n        return []\n\n    # Sort customers by non-increasing demand for deterministic packing\n    custs.sort(key=lambda x: (-x['demand'], x['id']))\n\n    # Greedy constructive: pack into routes\n    routes = []\n    current_route = []\n    current_load = 0\n\n    for c in custs:\n        d = c['demand']\n        if d > capacity:\n            # If a single demand exceeds capacity, we cannot satisfy constraints deterministically.\n            # As a fallback, place it alone in its own route but still violate capacity; however, to\n            # respect the constraint, return an empty plan indicating infeasibility.\n            # We'll instead split into a minimal feasible approach by assigning to its own route if possible.\n            # Here we skip adding this customer to avoid infinite loop; this situation should be prevented by input.\n            continue\n\n        if current_load + d <= capacity:\n            current_route.append(c['id'])\n            current_load += d\n        else:\n            # close current route and start new\n            if current_route:\n                routes.append(current_route)\n            current_route = [c['id']]\n            current_load = d\n\n    if current_route:\n        routes.append(current_route)\n\n    # Repair step: ensure all customers appear exactly once.\n    # Build a set of assigned ids\n    assigned = []\n    for r in routes:\n        assigned.extend(r)\n    assigned_set = set(assigned)\n\n    all_ids = set(c['id'] for c in custs)\n    missing = list(all_ids - assigned_set)\n\n    # If there are missing customers (due to capacity issues with impossible large demand), append them as separate routes\n    # (best effort)\n    for mid in missing:\n        routes.append([mid])\n\n    # Local adjustment: try to move a customer from a heavier route to an earlier one if feasible\n    # For deterministic behavior, perform a single pass of simple checks.\n    # Build a quick map id -> demand\n    id_to_demand = {c['id']: c['demand'] for c in custs}\n\n    # Recompute loads for safety\n    def route_load(route):\n        return sum(id_to_demand[cid] for cid in route)\n\n    improved = True\n    while improved:\n        improved = False\n        # Attempt to move any customer from route i to route i-1 if feasible\n        for i in range(1, len(routes)):\n            if not routes[i]:\n                continue\n            cid_to_move = routes[i][-1]  # take last as a heuristic\n            d = id_to_demand[cid_to_move]\n            load_prev = route_load(routes[i-1])\n            if load_prev + d <= capacity:\n                # move\n                routes[i].pop()\n                routes[i-1].append(cid_to_move)\n                improved = True\n        if improved:\n            # clean up empty routes\n            routes = [r for r in routes if r]\n\n    # Final guard: ensure no route exceeds capacity and all ids appear\n    final_routes = []\n    seen = set()\n    valid = True\n    for r in routes:\n        total = 0\n        for cid in r:\n            total += id_to_demand[cid]\n            seen.add(cid)\n        if total > capacity:\n            valid = False\n        final_routes.append(list(r))\n\n    # If somehow some customers are missing due to oddities, attempt a simple fix by placing missing into new routes\n    missing_all = all_ids - seen\n    if missing_all:\n        for mid in missing_all:\n            final_routes.append([mid])\n\n    return final_routes",
+      "final_evaluation": {
+        "holdout": {
+          "enabled": true,
+          "family_means": [
+            {
+              "count": 2,
+              "family": "grid_like",
+              "feasibility_rate": 0.0,
+              "mean_feasible_gap": null,
+              "mean_penalized_gap": 15.0
+            },
+            {
+              "count": 3,
+              "family": "two_cluster_bottleneck",
+              "feasibility_rate": 0.0,
+              "mean_feasible_gap": null,
+              "mean_penalized_gap": 11.766667
+            }
+          ],
+          "feasibility_rate": 0.0,
+          "instance_count": 5,
+          "mean_feasible_gap": null,
+          "mean_penalized_gap": 13.06,
+          "mean_runtime_ms": 133.1598,
+          "panel_name": "holdout",
+          "worst_instances": [
+            {
+              "errors": [
+                "missing 274 customers"
+              ],
+              "family": "grid_like",
+              "feasible": false,
+              "instance_name": "X-n275-k28",
+              "optimality_gap": null,
+              "penalized_gap": 15.7,
+              "runtime_ms": 146.4492
+            },
+            {
+              "errors": [
+                "missing 246 customers"
+              ],
+              "family": "grid_like",
+              "feasible": false,
+              "instance_name": "X-n247-k50",
+              "optimality_gap": null,
+              "penalized_gap": 14.3,
+              "runtime_ms": 136.9411
+            },
+            {
+              "errors": [
+                "missing 222 customers"
+              ],
+              "family": "two_cluster_bottleneck",
+              "feasible": false,
+              "instance_name": "X-n223-k34",
+              "optimality_gap": null,
+              "penalized_gap": 13.1,
+              "runtime_ms": 131.8394
+            },
+            {
+              "errors": [
+                "missing 189 customers"
+              ],
+              "family": "two_cluster_bottleneck",
+              "feasible": false,
+              "instance_name": "X-n190-k8",
+              "optimality_gap": null,
+              "penalized_gap": 11.45,
+              "runtime_ms": 126.6983
+            },
+            {
+              "errors": [
+                "missing 175 customers"
+              ],
+              "family": "two_cluster_bottleneck",
+              "feasible": false,
+              "instance_name": "X-n176-k26",
+              "optimality_gap": null,
+              "penalized_gap": 10.75,
+              "runtime_ms": 123.871
+            }
+          ]
+        },
+        "train": {
+          "enabled": true,
+          "family_means": [
+            {
+              "count": 1,
+              "family": "grid_like",
+              "feasibility_rate": 0.0,
+              "mean_feasible_gap": null,
+              "mean_penalized_gap": 12.65
+            },
+            {
+              "count": 5,
+              "family": "two_cluster_bottleneck",
+              "feasibility_rate": 0.0,
+              "mean_feasible_gap": null,
+              "mean_penalized_gap": 8.22
+            }
+          ],
+          "feasibility_rate": 0.0,
+          "instance_count": 6,
+          "mean_feasible_gap": null,
+          "mean_penalized_gap": 8.958333,
+          "mean_runtime_ms": 125.123483,
+          "panel_name": "train",
+          "worst_instances": [
+            {
+              "errors": [
+                "missing 213 customers"
+              ],
+              "family": "grid_like",
+              "feasible": false,
+              "instance_name": "X-n214-k11",
+              "optimality_gap": null,
+              "penalized_gap": 12.65,
+              "runtime_ms": 131.0761
+            },
+            {
+              "errors": [
+                "missing 156 customers"
+              ],
+              "family": "two_cluster_bottleneck",
+              "feasible": false,
+              "instance_name": "X-n157-k13",
+              "optimality_gap": null,
+              "penalized_gap": 9.8,
+              "runtime_ms": 123.3968
+            },
+            {
+              "errors": [
+                "missing 133 customers"
+              ],
+              "family": "two_cluster_bottleneck",
+              "feasible": false,
+              "instance_name": "X-n134-k13",
+              "optimality_gap": null,
+              "penalized_gap": 8.65,
+              "runtime_ms": 121.5911
+            },
+            {
+              "errors": [
+                "missing 124 customers"
+              ],
+              "family": "two_cluster_bottleneck",
+              "feasible": false,
+              "instance_name": "X-n125-k30",
+              "optimality_gap": null,
+              "penalized_gap": 8.2,
+              "runtime_ms": 142.5458
+            },
+            {
+              "errors": [
+                "missing 109 customers"
+              ],
+              "family": "two_cluster_bottleneck",
+              "feasible": false,
+              "instance_name": "X-n110-k13",
+              "optimality_gap": null,
+              "penalized_gap": 7.45,
+              "runtime_ms": 115.0183
+            }
+          ]
+        }
+      },
+      "skipped": false
+    },
+    "summary": {
+      "accepted_epoch_count": 0,
+      "condition_name": "factorial_cvrp_candidate",
+      "epoch_count": 0,
+      "execution_mode": "direct_factorial_candidate",
+      "heldout_feasibility_rate": 0.0,
+      "heldout_feasible_gap": 0.0,
+      "heldout_penalized_gap": 13.06,
+      "heldout_runtime_ms": 133.1598,
+      "mean_code_novelty": 0.0,
+      "mean_complexity": 0.0,
+      "robustness_dispersion": 1.616667,
+      "skip_reason": null,
+      "skipped": false,
+      "train_feasibility_rate": 0.0,
+      "train_feasible_gap": 0.0,
+      "train_penalized_gap": 8.958333
+    }
+  },
+  "row": {
+    "acceptance_rate": 1.0,
+    "accepted_epochs": 1,
+    "adaptation_efficiency": null,
+    "artifact_path": "runs\\cross_family_model_x_evolution_factorial\\20260524_172130\\cell_artifacts\\cvrp_phase9_real_world\\medium_model\\single_shot\\seed_31000",
+    "benchmark_score_source": "ordinal_proxy",
+    "benchmark_strength_score": 2.0,
+    "candidate_budget": 1,
+    "epochs_budget": 1,
+    "evolution_technique": "single_shot",
+    "feasibility_rate": 0.0,
+    "final_transfer_gap": null,
+    "final_tsplib_gap": null,
+    "generation_success_rate": 1.0,
+    "heldout_feasibility_rate": 0.0,
+    "heldout_feasible_gap": null,
+    "heldout_penalized_gap": 13.06,
+    "heldout_runtime_ms": 133.1598,
+    "mean_code_novelty": 0.0,
+    "model_name": "gpt-5-nano",
+    "model_tier": "medium_model",
+    "performance_raw": -13.06,
+    "performance_z": "",
+    "primary_holdout_score_margin": null,
+    "primary_holdout_win_rate": null,
+    "runtime_ms": 133.1598,
+    "secondary_performance_raw": null,
+    "seed": 31000,
+    "task_family": "cvrp_phase9_real_world"
+  }
+}

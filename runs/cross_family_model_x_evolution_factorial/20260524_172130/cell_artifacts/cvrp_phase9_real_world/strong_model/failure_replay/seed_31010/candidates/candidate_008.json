@@ -1,0 +1,1388 @@
+{
+  "accepted": false,
+  "candidate_index": 8,
+  "generation": {
+    "code": "def solve_cvrp(instance):\n    depot = instance[\"depot_index\"]\n    customers = list(instance[\"customer_ids\"])\n    demands = instance[\"demands\"]\n    capacity = instance[\"capacity\"]\n    dist = instance[\"distance_matrix\"]\n\n    n_customers = len(customers)\n    if n_customers == 0:\n        return []\n\n    # --- Helpers ---\n    def route_load(route):\n        s = 0\n        for c in route:\n            s += demands[c]\n        return s\n\n    def route_cost(route):\n        if not route:\n            return 0\n        c = dist[depot][route[0]] + dist[route[-1]][depot]\n        for i in range(len(route) - 1):\n            c += dist[route[i]][route[i + 1]]\n        return c\n\n    def insertion_delta(route, pos, node):\n        prev = depot if pos == 0 else route[pos - 1]\n        nxt = depot if pos == len(route) else route[pos]\n        return dist[prev][node] + dist[node][nxt] - dist[prev][nxt]\n\n    def best_insertion_in_route(route, node):\n        best_pos = 0\n        best_delta = None\n        for pos in range(len(route) + 1):\n            dlt = insertion_delta(route, pos, node)\n            if best_delta is None or dlt < best_delta or (dlt == best_delta and pos < best_pos):\n                best_delta = dlt\n                best_pos = pos\n        return best_pos, best_delta\n\n    def route_nearest_to_depot(nodes):\n        best = nodes[0]\n        best_d = dist[depot][best]\n        for c in nodes[1:]:\n            d = dist[depot][c]\n            if d < best_d or (d == best_d and c < best):\n                best = c\n                best_d = d\n        return best\n\n    # --- Initial constructive solution: route-growing by cheapest feasible insertion ---\n    unassigned = {}\n    for c in customers:\n        unassigned[c] = 1\n\n    routes = []\n    # Sort customers by demand descending, then depot distance descending, deterministic.\n    order = sorted(customers, key=lambda c: (-demands[c], -dist[depot][c], c))\n\n    while unassigned:\n        # Choose an anchor for a new route.\n        anchor = None\n        for c in order:\n            if c in unassigned:\n                anchor = c\n                break\n        if anchor is None:\n            break\n\n        route = [anchor]\n        del unassigned[anchor]\n        load = demands[anchor]\n\n        # Expand the route by the best feasible insertion among remaining customers.\n        while True:\n            best_node = None\n            best_pos = 0\n            best_delta = None\n\n            # Candidate screening: prioritize customers near current route ends or depot.\n            for c in order:\n                if c not in unassigned:\n                    continue\n                d = demands[c]\n                if load + d > capacity:\n                    continue\n\n                pos, dlt = best_insertion_in_route(route, c)\n                if best_delta is None or dlt < best_delta or (dlt == best_delta and c < best_node):\n                    best_node = c\n                    best_pos = pos\n                    best_delta = dlt\n\n            if best_node is None:\n                break\n\n            route.insert(best_pos, best_node)\n            load += demands[best_node]\n            del unassigned[best_node]\n\n        routes.append(route)\n\n    # --- Repair: ensure every customer appears exactly once ---\n    seen = {}\n    for r in routes:\n        for c in r:\n            seen[c] = seen.get(c, 0) + 1\n\n    missing = []\n    duplicates = []\n    for c in customers:\n        cnt = seen.get(c, 0)\n        if cnt == 0:\n            missing.append(c)\n        elif cnt > 1:\n            duplicates.append(c)\n\n    if duplicates:\n        # Remove extra copies while preserving one occurrence.\n        keep = {}\n        new_routes = []\n        for r in routes:\n            nr = []\n            for c in r:\n                if keep.get(c, 0) == 0:\n                    nr.append(c)\n                    keep[c] = 1\n            if nr:\n                new_routes.append(nr)\n        routes = new_routes\n\n    # Insert missing customers greedily.\n    for c in missing:\n        best_r = -1\n        best_pos = 0\n        best_delta = None\n\n        for ridx in range(len(routes)):\n            r = routes[ridx]\n            load = route_load(r)\n            if load + demands[c] > capacity:\n                continue\n            pos, dlt = best_insertion_in_route(r, c)\n            if best_delta is None or dlt < best_delta or (dlt == best_delta and ridx < best_r):\n                best_r = ridx\n                best_pos = pos\n                best_delta = dlt\n\n        if best_r == -1:\n            routes.append([c])\n        else:\n            routes[best_r].insert(best_pos, c)\n\n    # If still infeasible due to any overfull route, split greedily.\n    repaired = []\n    for r in routes:\n        if route_load(r) <= capacity:\n            repaired.append(r)\n            continue\n        current = []\n        current_load = 0\n        for c in r:\n            d = demands[c]\n            if current_load + d <= capacity:\n                current.append(c)\n                current_load += d\n            else:\n                if current:\n                    repaired.append(current)\n                current = [c]\n                current_load = d\n        if current:\n            repaired.append(current)\n    routes = repaired\n\n    # --- Local search: intra-route 2-opt ---\n    for ridx in range(len(routes)):\n        r = routes[ridx]\n        if len(r) < 4:\n            continue\n        improved = True\n        while improved:\n            improved = False\n            m = len(r)\n            for a in range(m - 2):\n                a_prev = depot if a == 0 else r[a - 1]\n                a_node = r[a]\n                for b in range(a + 2, m):\n                    b_node = r[b - 1]\n                    b_next = depot if b == m else r[b]\n                    old = dist[a_prev][a_node] + dist[b_node][b_next]\n                    new = dist[a_prev][b_node] + dist[a_node][b_next]\n                    if new < old:\n                        r[a:b] = r[a:b][::-1]\n                        improved = True\n                        break\n                if improved:\n                    break\n        routes[ridx] = r\n\n    # --- Local search: relocate customers between routes ---\n    improved = True\n    while improved:\n        improved = False\n        best_move = None\n        best_gain = 0\n\n        for i in range(len(routes)):\n            ri = routes[i]\n            if not ri:\n                continue\n            li = route_load(ri)\n            for p in range(len(ri)):\n                node = ri[p]\n                remove_prev = depot if p == 0 else ri[p - 1]\n                remove_next = depot if p == len(ri) - 1 else ri[p + 1]\n                remove_cost = dist[remove_prev][node] + dist[node][remove_next] - dist[remove_prev][remove_next]\n\n                for j in range(len(routes)):\n                    if i == j:\n                        continue\n                    rj = routes[j]\n                    if route_load(rj) + demands[node] > capacity:\n                        continue\n                    # Best insertion into rj\n                    pos, ins_cost = best_insertion_in_route(rj, node)\n                    gain = remove_cost - ins_cost\n                    if gain > best_gain:\n                        best_gain = gain\n                        best_move = (i, p, j, pos, node)\n\n        if best_move is not None and best_gain > 0:\n            i, p, j, pos, node = best_move\n            if i < len(routes) and j < len(routes):\n                if p < len(routes[i]) and routes[i][p] == node:\n                    routes[i].pop(p)\n                    routes[j].insert(pos, node)\n                    if not routes[i]:\n                        routes.pop(i)\n                    improved = True\n\n    # --- Final cleanup: remove empties, verify coverage, patch if needed ---\n    final_routes = []\n    seen = {}\n    for r in routes:\n        if not r:\n            continue\n        final_routes.append(r)\n        for c in r:\n            seen[c] = seen.get(c, 0) + 1\n\n    missing = []\n    for c in customers:\n        if seen.get(c, 0) == 0:\n            missing.append(c)\n\n    for c in missing:\n        best_r = -1\n        best_pos = 0\n        best_delta = None\n        for ridx in range(len(final_routes)):\n            r = final_routes[ridx]\n            if route_load(r) + demands[c] > capacity:\n                continue\n            pos, dlt = best_insertion_in_route(r, c)\n            if best_delta is None or dlt < best_delta or (dlt == best_delta and ridx < best_r):\n                best_r = ridx\n                best_pos = pos\n                best_delta = dlt\n        if best_r == -1:\n            final_routes.append([c])\n        else:\n            final_routes[best_r].insert(best_pos, c)\n\n    return final_routes",
+    "error": null,
+    "model_name": "gpt-5.4-mini",
+    "prompt": "Return only raw Python source code.\nDefine exactly this function:\ndef solve_cvrp(instance):\n    return routes\n\nRules:\n- No imports.\n- Return a list of routes; each route is a list of customer ids and must not include the depot.\n- Visit every customer exactly once and respect vehicle capacity.\n- Build deterministic, interpretable CVRP solver logic using constructive, repair, and local-search ideas.\n- Do not rely on held-out data.\n\nTechnique: failure_replay. Candidate 8.\nFailure replay examples prioritized by poor train validation:\n[\n  {\n    \"accepted\": false,\n    \"candidate_index\": 2,\n    \"failure_examples\": [\n      {\n        \"errors\": [\n          \"NameError: name 'isinstance' is not defined\",\n          \"missing 213 customers\"\n        ],\n        \"family\": \"grid_like\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n214-k11\",\n        \"penalized_gap\": 12.65\n      },\n      {\n        \"errors\": [\n          \"NameError: name 'isinstance' is not defined\",\n          \"missing 156 customers\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n157-k13\",\n        \"penalized_gap\": 9.8\n      },\n      {\n        \"errors\": [\n          \"NameError: name 'isinstance' is not defined\",\n          \"missing 133 customers\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n134-k13\",\n        \"penalized_gap\": 8.65\n      }\n    ],\n    \"failure_note\": \"mean_train_penalized_gap=8.958333\",\n    \"novelty\": 0.927419,\n    \"train_score_for_minimization\": 8.958333\n  },\n  {\n    \"accepted\": false,\n    \"candidate_index\": 4,\n    \"failure_examples\": [\n      {\n        \"errors\": [\n          \"solver did not return a list of routes\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n101-k25\",\n        \"penalized_gap\": 3.0\n      },\n      {\n        \"errors\": [\n          \"solver did not return a list of routes\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n110-k13\",\n        \"penalized_gap\": 3.0\n      },\n      {\n        \"errors\": [\n          \"solver did not return a list of routes\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n125-k30\",\n        \"penalized_gap\": 3.0\n      }\n    ],\n    \"failure_note\": \"mean_train_penalized_gap=3.000000\",\n    \"novelty\": 0.59617,\n    \"train_score_for_minimization\": 3.0\n  },\n  {\n    \"accepted\": false,\n    \"candidate_index\": 6,\n    \"failure_examples\": [\n      {\n        \"errors\": [\n          \"solver did not return a list of routes\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n101-k25\",\n        \"penalized_gap\": 3.0\n      },\n      {\n        \"errors\": [\n          \"solver did not return a list of routes\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n110-k13\",\n        \"penalized_gap\": 3.0\n      },\n      {\n        \"errors\": [\n          \"solver did not return a list of routes\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n125-k30\",\n        \"penalized_gap\": 3.0\n      }\n    ],\n    \"failure_note\": \"mean_train_penalized_gap=3.000000\",\n    \"novelty\": 0.562833,\n    \"train_score_for_minimization\": 3.0\n  }\n]\n\nCurrent accepted incumbent code to improve:\ndef solve_cvrp(instance):\n    depot = instance[\"depot_index\"]\n    customers = list(instance[\"customer_ids\"])\n    demands = instance[\"demands\"]\n    capacity = instance[\"capacity\"]\n    dist = instance[\"distance_matrix\"]\n\n    # Initial solution: singleton routes\n    routes = [[c] for c in customers]\n    loads = {c: demands[c] for c in customers}\n    route_of = {c: i for i, c in enumerate(customers)}\n\n    def route_load(route):\n        s = 0\n        for n in route:\n            s += demands[n]\n        return s\n\n    def savings(i, j):\n        return dist[depot][i] + dist[depot][j] - dist[i][j]\n\n    # Clarke-Wright style merges on route endpoints\n    pairs = []\n    n = len(customers)\n    for a in range(n):\n        i = customers[a]\n        for b in range(a + 1, n):\n            j = customers[b]\n            pairs.append((savings(i, j), i, j))\n    pairs.sort(key=lambda x: (-x[0], x[1], x[2]))\n\n    active = [True] * len(routes)\n\n    def find_route_of(node):\n        return route_of.get(node, -1)\n\n    for _, i, j in pairs:\n        ri = find_route_of(i)\n        rj = find_route_of(j)\n        if ri < 0 or rj < 0 or ri == rj:\n            continue\n        if not active[ri] or not active[rj]:\n            continue\n        A = routes[ri]\n        B = routes[rj]\n        if not A or not B:\n            continue\n        la = 0\n        lb = 0\n        for x in A:\n            la += demands[x]\n        for x in B:\n            lb += demands[x]\n        if la + lb > capacity:\n            continue\n\n        merged = None\n        # Four endpoint orientation cases\n        if A[-1] == i and B[0] == j:\n            merged = A + B\n        elif A[0] == i and B[-1] == j:\n            merged = B + A\n        elif A[0] == i and B[0] == j:\n            merged = A[::-1] + B\n        elif A[-1] == i and B[-1] == j:\n            merged = A + B[::-1]\n\n        if merged is None:\n            continue\n\n        routes[ri] = merged\n        active[rj] = False\n        for x in merged:\n            route_of[x] = ri\n\n    routes = [r for k, r in enumerate(routes) if active[k]]\n\n    # If any customer somehow missing, repair by inserting greedily.\n    seen = {}\n    for r in routes:\n        for c in r:\n            seen[c] = 1\n    missing = []\n    for c in customers:\n        if c not in seen:\n            missing.append(c)\n    for c in missing:\n        best_r = -1\n        best_pos = 0\n        best_cost = None\n        for idx in range(len(routes)):\n            load = 0\n            for x in routes[idx]:\n                load += demands[x]\n            if load + demands[c] > capacity:\n                continue\n            r = routes[idx]\n            if not r:\n                cost = dist[depot][c] * 2\n                if best_cost is None or cost < best_cost:\n                    best_cost = cost\n                    best_r = idx\n                    best_pos = 0\n                continue\n            for pos in range(len(r) + 1):\n                prev = depot if pos == 0 else r[pos - 1]\n                nxt = depot if pos == len(r) else r[pos]\n                cost = dist[prev][c] + dist[c][nxt] - dist[prev][nxt]\n                if best_cost is None or cost < best_cost:\n                    best_cost = cost\n                    best_r = idx\n                    best_pos = pos\n        if best_r == -1:\n            routes.append([c])\n        else:\n            routes[best_r].insert(best_pos, c)\n\n    # Intra-route 2-opt improvement\n    for idx in range(len(routes)):\n        r = routes[idx]\n        if len(r) < 4:\n            continue\n        improved = True\n        while improved:\n            improved = False\n            m = len(r)\n            for a in range(m - 2):\n                a_prev = depot if a == 0 else r[a - 1]\n                a_node = r[a]\n                for b in range(a + 2, m):\n                    b_node = r[b - 1]\n                    b_next = depot if b == m else r[b]\n                    old = dist[a_prev][a_node] + dist[b_node][b_next]\n                    new = dist[a_prev][b_node] + dist[a_node][b_next]\n                    if new + 1e-12 < old:\n                        r[a:b] = r[a:b][::-1]\n                        improved = True\n                        break\n                if improved:\n                    break\n        routes[idx] = r\n\n    # Final normalization: remove empty routes if any\n    final_routes = []\n    for r in routes:\n        if r:\n            final_routes.append(r)\n    return final_routes",
+    "provider": "openai",
+    "raw_text": "def solve_cvrp(instance):\n    depot = instance[\"depot_index\"]\n    customers = list(instance[\"customer_ids\"])\n    demands = instance[\"demands\"]\n    capacity = instance[\"capacity\"]\n    dist = instance[\"distance_matrix\"]\n\n    n_customers = len(customers)\n    if n_customers == 0:\n        return []\n\n    # --- Helpers ---\n    def route_load(route):\n        s = 0\n        for c in route:\n            s += demands[c]\n        return s\n\n    def route_cost(route):\n        if not route:\n            return 0\n        c = dist[depot][route[0]] + dist[route[-1]][depot]\n        for i in range(len(route) - 1):\n            c += dist[route[i]][route[i + 1]]\n        return c\n\n    def insertion_delta(route, pos, node):\n        prev = depot if pos == 0 else route[pos - 1]\n        nxt = depot if pos == len(route) else route[pos]\n        return dist[prev][node] + dist[node][nxt] - dist[prev][nxt]\n\n    def best_insertion_in_route(route, node):\n        best_pos = 0\n        best_delta = None\n        for pos in range(len(route) + 1):\n            dlt = insertion_delta(route, pos, node)\n            if best_delta is None or dlt < best_delta or (dlt == best_delta and pos < best_pos):\n                best_delta = dlt\n                best_pos = pos\n        return best_pos, best_delta\n\n    def route_nearest_to_depot(nodes):\n        best = nodes[0]\n        best_d = dist[depot][best]\n        for c in nodes[1:]:\n            d = dist[depot][c]\n            if d < best_d or (d == best_d and c < best):\n                best = c\n                best_d = d\n        return best\n\n    # --- Initial constructive solution: route-growing by cheapest feasible insertion ---\n    unassigned = {}\n    for c in customers:\n        unassigned[c] = 1\n\n    routes = []\n    # Sort customers by demand descending, then depot distance descending, deterministic.\n    order = sorted(customers, key=lambda c: (-demands[c], -dist[depot][c], c))\n\n    while unassigned:\n        # Choose an anchor for a new route.\n        anchor = None\n        for c in order:\n            if c in unassigned:\n                anchor = c\n                break\n        if anchor is None:\n            break\n\n        route = [anchor]\n        del unassigned[anchor]\n        load = demands[anchor]\n\n        # Expand the route by the best feasible insertion among remaining customers.\n        while True:\n            best_node = None\n            best_pos = 0\n            best_delta = None\n\n            # Candidate screening: prioritize customers near current route ends or depot.\n            for c in order:\n                if c not in unassigned:\n                    continue\n                d = demands[c]\n                if load + d > capacity:\n                    continue\n\n                pos, dlt = best_insertion_in_route(route, c)\n                if best_delta is None or dlt < best_delta or (dlt == best_delta and c < best_node):\n                    best_node = c\n                    best_pos = pos\n                    best_delta = dlt\n\n            if best_node is None:\n                break\n\n            route.insert(best_pos, best_node)\n            load += demands[best_node]\n            del unassigned[best_node]\n\n        routes.append(route)\n\n    # --- Repair: ensure every customer appears exactly once ---\n    seen = {}\n    for r in routes:\n        for c in r:\n            seen[c] = seen.get(c, 0) + 1\n\n    missing = []\n    duplicates = []\n    for c in customers:\n        cnt = seen.get(c, 0)\n        if cnt == 0:\n            missing.append(c)\n        elif cnt > 1:\n            duplicates.append(c)\n\n    if duplicates:\n        # Remove extra copies while preserving one occurrence.\n        keep = {}\n        new_routes = []\n        for r in routes:\n            nr = []\n            for c in r:\n                if keep.get(c, 0) == 0:\n                    nr.append(c)\n                    keep[c] = 1\n            if nr:\n                new_routes.append(nr)\n        routes = new_routes\n\n    # Insert missing customers greedily.\n    for c in missing:\n        best_r = -1\n        best_pos = 0\n        best_delta = None\n\n        for ridx in range(len(routes)):\n            r = routes[ridx]\n            load = route_load(r)\n            if load + demands[c] > capacity:\n                continue\n            pos, dlt = best_insertion_in_route(r, c)\n            if best_delta is None or dlt < best_delta or (dlt == best_delta and ridx < best_r):\n                best_r = ridx\n                best_pos = pos\n                best_delta = dlt\n\n        if best_r == -1:\n            routes.append([c])\n        else:\n            routes[best_r].insert(best_pos, c)\n\n    # If still infeasible due to any overfull route, split greedily.\n    repaired = []\n    for r in routes:\n        if route_load(r) <= capacity:\n            repaired.append(r)\n            continue\n        current = []\n        current_load = 0\n        for c in r:\n            d = demands[c]\n            if current_load + d <= capacity:\n                current.append(c)\n                current_load += d\n            else:\n                if current:\n                    repaired.append(current)\n                current = [c]\n                current_load = d\n        if current:\n            repaired.append(current)\n    routes = repaired\n\n    # --- Local search: intra-route 2-opt ---\n    for ridx in range(len(routes)):\n        r = routes[ridx]\n        if len(r) < 4:\n            continue\n        improved = True\n        while improved:\n            improved = False\n            m = len(r)\n            for a in range(m - 2):\n                a_prev = depot if a == 0 else r[a - 1]\n                a_node = r[a]\n                for b in range(a + 2, m):\n                    b_node = r[b - 1]\n                    b_next = depot if b == m else r[b]\n                    old = dist[a_prev][a_node] + dist[b_node][b_next]\n                    new = dist[a_prev][b_node] + dist[a_node][b_next]\n                    if new < old:\n                        r[a:b] = r[a:b][::-1]\n                        improved = True\n                        break\n                if improved:\n                    break\n        routes[ridx] = r\n\n    # --- Local search: relocate customers between routes ---\n    improved = True\n    while improved:\n        improved = False\n        best_move = None\n        best_gain = 0\n\n        for i in range(len(routes)):\n            ri = routes[i]\n            if not ri:\n                continue\n            li = route_load(ri)\n            for p in range(len(ri)):\n                node = ri[p]\n                remove_prev = depot if p == 0 else ri[p - 1]\n                remove_next = depot if p == len(ri) - 1 else ri[p + 1]\n                remove_cost = dist[remove_prev][node] + dist[node][remove_next] - dist[remove_prev][remove_next]\n\n                for j in range(len(routes)):\n                    if i == j:\n                        continue\n                    rj = routes[j]\n                    if route_load(rj) + demands[node] > capacity:\n                        continue\n                    # Best insertion into rj\n                    pos, ins_cost = best_insertion_in_route(rj, node)\n                    gain = remove_cost - ins_cost\n                    if gain > best_gain:\n                        best_gain = gain\n                        best_move = (i, p, j, pos, node)\n\n        if best_move is not None and best_gain > 0:\n            i, p, j, pos, node = best_move\n            if i < len(routes) and j < len(routes):\n                if p < len(routes[i]) and routes[i][p] == node:\n                    routes[i].pop(p)\n                    routes[j].insert(pos, node)\n                    if not routes[i]:\n                        routes.pop(i)\n                    improved = True\n\n    # --- Final cleanup: remove empties, verify coverage, patch if needed ---\n    final_routes = []\n    seen = {}\n    for r in routes:\n        if not r:\n            continue\n        final_routes.append(r)\n        for c in r:\n            seen[c] = seen.get(c, 0) + 1\n\n    missing = []\n    for c in customers:\n        if seen.get(c, 0) == 0:\n            missing.append(c)\n\n    for c in missing:\n        best_r = -1\n        best_pos = 0\n        best_delta = None\n        for ridx in range(len(final_routes)):\n            r = final_routes[ridx]\n            if route_load(r) + demands[c] > capacity:\n                continue\n            pos, dlt = best_insertion_in_route(r, c)\n            if best_delta is None or dlt < best_delta or (dlt == best_delta and ridx < best_r):\n                best_r = ridx\n                best_pos = pos\n                best_delta = dlt\n        if best_r == -1:\n            final_routes.append([c])\n        else:\n            final_routes[best_r].insert(best_pos, c)\n\n    return final_routes",
+    "repair_attempted": false,
+    "submitted_code": "def solve_cvrp(instance):\n    depot = instance[\"depot_index\"]\n    customers = list(instance[\"customer_ids\"])\n    demands = instance[\"demands\"]\n    capacity = instance[\"capacity\"]\n    dist = instance[\"distance_matrix\"]\n\n    n_customers = len(customers)\n    if n_customers == 0:\n        return []\n\n    # --- Helpers ---\n    def route_load(route):\n        s = 0\n        for c in route:\n            s += demands[c]\n        return s\n\n    def route_cost(route):\n        if not route:\n            return 0\n        c = dist[depot][route[0]] + dist[route[-1]][depot]\n        for i in range(len(route) - 1):\n            c += dist[route[i]][route[i + 1]]\n        return c\n\n    def insertion_delta(route, pos, node):\n        prev = depot if pos == 0 else route[pos - 1]\n        nxt = depot if pos == len(route) else route[pos]\n        return dist[prev][node] + dist[node][nxt] - dist[prev][nxt]\n\n    def best_insertion_in_route(route, node):\n        best_pos = 0\n        best_delta = None\n        for pos in range(len(route) + 1):\n            dlt = insertion_delta(route, pos, node)\n            if best_delta is None or dlt < best_delta or (dlt == best_delta and pos < best_pos):\n                best_delta = dlt\n                best_pos = pos\n        return best_pos, best_delta\n\n    def route_nearest_to_depot(nodes):\n        best = nodes[0]\n        best_d = dist[depot][best]\n        for c in nodes[1:]:\n            d = dist[depot][c]\n            if d < best_d or (d == best_d and c < best):\n                best = c\n                best_d = d\n        return best\n\n    # --- Initial constructive solution: route-growing by cheapest feasible insertion ---\n    unassigned = {}\n    for c in customers:\n        unassigned[c] = 1\n\n    routes = []\n    # Sort customers by demand descending, then depot distance descending, deterministic.\n    order = sorted(customers, key=lambda c: (-demands[c], -dist[depot][c], c))\n\n    while unassigned:\n        # Choose an anchor for a new route.\n        anchor = None\n        for c in order:\n            if c in unassigned:\n                anchor = c\n                break\n        if anchor is None:\n            break\n\n        route = [anchor]\n        del unassigned[anchor]\n        load = demands[anchor]\n\n        # Expand the route by the best feasible insertion among remaining customers.\n        while True:\n            best_node = None\n            best_pos = 0\n            best_delta = None\n\n            # Candidate screening: prioritize customers near current route ends or depot.\n            for c in order:\n                if c not in unassigned:\n                    continue\n                d = demands[c]\n                if load + d > capacity:\n                    continue\n\n                pos, dlt = best_insertion_in_route(route, c)\n                if best_delta is None or dlt < best_delta or (dlt == best_delta and c < best_node):\n                    best_node = c\n                    best_pos = pos\n                    best_delta = dlt\n\n            if best_node is None:\n                break\n\n            route.insert(best_pos, best_node)\n            load += demands[best_node]\n            del unassigned[best_node]\n\n        routes.append(route)\n\n    # --- Repair: ensure every customer appears exactly once ---\n    seen = {}\n    for r in routes:\n        for c in r:\n            seen[c] = seen.get(c, 0) + 1\n\n    missing = []\n    duplicates = []\n    for c in customers:\n        cnt = seen.get(c, 0)\n        if cnt == 0:\n            missing.append(c)\n        elif cnt > 1:\n            duplicates.append(c)\n\n    if duplicates:\n        # Remove extra copies while preserving one occurrence.\n        keep = {}\n        new_routes = []\n        for r in routes:\n            nr = []\n            for c in r:\n                if keep.get(c, 0) == 0:\n                    nr.append(c)\n                    keep[c] = 1\n            if nr:\n                new_routes.append(nr)\n        routes = new_routes\n\n    # Insert missing customers greedily.\n    for c in missing:\n        best_r = -1\n        best_pos = 0\n        best_delta = None\n\n        for ridx in range(len(routes)):\n            r = routes[ridx]\n            load = route_load(r)\n            if load + demands[c] > capacity:\n                continue\n            pos, dlt = best_insertion_in_route(r, c)\n            if best_delta is None or dlt < best_delta or (dlt == best_delta and ridx < best_r):\n                best_r = ridx\n                best_pos = pos\n                best_delta = dlt\n\n        if best_r == -1:\n            routes.append([c])\n        else:\n            routes[best_r].insert(best_pos, c)\n\n    # If still infeasible due to any overfull route, split greedily.\n    repaired = []\n    for r in routes:\n        if route_load(r) <= capacity:\n            repaired.append(r)\n            continue\n        current = []\n        current_load = 0\n        for c in r:\n            d = demands[c]\n            if current_load + d <= capacity:\n                current.append(c)\n                current_load += d\n            else:\n                if current:\n                    repaired.append(current)\n                current = [c]\n                current_load = d\n        if current:\n            repaired.append(current)\n    routes = repaired\n\n    # --- Local search: intra-route 2-opt ---\n    for ridx in range(len(routes)):\n        r = routes[ridx]\n        if len(r) < 4:\n            continue\n        improved = True\n        while improved:\n            improved = False\n            m = len(r)\n            for a in range(m - 2):\n                a_prev = depot if a == 0 else r[a - 1]\n                a_node = r[a]\n                for b in range(a + 2, m):\n                    b_node = r[b - 1]\n                    b_next = depot if b == m else r[b]\n                    old = dist[a_prev][a_node] + dist[b_node][b_next]\n                    new = dist[a_prev][b_node] + dist[a_node][b_next]\n                    if new < old:\n                        r[a:b] = r[a:b][::-1]\n                        improved = True\n                        break\n                if improved:\n                    break\n        routes[ridx] = r\n\n    # --- Local search: relocate customers between routes ---\n    improved = True\n    while improved:\n        improved = False\n        best_move = None\n        best_gain = 0\n\n        for i in range(len(routes)):\n            ri = routes[i]\n            if not ri:\n                continue\n            li = route_load(ri)\n            for p in range(len(ri)):\n                node = ri[p]\n                remove_prev = depot if p == 0 else ri[p - 1]\n                remove_next = depot if p == len(ri) - 1 else ri[p + 1]\n                remove_cost = dist[remove_prev][node] + dist[node][remove_next] - dist[remove_prev][remove_next]\n\n                for j in range(len(routes)):\n                    if i == j:\n                        continue\n                    rj = routes[j]\n                    if route_load(rj) + demands[node] > capacity:\n                        continue\n                    # Best insertion into rj\n                    pos, ins_cost = best_insertion_in_route(rj, node)\n                    gain = remove_cost - ins_cost\n                    if gain > best_gain:\n                        best_gain = gain\n                        best_move = (i, p, j, pos, node)\n\n        if best_move is not None and best_gain > 0:\n            i, p, j, pos, node = best_move\n            if i < len(routes) and j < len(routes):\n                if p < len(routes[i]) and routes[i][p] == node:\n                    routes[i].pop(p)\n                    routes[j].insert(pos, node)\n                    if not routes[i]:\n                        routes.pop(i)\n                    improved = True\n\n    # --- Final cleanup: remove empties, verify coverage, patch if needed ---\n    final_routes = []\n    seen = {}\n    for r in routes:\n        if not r:\n            continue\n        final_routes.append(r)\n        for c in r:\n            seen[c] = seen.get(c, 0) + 1\n\n    missing = []\n    for c in customers:\n        if seen.get(c, 0) == 0:\n            missing.append(c)\n\n    for c in missing:\n        best_r = -1\n        best_pos = 0\n        best_delta = None\n        for ridx in range(len(final_routes)):\n            r = final_routes[ridx]\n            if route_load(r) + demands[c] > capacity:\n                continue\n            pos, dlt = best_insertion_in_route(r, c)\n            if best_delta is None or dlt < best_delta or (dlt == best_delta and ridx < best_r):\n                best_r = ridx\n                best_pos = pos\n                best_delta = dlt\n        if best_r == -1:\n            final_routes.append([c])\n        else:\n            final_routes[best_r].insert(best_pos, c)\n\n    return final_routes",
+    "used_fallback": false,
+    "validation_issues": []
+  },
+  "novelty": 0.521445,
+  "train_score_for_minimization": 0.156547,
+  "train_summary": {
+    "results": [
+      {
+        "descriptors": {
+          "aspect_ratio": 1.021762,
+          "bottleneck_score": 0.814063,
+          "capacity": 206,
+          "clusteredness_score": 0.907031,
+          "coordinate_spread_norm": 0.925315,
+          "corridor_score": 0.021298,
+          "customer_count": 100,
+          "demand_cv": 0.55785,
+          "demand_max_norm": 0.485437,
+          "demand_mean_norm": 0.249854,
+          "demand_pressure": 0.999417,
+          "distance_cv": 0.498378,
+          "distance_mean_norm": 0.372124,
+          "grid_likeness": 0.11,
+          "nearest_neighbor_trap_score": 0.06403,
+          "nn_distance_cv": 0.688729,
+          "nn_distance_mean_norm": 0.034596,
+          "route_size_hint": 4.0,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 25
+        },
+        "instance_name": "X-n101-k25",
+        "runtime_ms": 84.1849,
+        "validation": {
+          "cost": 30498,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.10536,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.10536,
+          "route_count": 26,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              40,
+              88,
+              67,
+              44
+            ],
+            [
+              75,
+              93
+            ],
+            [
+              14,
+              25,
+              10,
+              39
+            ],
+            [
+              80,
+              8,
+              21
+            ],
+            [
+              82,
+              36,
+              29,
+              72
+            ],
+            [
+              76,
+              16,
+              90,
+              66
+            ],
+            [
+              32,
+              33,
+              53,
+              73,
+              95,
+              24
+            ],
+            [
+              5,
+              1,
+              70
+            ],
+            [
+              97,
+              81,
+              83,
+              100
+            ],
+            [
+              35,
+              46,
+              31
+            ],
+            [
+              17,
+              48,
+              26,
+              89
+            ],
+            [
+              50,
+              23,
+              61
+            ],
+            [
+              11,
+              91,
+              71,
+              52
+            ],
+            [
+              19,
+              27,
+              56
+            ],
+            [
+              94,
+              58,
+              12
+            ],
+            [
+              96,
+              85,
+              30,
+              79
+            ],
+            [
+              57,
+              28,
+              4,
+              18
+            ],
+            [
+              99,
+              62,
+              51
+            ],
+            [
+              63,
+              42,
+              77
+            ],
+            [
+              84,
+              55,
+              74
+            ],
+            [
+              68,
+              54,
+              86
+            ],
+            [
+              60,
+              59,
+              3,
+              64,
+              34
+            ],
+            [
+              65,
+              78,
+              6,
+              37,
+              87,
+              38
+            ],
+            [
+              13,
+              69,
+              9,
+              92
+            ],
+            [
+              15,
+              22,
+              41,
+              20
+            ],
+            [
+              7,
+              2,
+              49,
+              45,
+              43,
+              47,
+              98
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.027749,
+          "bottleneck_score": 0.798788,
+          "capacity": 66,
+          "clusteredness_score": 0.899394,
+          "coordinate_spread_norm": 0.930168,
+          "corridor_score": 0.027,
+          "customer_count": 109,
+          "demand_cv": 0.245851,
+          "demand_max_norm": 0.151515,
+          "demand_mean_norm": 0.113428,
+          "demand_pressure": 0.951049,
+          "distance_cv": 0.472398,
+          "distance_mean_norm": 0.368552,
+          "grid_likeness": 0.165138,
+          "nearest_neighbor_trap_score": 0.053669,
+          "nn_distance_cv": 0.533459,
+          "nn_distance_mean_norm": 0.037079,
+          "route_size_hint": 8.384615,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n110-k13",
+        "runtime_ms": 106.1798,
+        "validation": {
+          "cost": 16601,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.108877,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.108877,
+          "route_count": 13,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              14,
+              1,
+              90,
+              70,
+              44,
+              81,
+              23
+            ],
+            [
+              56,
+              55,
+              76,
+              93,
+              43,
+              2,
+              80,
+              71
+            ],
+            [
+              19,
+              58,
+              12,
+              21,
+              75,
+              88,
+              96,
+              41
+            ],
+            [
+              62,
+              100,
+              63,
+              72,
+              10,
+              86,
+              47,
+              40,
+              8
+            ],
+            [
+              3,
+              108,
+              38,
+              79,
+              32,
+              78,
+              29,
+              16
+            ],
+            [
+              68,
+              54,
+              95,
+              17,
+              31,
+              28,
+              39,
+              50,
+              52
+            ],
+            [
+              109,
+              25,
+              102,
+              9,
+              33,
+              101,
+              4,
+              24,
+              18
+            ],
+            [
+              65,
+              36,
+              99,
+              30,
+              69,
+              6,
+              5,
+              91
+            ],
+            [
+              13,
+              57,
+              82,
+              35,
+              73,
+              48,
+              49
+            ],
+            [
+              46,
+              89,
+              45,
+              67,
+              51,
+              85,
+              11,
+              77
+            ],
+            [
+              34,
+              106,
+              92,
+              20,
+              74,
+              94,
+              37,
+              7,
+              107
+            ],
+            [
+              103,
+              83,
+              22,
+              61,
+              60,
+              104,
+              64,
+              59,
+              27
+            ],
+            [
+              105,
+              97,
+              42,
+              98,
+              66,
+              53,
+              15,
+              26,
+              87,
+              84
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.017223,
+          "bottleneck_score": 0.852396,
+          "capacity": 188,
+          "clusteredness_score": 0.926198,
+          "coordinate_spread_norm": 0.89327,
+          "corridor_score": 0.016931,
+          "customer_count": 124,
+          "demand_cv": 0.656149,
+          "demand_max_norm": 0.531915,
+          "demand_mean_norm": 0.237474,
+          "demand_pressure": 0.98156,
+          "distance_cv": 0.598362,
+          "distance_mean_norm": 0.344102,
+          "grid_likeness": 0.193548,
+          "nearest_neighbor_trap_score": 0.077781,
+          "nn_distance_cv": 1.053908,
+          "nn_distance_mean_norm": 0.025395,
+          "route_size_hint": 4.133333,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 30
+        },
+        "instance_name": "X-n125-k30",
+        "runtime_ms": 91.7368,
+        "validation": {
+          "cost": 60261,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.085021,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.085021,
+          "route_count": 30,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              21,
+              35,
+              54,
+              84
+            ],
+            [
+              76,
+              120,
+              48
+            ],
+            [
+              93,
+              111
+            ],
+            [
+              60,
+              31
+            ],
+            [
+              90,
+              86,
+              26
+            ],
+            [
+              106,
+              99,
+              13
+            ],
+            [
+              121,
+              64,
+              72,
+              45
+            ],
+            [
+              3,
+              96
+            ],
+            [
+              82,
+              56
+            ],
+            [
+              10,
+              12,
+              95
+            ],
+            [
+              75,
+              37,
+              58
+            ],
+            [
+              61,
+              18,
+              43
+            ],
+            [
+              8,
+              103,
+              104,
+              20
+            ],
+            [
+              38,
+              102,
+              2
+            ],
+            [
+              112,
+              83,
+              44
+            ],
+            [
+              22,
+              71,
+              29,
+              67,
+              7
+            ],
+            [
+              118,
+              122,
+              110,
+              52,
+              97
+            ],
+            [
+              25,
+              101,
+              5,
+              32
+            ],
+            [
+              4,
+              77,
+              119,
+              69
+            ],
+            [
+              80,
+              107,
+              41,
+              98
+            ],
+            [
+              91,
+              39,
+              57
+            ],
+            [
+              14,
+              42,
+              92,
+              81,
+              16,
+              73
+            ],
+            [
+              68,
+              53,
+              33,
+              113
+            ],
+            [
+              117,
+              94,
+              47,
+              65,
+              100
+            ],
+            [
+              49,
+              17,
+              116,
+              66,
+              23,
+              24
+            ],
+            [
+              15,
+              50,
+              78,
+              28,
+              9,
+              19
+            ],
+            [
+              51,
+              115,
+              6,
+              34,
+              124,
+              59,
+              11
+            ],
+            [
+              105,
+              89,
+              88,
+              70,
+              87,
+              74
+            ],
+            [
+              62,
+              85,
+              30,
+              27,
+              109,
+              40
+            ],
+            [
+              108,
+              55,
+              36,
+              1,
+              46,
+              79,
+              63,
+              114,
+              123
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.934498,
+          "bottleneck_score": 0.833457,
+          "capacity": 643,
+          "clusteredness_score": 0.916728,
+          "coordinate_spread_norm": 0.689034,
+          "corridor_score": 0.48307,
+          "customer_count": 133,
+          "demand_cv": 0.415926,
+          "demand_max_norm": 0.155521,
+          "demand_mean_norm": 0.096119,
+          "demand_pressure": 0.983371,
+          "distance_cv": 0.622037,
+          "distance_mean_norm": 0.276297,
+          "grid_likeness": 0.233083,
+          "nearest_neighbor_trap_score": 0.074344,
+          "nn_distance_cv": 0.892784,
+          "nn_distance_mean_norm": 0.023008,
+          "route_size_hint": 10.230769,
+          "size_bucket": "medium",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n134-k13",
+        "runtime_ms": 89.9884,
+        "validation": {
+          "cost": 14192,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.30011,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.30011,
+          "route_count": 13,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              83,
+              17,
+              130,
+              82,
+              12,
+              97,
+              6,
+              133,
+              80,
+              76
+            ],
+            [
+              100,
+              122,
+              125,
+              5,
+              31,
+              92,
+              29,
+              115,
+              128
+            ],
+            [
+              95,
+              91,
+              14,
+              34,
+              58,
+              60,
+              40,
+              132
+            ],
+            [
+              109,
+              87,
+              74,
+              50,
+              38,
+              94,
+              3,
+              19,
+              78
+            ],
+            [
+              127,
+              112,
+              64,
+              79,
+              120,
+              43,
+              48,
+              114,
+              11
+            ],
+            [
+              103,
+              35,
+              62,
+              32,
+              54,
+              110,
+              123,
+              26
+            ],
+            [
+              72,
+              86,
+              33,
+              124,
+              85,
+              119,
+              57,
+              61,
+              66,
+              23,
+              121
+            ],
+            [
+              41,
+              25,
+              113,
+              89,
+              116,
+              129,
+              101,
+              131,
+              52
+            ],
+            [
+              1,
+              71,
+              111,
+              104,
+              46,
+              99,
+              117,
+              49,
+              69
+            ],
+            [
+              51,
+              16,
+              47,
+              9,
+              2,
+              39,
+              63,
+              13,
+              105
+            ],
+            [
+              106,
+              36,
+              90,
+              108,
+              96,
+              59,
+              18,
+              73,
+              118
+            ],
+            [
+              10,
+              21,
+              45,
+              53,
+              93,
+              102,
+              88,
+              37,
+              24,
+              56
+            ],
+            [
+              77,
+              30,
+              8,
+              84,
+              107,
+              44,
+              98,
+              42,
+              65,
+              28,
+              75,
+              20,
+              126,
+              55,
+              67,
+              70,
+              4,
+              22,
+              27,
+              15,
+              81,
+              68,
+              7
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.118743,
+          "bottleneck_score": 0.893852,
+          "capacity": 12,
+          "clusteredness_score": 0.946926,
+          "coordinate_spread_norm": 0.884056,
+          "corridor_score": 0.106139,
+          "customer_count": 156,
+          "demand_cv": 0.0,
+          "demand_max_norm": 0.083333,
+          "demand_mean_norm": 0.083333,
+          "demand_pressure": 1.0,
+          "distance_cv": 0.716517,
+          "distance_mean_norm": 0.328337,
+          "grid_likeness": 0.282051,
+          "nearest_neighbor_trap_score": 0.058611,
+          "nn_distance_cv": 1.10432,
+          "nn_distance_mean_norm": 0.017426,
+          "route_size_hint": 12.0,
+          "size_bucket": "medium",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n157-k13",
+        "runtime_ms": 93.8595,
+        "validation": {
+          "cost": 19424,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.150984,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.150984,
+          "route_count": 13,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              101,
+              148,
+              151,
+              13,
+              129,
+              91,
+              72,
+              48,
+              33,
+              34,
+              18,
+              107
+            ],
+            [
+              84,
+              30,
+              22,
+              155,
+              134,
+              10,
+              39,
+              58,
+              12,
+              11,
+              82,
+              113
+            ],
+            [
+              71,
+              59,
+              150,
+              96,
+              102,
+              132,
+              66,
+              127,
+              145,
+              28,
+              137,
+              156
+            ],
+            [
+              100,
+              51,
+              90,
+              45,
+              77,
+              2,
+              119,
+              81,
+              60,
+              109,
+              114,
+              29
+            ],
+            [
+              149,
+              8,
+              44,
+              124,
+              130,
+              46,
+              19,
+              27,
+              37,
+              56,
+              17,
+              61
+            ],
+            [
+              138,
+              52,
+              25,
+              79,
+              74,
+              83,
+              88,
+              43,
+              24,
+              141,
+              63,
+              64
+            ],
+            [
+              47,
+              70,
+              139,
+              125,
+              78,
+              108,
+              9,
+              117,
+              1,
+              126,
+              5,
+              57
+            ],
+            [
+              92,
+              136,
+              112,
+              89,
+              40,
+              146,
+              80,
+              7,
+              104,
+              94,
+              86,
+              111
+            ],
+            [
+              143,
+              41,
+              110,
+              54,
+              6,
+              35,
+              4,
+              67,
+              105,
+              152,
+              153,
+              76
+            ],
+            [
+              38,
+              32,
+              97,
+              123,
+              53,
+              62,
+              87,
+              65,
+              93,
+              99,
+              69,
+              122
+            ],
+            [
+              95,
+              115,
+              55,
+              131,
+              133,
+              50,
+              154,
+              98,
+              31,
+              23,
+              21,
+              121
+            ],
+            [
+              42,
+              3,
+              106,
+              73,
+              85,
+              144,
+              103,
+              16,
+              75,
+              118,
+              147,
+              15
+            ],
+            [
+              20,
+              49,
+              14,
+              120,
+              26,
+              128,
+              142,
+              68,
+              36,
+              135,
+              140,
+              116
+            ]
+          ]
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.06015,
+          "bottleneck_score": 0.826299,
+          "capacity": 944,
+          "clusteredness_score": 0.913149,
+          "coordinate_spread_norm": 0.646746,
+          "corridor_score": 0.056738,
+          "customer_count": 213,
+          "demand_cv": 0.595001,
+          "demand_max_norm": 0.105932,
+          "demand_mean_norm": 0.051504,
+          "demand_pressure": 0.997304,
+          "distance_cv": 0.526673,
+          "distance_mean_norm": 0.244639,
+          "grid_likeness": 0.403756,
+          "nearest_neighbor_trap_score": 0.094318,
+          "nn_distance_cv": 1.085984,
+          "nn_distance_mean_norm": 0.021247,
+          "route_size_hint": 19.363636,
+          "size_bucket": "large",
+          "structure_class": "grid_like",
+          "vehicle_count_hint": 11
+        },
+        "instance_name": "X-n214-k11",
+        "runtime_ms": 223.3268,
+        "validation": {
+          "cost": 12907,
+          "duplicate_count": 0,
+          "errors": [],
+          "feasible": true,
+          "missing_count": 0,
+          "optimality_gap": 0.188928,
+          "over_capacity_routes": 0,
+          "penalized_gap": 0.188928,
+          "route_count": 11,
+          "route_count_excess": 0,
+          "routes": [
+            [
+              26,
+              4,
+              101,
+              143,
+              140,
+              23,
+              211,
+              202,
+              67,
+              154,
+              75,
+              100,
+              165,
+              207,
+              103,
+              158,
+              58,
+              72,
+              65,
+              71
+            ],
+            [
+              151,
+              24,
+              84,
+              96,
+              47,
+              137,
+              99,
+              7,
+              172,
+              193,
+              106,
+              55,
+              138,
+              152,
+              153,
+              190,
+              161,
+              148,
+              213,
+              209
+            ],
+            [
+              6,
+              70,
+              105,
+              174,
+              112,
+              28,
+              85,
+              61,
+              69,
+              122,
+              16,
+              145,
+              44,
+              128,
+              1,
+              35,
+              123
+            ],
+            [
+              200,
+              189,
+              162,
+              131,
+              30,
+              196,
+              3,
+              60,
+              199,
+              108,
+              42,
+              79,
+              9,
+              197,
+              21,
+              155,
+              179,
+              92,
+              210,
+              83,
+              36
+            ],
+            [
+              64,
+              160,
+              133,
+              34,
+              68,
+              11,
+              63,
+              17,
+              163,
+              187,
+              186,
+              135,
+              181,
+              93,
+              82,
+              33,
+              120,
+              13,
+              80
+            ],
+            [
+              31,
+              20,
+              205,
+              109,
+              183,
+              25,
+              170,
+              164,
+              66,
+              14,
+              89,
+              8,
+              52,
+              127,
+              12,
+              121,
+              32,
+              107,
+              116,
+              169
+            ],
+            [
+              78,
+              168,
+              53,
+              40,
+              45,
+              132,
+              5,
+              41,
+              157,
+              104,
+              204,
+              130,
+              88,
+              43,
+              188,
+              141,
+              139,
+              77,
+              98,
+              129,
+              167
+            ],
+            [
+              49,
+              76,
+              27,
+              117,
+              175,
+              97,
+              136,
+              182,
+              212,
+              156,
+              2,
+              147,
+              91,
+              62,
+              48,
+              144,
+              124
+            ],
+            [
+              203,
+              126,
+              111,
+              57,
+              134,
+              146,
+              90,
+              150,
+              95,
+              184,
+              54,
+              86,
+              176,
+              110,
+              18,
+              87,
+              198
+            ],
+            [
+              142,
+              15,
+              19,
+              194,
+              119,
+              178,
+              171,
+              177,
+              94,
+              81,
+              195,
+              59,
+              115,
+              201,
+              180,
+              166,
+              46,
+              149,
+              10,
+              206,
+              191
+            ],
+            [
+              208,
+              118,
+              185,
+              102,
+              51,
+              37,
+              114,
+              113,
+              192,
+              29,
+              74,
+              22,
+              56,
+              159,
+              125,
+              73,
+              38,
+              50,
+              173,
+              39
+            ]
+          ]
+        }
+      }
+    ],
+    "summary": {
+      "enabled": true,
+      "family_means": [
+        {
+          "count": 1,
+          "family": "grid_like",
+          "feasibility_rate": 1.0,
+          "mean_feasible_gap": 0.188928,
+          "mean_penalized_gap": 0.188928
+        },
+        {
+          "count": 5,
+          "family": "two_cluster_bottleneck",
+          "feasibility_rate": 1.0,
+          "mean_feasible_gap": 0.15007,
+          "mean_penalized_gap": 0.15007
+        }
+      ],
+      "feasibility_rate": 1.0,
+      "instance_count": 6,
+      "mean_feasible_gap": 0.156547,
+      "mean_penalized_gap": 0.156547,
+      "mean_runtime_ms": 114.879367,
+      "panel_name": "train",
+      "worst_instances": [
+        {
+          "errors": [],
+          "family": "two_cluster_bottleneck",
+          "feasible": true,
+          "instance_name": "X-n134-k13",
+          "optimality_gap": 0.30011,
+          "penalized_gap": 0.30011,
+          "runtime_ms": 89.9884
+        },
+        {
+          "errors": [],
+          "family": "grid_like",
+          "feasible": true,
+          "instance_name": "X-n214-k11",
+          "optimality_gap": 0.188928,
+          "penalized_gap": 0.188928,
+          "runtime_ms": 223.3268
+        },
+        {
+          "errors": [],
+          "family": "two_cluster_bottleneck",
+          "feasible": true,
+          "instance_name": "X-n157-k13",
+          "optimality_gap": 0.150984,
+          "penalized_gap": 0.150984,
+          "runtime_ms": 93.8595
+        },
+        {
+          "errors": [],
+          "family": "two_cluster_bottleneck",
+          "feasible": true,
+          "instance_name": "X-n110-k13",
+          "optimality_gap": 0.108877,
+          "penalized_gap": 0.108877,
+          "runtime_ms": 106.1798
+        },
+        {
+          "errors": [],
+          "family": "two_cluster_bottleneck",
+          "feasible": true,
+          "instance_name": "X-n101-k25",
+          "optimality_gap": 0.10536,
+          "penalized_gap": 0.10536,
+          "runtime_ms": 84.1849
+        }
+      ]
+    },
+    "train_score_for_minimization": 0.156547
+  }
+}

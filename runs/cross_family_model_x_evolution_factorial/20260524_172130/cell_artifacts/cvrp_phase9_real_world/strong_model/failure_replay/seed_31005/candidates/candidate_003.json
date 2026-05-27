@@ -1,0 +1,360 @@
+{
+  "accepted": false,
+  "candidate_index": 3,
+  "generation": {
+    "code": "def solve_cvrp(instance):\n    def get_field(obj, names, default=None):\n        try:\n            if type(obj) is dict:\n                for n in names:\n                    if n in obj:\n                        return obj[n]\n                return default\n        except:\n            pass\n        try:\n            d = obj.__dict__\n            if d is not None:\n                for n in names:\n                    if n in d:\n                        return d[n]\n        except:\n            pass\n        for n in names:\n            try:\n                return object.__getattribute__(obj, n)\n            except:\n                pass\n        return default\n\n    coords = get_field(instance, (\"coords\", \"locations\", \"points\", \"xy\", \"nodes\"), None)\n    demands = get_field(instance, (\"demands\", \"demand\"), None)\n    capacity = get_field(instance, (\"capacity\", \"vehicle_capacity\", \"cap\"), None)\n    depot = get_field(instance, (\"depot\", \"depot_id\", \"start\", \"origin\"), 0)\n\n    if coords is None:\n        return []\n    n = len(coords)\n    if n <= 1:\n        return []\n\n    if demands is None:\n        demands = [0] * n\n    if capacity is None:\n        capacity = 0\n\n    try:\n        if type(depot) in (list, tuple):\n            depot = depot[0] if depot else 0\n    except:\n        pass\n    depot = int(depot)\n\n    def xy(i):\n        p = coords[i]\n        return p[0], p[1]\n\n    def dist(i, j):\n        ax, ay = xy(i)\n        bx, by = xy(j)\n        dx = ax - bx\n        dy = ay - by\n        return (dx * dx + dy * dy) ** 0.5\n\n    customers = []\n    for i in range(n):\n        if i != depot:\n            customers.append(i)\n\n    # Fallback if any demand exceeds capacity: still make a singleton route.\n    unrouted = {}\n    for c in customers:\n        unrouted[c] = 1\n\n    def route_demand(route):\n        s = 0\n        for c in route:\n            s += demands[c]\n        return s\n\n    def route_cost(route):\n        if not route:\n            return 0.0\n        c = dist(depot, route[0]) + dist(route[-1], depot)\n        k = 0\n        while k + 1 < len(route):\n            c += dist(route[k], route[k + 1])\n            k += 1\n        return c\n\n    def insertion_delta(route, pos, cust):\n        prev_node = depot if pos == 0 else route[pos - 1]\n        next_node = depot if pos == len(route) else route[pos]\n        return dist(prev_node, cust) + dist(cust, next_node) - dist(prev_node, next_node)\n\n    def best_insertion(route, cust):\n        best = None\n        best_pos = 0\n        p = 0\n        while p <= len(route):\n            d = insertion_delta(route, p, cust)\n            key = (d, dist(depot, cust), cust, p)\n            if best is None or key < best:\n                best = key\n                best_pos = p\n            p += 1\n        return best_pos, best[0]\n\n    # Seed with a farthest customer from depot.\n    routes = []\n    remaining = {}\n    for c in customers:\n        remaining[c] = 1\n\n    while remaining:\n        seed = None\n        best_key = None\n        for c in remaining:\n            dem = demands[c]\n            key = (-dem, dist(depot, c), c)\n            if best_key is None or key < best_key:\n                best_key = key\n                seed = c\n\n        route = [seed]\n        del remaining[seed]\n        load = demands[seed]\n\n        # Greedy cheapest insertion by global route extension / insertion.\n        while remaining:\n            best_c = None\n            best_pos = None\n            best_key = None\n            for c in remaining:\n                dem = demands[c]\n                if capacity > 0 and load + dem > capacity:\n                    continue\n                p = 0\n                while p <= len(route):\n                    d = insertion_delta(route, p, c)\n                    key = (d, route_cost(route) + d, dist(depot, c), c, p)\n                    if best_key is None or key < best_key:\n                        best_key = key\n                        best_c = c\n                        best_pos = p\n                    p += 1\n            if best_c is None:\n                break\n            route.insert(best_pos, best_c)\n            load += demands[best_c]\n            del remaining[best_c]\n\n        routes.append(route)\n\n    # Improvement loop: intra-route 2-opt, relocate, swap, and split/merge style cleanup.\n    improved = True\n    while improved:\n        improved = False\n\n        # 2-opt within each route\n        r = 0\n        while r < len(routes):\n            route = routes[r]\n            m = len(route)\n            if m >= 4:\n                best_delta = 0.0\n                bi = None\n                bj = None\n                i = 0\n                while i < m - 1:\n                    a = depot if i == 0 else route[i - 1]\n                    b = route[i]\n                    j = i + 2\n                    while j < m:\n                        c = route[j - 1]\n                        d = depot if j == m else route[j]\n                        delta = (dist(a, c) + dist(b, d)) - (dist(a, b) + dist(c, d))\n                        if delta < best_delta - 1e-12:\n                            best_delta = delta\n                            bi = i\n                            bj = j\n                        j += 1\n                    i += 1\n                if bi is not None:\n                    route[bi:bj] = route[bi:bj][::-1]\n                    improved = True\n            r += 1\n\n        # Relocate between routes\n        best_move = None\n        i = 0\n        while i < len(routes):\n            ra = routes[i]\n            da = route_demand(ra)\n            pa = 0\n            while pa < len(ra):\n                c = ra[pa]\n                dc = demands[c]\n                j = 0\n                while j < len(routes):\n                    if i != j:\n                        rb = routes[j]\n                        db = route_demand(rb)\n                        if capacity <= 0 or db + dc <= capacity:\n                            remove_delta = insertion_delta(ra, pa, c) * -1.0\n                            # remove_delta computed via local edges\n                            prev_a = depot if pa == 0 else ra[pa - 1]\n                            next_a = depot if pa + 1 == len(ra) else ra[pa + 1]\n                            remove_delta = (dist(prev_a, next_a) - dist(prev_a, c) - dist(c, next_a))\n                            pb = 0\n                            while pb <= len(rb):\n                                add_delta = insertion_delta(rb, pb, c)\n                                total = remove_delta + add_delta\n                                key = (total, c, i, j, pa, pb)\n                                if best_move is None or key < best_move:\n                                    best_move = key\n                    j += 1\n                pa += 1\n            i += 1\n\n        if best_move is not None and best_move[0] < -1e-12:\n            _, c, i, j, pa, pb = best_move\n            if i < len(routes) and j < len(routes):\n                if pa < len(routes[i]) and routes[i][pa] == c:\n                    routes[i].pop(pa)\n                    routes[j].insert(pb, c)\n                    if len(routes[i]) == 0:\n                        routes.pop(i)\n                    improved = True\n                    continue\n\n        # Swap between routes\n        best_swap = None\n        i = 0\n        while i < len(routes):\n            ra = routes[i]\n            da = route_demand(ra)\n            pa = 0\n            while pa < len(ra):\n                a = ra[pa]\n                daa = demands[a]\n                j = i + 1\n                while j < len(routes):\n                    rb = routes[j]\n                    db = route_demand(rb)\n                    pb = 0\n                    while pb < len(rb):\n                        b = rb[pb]\n                        dbb = demands[b]\n                        if (capacity <= 0 or (da - daa + dbb <= capacity and db - dbb + daa <= capacity)):\n                            prev_a = depot if pa == 0 else ra[pa - 1]\n                            next_a = depot if pa + 1 == len(ra) else ra[pa + 1]\n                            prev_b = depot if pb == 0 else rb[pb - 1]\n                            next_b = depot if pb + 1 == len(rb) else rb[pb + 1]\n                            before = (dist(prev_a, a) + dist(a, next_a) + dist(prev_b, b) + dist(b, next_b))\n                            after = (dist(prev_a, b) + dist(b, next_a) + dist(prev_b, a) + dist(a, next_b))\n                            delta = after - before\n                            key = (delta, a, b, i, j, pa, pb)\n                            if best_swap is None or key < best_swap:\n                                best_swap = key\n                        pb += 1\n                    j += 1\n                pa += 1\n            i += 1\n\n        if best_swap is not None and best_swap[0] < -1e-12:\n            _, a, b, i, j, pa, pb = best_swap\n            if i < len(routes) and j < len(routes):\n                if pa < len(routes[i]) and pb < len(routes[j]) and routes[i][pa] == a and routes[j][pb] == b:\n                    routes[i][pa] = b\n                    routes[j][pb] = a\n                    improved = True\n                    continue\n\n    # Final cleanup: remove any empty routes and ensure all customers appear once.\n    cleaned = []\n    seen = {}\n    for route in routes:\n        if len(route) == 0:\n            continue\n        nr = []\n        for c in route:\n            if c != depot and c not in seen:\n                seen[c] = 1\n                nr.append(c)\n        if len(nr) > 0:\n            cleaned.append(nr)\n\n    missing = []",
+    "error": null,
+    "model_name": "gpt-5.4-mini",
+    "prompt": "Return only raw Python source code.\nDefine exactly this function:\ndef solve_cvrp(instance):\n    return routes\n\nRules:\n- No imports.\n- Return a list of routes; each route is a list of customer ids and must not include the depot.\n- Visit every customer exactly once and respect vehicle capacity.\n- Build deterministic, interpretable CVRP solver logic using constructive, repair, and local-search ideas.\n- Do not rely on held-out data.\n\nTechnique: failure_replay. Candidate 3.\nFailure replay examples prioritized by poor train validation:\n[\n  {\n    \"accepted\": true,\n    \"candidate_index\": 1,\n    \"failure_examples\": [\n      {\n        \"errors\": [\n          \"NameError: name 'isinstance' is not defined\",\n          \"missing 213 customers\"\n        ],\n        \"family\": \"grid_like\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n214-k11\",\n        \"penalized_gap\": 12.65\n      },\n      {\n        \"errors\": [\n          \"NameError: name 'isinstance' is not defined\",\n          \"missing 156 customers\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n157-k13\",\n        \"penalized_gap\": 9.8\n      },\n      {\n        \"errors\": [\n          \"NameError: name 'isinstance' is not defined\",\n          \"missing 133 customers\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n134-k13\",\n        \"penalized_gap\": 8.65\n      }\n    ],\n    \"failure_note\": \"mean_train_penalized_gap=8.958333\",\n    \"novelty\": 0.0,\n    \"train_score_for_minimization\": 8.958333\n  },\n  {\n    \"accepted\": false,\n    \"candidate_index\": 2,\n    \"failure_examples\": [\n      {\n        \"errors\": [\n          \"missing 213 customers\"\n        ],\n        \"family\": \"grid_like\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n214-k11\",\n        \"penalized_gap\": 12.65\n      },\n      {\n        \"errors\": [\n          \"missing 156 customers\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n157-k13\",\n        \"penalized_gap\": 9.8\n      },\n      {\n        \"errors\": [\n          \"missing 133 customers\"\n        ],\n        \"family\": \"two_cluster_bottleneck\",\n        \"feasible\": false,\n        \"instance_name\": \"X-n134-k13\",\n        \"penalized_gap\": 8.65\n      }\n    ],\n    \"failure_note\": \"mean_train_penalized_gap=8.958333\",\n    \"novelty\": 0.459841,\n    \"train_score_for_minimization\": 8.958333\n  }\n]\n\nCurrent accepted incumbent code to improve:\ndef solve_cvrp(instance):\n    def get_field(obj, names, default=None):\n        if isinstance(obj, dict):\n            for n in names:\n                if n in obj:\n                    return obj[n]\n            return default\n        d = None\n        try:\n            d = obj.__dict__\n        except:\n            d = None\n        if d is not None:\n            for n in names:\n                if n in d:\n                    return d[n]\n        for n in names:\n            try:\n                return object.__getattribute__(obj, n)\n            except:\n                pass\n        return default\n\n    coords = get_field(instance, (\"coords\", \"locations\", \"points\", \"xy\", \"nodes\"), None)\n    demands = get_field(instance, (\"demands\", \"demand\"), None)\n    capacity = get_field(instance, (\"capacity\", \"vehicle_capacity\", \"cap\"), None)\n    depot = get_field(instance, (\"depot\", \"depot_id\", \"start\", \"origin\"), 0)\n\n    if coords is None:\n        return []\n\n    n = len(coords)\n    if n == 0:\n        return []\n\n    if demands is None:\n        demands = [0] * n\n    if capacity is None:\n        capacity = 0\n\n    if isinstance(depot, (list, tuple)):\n        depot = depot[0] if depot else 0\n    depot = int(depot)\n\n    def xy(i):\n        p = coords[i]\n        return p[0], p[1]\n\n    def dist(i, j):\n        ax, ay = xy(i)\n        bx, by = xy(j)\n        dx = ax - bx\n        dy = ay - by\n        return (dx * dx + dy * dy) ** 0.5\n\n    def route_demand(route):\n        s = 0\n        for c in route:\n            s += demands[c]\n        return s\n\n    def route_cost(route):\n        if not route:\n            return 0.0\n        c = dist(depot, route[0]) + dist(route[-1], depot)\n        k = 0\n        while k + 1 < len(route):\n            c += dist(route[k], route[k + 1])\n            k += 1\n        return c\n\n    def insertion_cost(route, pos, cust):\n        prev_node = depot if pos == 0 else route[pos - 1]\n        next_node = depot if pos == len(route) else route[pos]\n        return dist(prev_node, cust) + dist(cust, next_node) - dist(prev_node, next_node)\n\n    customers = []\n    i = 0\n    while i < n:\n        if i != depot:\n            customers.append(i)\n        i += 1\n\n    unrouted = set(customers)\n    routes = []\n\n    while unrouted:\n        start = None\n        best_key = None\n        for c in unrouted:\n            d = demands[c]\n            if d > capacity and capacity > 0:\n                continue\n            key = (-d, dist(depot, c), c)\n            if best_key is None or key < best_key:\n                best_key = key\n                start = c\n        if start is None:\n            start = min(unrouted, key=lambda c: (demands[c], dist(depot, c), c))\n\n        route = [start]\n        unrouted.remove(start)\n        load = demands[start]\n\n        while unrouted:\n            best_choice = None\n            best_c = None\n            best_pos = None\n            for c in unrouted:\n                d = demands[c]\n                if capacity > 0 and load + d > capacity:\n                    continue\n                pos = 0\n                while pos <= len(route):\n                    ins = insertion_cost(route, pos, c)\n                    prev_node = depot if pos == 0 else route[pos - 1]\n                    next_node = depot if pos == len(route) else route[pos]\n                    key = (ins, dist(prev_node, c) + dist(c, next_node), dist(depot, c), c, pos)\n                    if best_choice is None or key < best_choice:\n                        best_choice = key\n                        best_c = c\n                        best_pos = pos\n                    pos += 1\n            if best_c is None:\n                break\n            route.insert(best_pos, best_c)\n            unrouted.remove(best_c)\n            load += demands[best_c]\n\n        routes.append(route)\n\n    changed = True\n    while changed:\n        changed = False\n\n        # Intra-route 2-opt\n        r_idx = 0\n        while r_idx < len(routes):\n            route = routes[r_idx]\n            m = len(route)\n            if m >= 4:\n                best_delta = 0.0\n                best_i = None\n                best_j = None\n                i = 0\n                while i < m - 1:\n                    a = depot if i == 0 else route[i - 1]\n                    b = route[i]\n                    j = i + 2\n                    while j < m:\n                        c = route[j - 1]\n                        d = depot if j == m else route[j]\n                        delta = (dist(a, c) + dist(b, d)) - (dist(a, b) + dist(c, d))\n                        if delta < best_delta - 1e-12:\n                            best_delta = delta\n                            best_i = i\n                            best_j = j\n                        j += 1\n                    i += 1\n                if best_i is not None:\n                    route[best_i:best_j] = reversed(route[best_i:best_j])\n                    changed = True\n            r_idx += 1\n\n        # Relocate between routes\n        i = 0\n        moved = False\n        while i < len(routes) \n# ... truncated incumbent ...",
+    "provider": "openai",
+    "raw_text": "def solve_cvrp(instance):\n    def get_field(obj, names, default=None):\n        try:\n            if type(obj) is dict:\n                for n in names:\n                    if n in obj:\n                        return obj[n]\n                return default\n        except:\n            pass\n        try:\n            d = obj.__dict__\n            if d is not None:\n                for n in names:\n                    if n in d:\n                        return d[n]\n        except:\n            pass\n        for n in names:\n            try:\n                return object.__getattribute__(obj, n)\n            except:\n                pass\n        return default\n\n    coords = get_field(instance, (\"coords\", \"locations\", \"points\", \"xy\", \"nodes\"), None)\n    demands = get_field(instance, (\"demands\", \"demand\"), None)\n    capacity = get_field(instance, (\"capacity\", \"vehicle_capacity\", \"cap\"), None)\n    depot = get_field(instance, (\"depot\", \"depot_id\", \"start\", \"origin\"), 0)\n\n    if coords is None:\n        return []\n    n = len(coords)\n    if n <= 1:\n        return []\n\n    if demands is None:\n        demands = [0] * n\n    if capacity is None:\n        capacity = 0\n\n    try:\n        if type(depot) in (list, tuple):\n            depot = depot[0] if depot else 0\n    except:\n        pass\n    depot = int(depot)\n\n    def xy(i):\n        p = coords[i]\n        return p[0], p[1]\n\n    def dist(i, j):\n        ax, ay = xy(i)\n        bx, by = xy(j)\n        dx = ax - bx\n        dy = ay - by\n        return (dx * dx + dy * dy) ** 0.5\n\n    customers = []\n    for i in range(n):\n        if i != depot:\n            customers.append(i)\n\n    # Fallback if any demand exceeds capacity: still make a singleton route.\n    unrouted = {}\n    for c in customers:\n        unrouted[c] = 1\n\n    def route_demand(route):\n        s = 0\n        for c in route:\n            s += demands[c]\n        return s\n\n    def route_cost(route):\n        if not route:\n            return 0.0\n        c = dist(depot, route[0]) + dist(route[-1], depot)\n        k = 0\n        while k + 1 < len(route):\n            c += dist(route[k], route[k + 1])\n            k += 1\n        return c\n\n    def insertion_delta(route, pos, cust):\n        prev_node = depot if pos == 0 else route[pos - 1]\n        next_node = depot if pos == len(route) else route[pos]\n        return dist(prev_node, cust) + dist(cust, next_node) - dist(prev_node, next_node)\n\n    def best_insertion(route, cust):\n        best = None\n        best_pos = 0\n        p = 0\n        while p <= len(route):\n            d = insertion_delta(route, p, cust)\n            key = (d, dist(depot, cust), cust, p)\n            if best is None or key < best:\n                best = key\n                best_pos = p\n            p += 1\n        return best_pos, best[0]\n\n    # Seed with a farthest customer from depot.\n    routes = []\n    remaining = {}\n    for c in customers:\n        remaining[c] = 1\n\n    while remaining:\n        seed = None\n        best_key = None\n        for c in remaining:\n            dem = demands[c]\n            key = (-dem, dist(depot, c), c)\n            if best_key is None or key < best_key:\n                best_key = key\n                seed = c\n\n        route = [seed]\n        del remaining[seed]\n        load = demands[seed]\n\n        # Greedy cheapest insertion by global route extension / insertion.\n        while remaining:\n            best_c = None\n            best_pos = None\n            best_key = None\n            for c in remaining:\n                dem = demands[c]\n                if capacity > 0 and load + dem > capacity:\n                    continue\n                p = 0\n                while p <= len(route):\n                    d = insertion_delta(route, p, c)\n                    key = (d, route_cost(route) + d, dist(depot, c), c, p)\n                    if best_key is None or key < best_key:\n                        best_key = key\n                        best_c = c\n                        best_pos = p\n                    p += 1\n            if best_c is None:\n                break\n            route.insert(best_pos, best_c)\n            load += demands[best_c]\n            del remaining[best_c]\n\n        routes.append(route)\n\n    # Improvement loop: intra-route 2-opt, relocate, swap, and split/merge style cleanup.\n    improved = True\n    while improved:\n        improved = False\n\n        # 2-opt within each route\n        r = 0\n        while r < len(routes):\n            route = routes[r]\n            m = len(route)\n            if m >= 4:\n                best_delta = 0.0\n                bi = None\n                bj = None\n                i = 0\n                while i < m - 1:\n                    a = depot if i == 0 else route[i - 1]\n                    b = route[i]\n                    j = i + 2\n                    while j < m:\n                        c = route[j - 1]\n                        d = depot if j == m else route[j]\n                        delta = (dist(a, c) + dist(b, d)) - (dist(a, b) + dist(c, d))\n                        if delta < best_delta - 1e-12:\n                            best_delta = delta\n                            bi = i\n                            bj = j\n                        j += 1\n                    i += 1\n                if bi is not None:\n                    route[bi:bj] = route[bi:bj][::-1]\n                    improved = True\n            r += 1\n\n        # Relocate between routes\n        best_move = None\n        i = 0\n        while i < len(routes):\n            ra = routes[i]\n            da = route_demand(ra)\n            pa = 0\n            while pa < len(ra):\n                c = ra[pa]\n                dc = demands[c]\n                j = 0\n                while j < len(routes):\n                    if i != j:\n                        rb = routes[j]\n                        db = route_demand(rb)\n                        if capacity <= 0 or db + dc <= capacity:\n                            remove_delta = insertion_delta(ra, pa, c) * -1.0\n                            # remove_delta computed via local edges\n                            prev_a = depot if pa == 0 else ra[pa - 1]\n                            next_a = depot if pa + 1 == len(ra) else ra[pa + 1]\n                            remove_delta = (dist(prev_a, next_a) - dist(prev_a, c) - dist(c, next_a))\n                            pb = 0\n                            while pb <= len(rb):\n                                add_delta = insertion_delta(rb, pb, c)\n                                total = remove_delta + add_delta\n                                key = (total, c, i, j, pa, pb)\n                                if best_move is None or key < best_move:\n                                    best_move = key\n                    j += 1\n                pa += 1\n            i += 1\n\n        if best_move is not None and best_move[0] < -1e-12:\n            _, c, i, j, pa, pb = best_move\n            if i < len(routes) and j < len(routes):\n                if pa < len(routes[i]) and routes[i][pa] == c:\n                    routes[i].pop(pa)\n                    routes[j].insert(pb, c)\n                    if len(routes[i]) == 0:\n                        routes.pop(i)\n                    improved = True\n                    continue\n\n        # Swap between routes\n        best_swap = None\n        i = 0\n        while i < len(routes):\n            ra = routes[i]\n            da = route_demand(ra)\n            pa = 0\n            while pa < len(ra):\n                a = ra[pa]\n                daa = demands[a]\n                j = i + 1\n                while j < len(routes):\n                    rb = routes[j]\n                    db = route_demand(rb)\n                    pb = 0\n                    while pb < len(rb):\n                        b = rb[pb]\n                        dbb = demands[b]\n                        if (capacity <= 0 or (da - daa + dbb <= capacity and db - dbb + daa <= capacity)):\n                            prev_a = depot if pa == 0 else ra[pa - 1]\n                            next_a = depot if pa + 1 == len(ra) else ra[pa + 1]\n                            prev_b = depot if pb == 0 else rb[pb - 1]\n                            next_b = depot if pb + 1 == len(rb) else rb[pb + 1]\n                            before = (dist(prev_a, a) + dist(a, next_a) + dist(prev_b, b) + dist(b, next_b))\n                            after = (dist(prev_a, b) + dist(b, next_a) + dist(prev_b, a) + dist(a, next_b))\n                            delta = after - before\n                            key = (delta, a, b, i, j, pa, pb)\n                            if best_swap is None or key < best_swap:\n                                best_swap = key\n                        pb += 1\n                    j += 1\n                pa += 1\n            i += 1\n\n        if best_swap is not None and best_swap[0] < -1e-12:\n            _, a, b, i, j, pa, pb = best_swap\n            if i < len(routes) and j < len(routes):\n                if pa < len(routes[i]) and pb < len(routes[j]) and routes[i][pa] == a and routes[j][pb] == b:\n                    routes[i][pa] = b\n                    routes[j][pb] = a\n                    improved = True\n                    continue\n\n    # Final cleanup: remove any empty routes and ensure all customers appear once.\n    cleaned = []\n    seen = {}\n    for route in routes:\n        if len(route) == 0:\n            continue\n        nr = []\n        for c in route:\n            if c != depot and c not in seen:\n                seen[c] = 1\n                nr.append(c)\n        if len(nr) > 0:\n            cleaned.append(nr)\n\n    missing = []\n    for c in customers:\n        if c not in seen:\n            missing.append(c)\n\n    # Repair missing by greedy insertion into feasible routes; otherwise singleton routes.\n    for c in missing:\n        best_r = None\n        best_p = None\n        best_key = None\n        for r_idx in range(len(cleaned)):\n            route = cleaned[r_idx]\n            if capacity > 0 and route_demand(route) + demands[c] > capacity:\n                continue\n            p = 0\n            while p <= len(route):\n                d = insertion_delta(route, p, c)\n                key = (d, route_cost(route) + d, r_idx, p, c)\n                if best_key is None or key < best_key:\n                    best_key = key\n                    best_r = r_idx\n                    best_p = p\n                p += 1\n        if best_r is None:\n            cleaned.append([c])\n        else:\n            cleaned[best_r].insert(best_p, c)\n\n    # Remove duplicates if any slipped through, preserving first occurrence.\n    final_routes = []\n    used = {}\n    for route in cleaned:\n        nr = []\n        for c in route:\n            if c != depot and c not in used:\n                used[c] = 1\n                nr.append(c)\n        if nr:\n            final_routes.append(nr)\n\n    # Last resort: put any unseen customers in singleton routes.\n    for c in customers:\n        if c not in used:\n            final_routes.append([c])\n            used[c] = 1\n\n    return final_routes",
+    "repair_attempted": false,
+    "submitted_code": "def solve_cvrp(instance):\n    def get_field(obj, names, default=None):\n        try:\n            if type(obj) is dict:\n                for n in names:\n                    if n in obj:\n                        return obj[n]\n                return default\n        except:\n            pass\n        try:\n            d = obj.__dict__\n            if d is not None:\n                for n in names:\n                    if n in d:\n                        return d[n]\n        except:\n            pass\n        for n in names:\n            try:\n                return object.__getattribute__(obj, n)\n            except:\n                pass\n        return default\n\n    coords = get_field(instance, (\"coords\", \"locations\", \"points\", \"xy\", \"nodes\"), None)\n    demands = get_field(instance, (\"demands\", \"demand\"), None)\n    capacity = get_field(instance, (\"capacity\", \"vehicle_capacity\", \"cap\"), None)\n    depot = get_field(instance, (\"depot\", \"depot_id\", \"start\", \"origin\"), 0)\n\n    if coords is None:\n        return []\n    n = len(coords)\n    if n <= 1:\n        return []\n\n    if demands is None:\n        demands = [0] * n\n    if capacity is None:\n        capacity = 0\n\n    try:\n        if type(depot) in (list, tuple):\n            depot = depot[0] if depot else 0\n    except:\n        pass\n    depot = int(depot)\n\n    def xy(i):\n        p = coords[i]\n        return p[0], p[1]\n\n    def dist(i, j):\n        ax, ay = xy(i)\n        bx, by = xy(j)\n        dx = ax - bx\n        dy = ay - by\n        return (dx * dx + dy * dy) ** 0.5\n\n    customers = []\n    for i in range(n):\n        if i != depot:\n            customers.append(i)\n\n    # Fallback if any demand exceeds capacity: still make a singleton route.\n    unrouted = {}\n    for c in customers:\n        unrouted[c] = 1\n\n    def route_demand(route):\n        s = 0\n        for c in route:\n            s += demands[c]\n        return s\n\n    def route_cost(route):\n        if not route:\n            return 0.0\n        c = dist(depot, route[0]) + dist(route[-1], depot)\n        k = 0\n        while k + 1 < len(route):\n            c += dist(route[k], route[k + 1])\n            k += 1\n        return c\n\n    def insertion_delta(route, pos, cust):\n        prev_node = depot if pos == 0 else route[pos - 1]\n        next_node = depot if pos == len(route) else route[pos]\n        return dist(prev_node, cust) + dist(cust, next_node) - dist(prev_node, next_node)\n\n    def best_insertion(route, cust):\n        best = None\n        best_pos = 0\n        p = 0\n        while p <= len(route):\n            d = insertion_delta(route, p, cust)\n            key = (d, dist(depot, cust), cust, p)\n            if best is None or key < best:\n                best = key\n                best_pos = p\n            p += 1\n        return best_pos, best[0]\n\n    # Seed with a farthest customer from depot.\n    routes = []\n    remaining = {}\n    for c in customers:\n        remaining[c] = 1\n\n    while remaining:\n        seed = None\n        best_key = None\n        for c in remaining:\n            dem = demands[c]\n            key = (-dem, dist(depot, c), c)\n            if best_key is None or key < best_key:\n                best_key = key\n                seed = c\n\n        route = [seed]\n        del remaining[seed]\n        load = demands[seed]\n\n        # Greedy cheapest insertion by global route extension / insertion.\n        while remaining:\n            best_c = None\n            best_pos = None\n            best_key = None\n            for c in remaining:\n                dem = demands[c]\n                if capacity > 0 and load + dem > capacity:\n                    continue\n                p = 0\n                while p <= len(route):\n                    d = insertion_delta(route, p, c)\n                    key = (d, route_cost(route) + d, dist(depot, c), c, p)\n                    if best_key is None or key < best_key:\n                        best_key = key\n                        best_c = c\n                        best_pos = p\n                    p += 1\n            if best_c is None:\n                break\n            route.insert(best_pos, best_c)\n            load += demands[best_c]\n            del remaining[best_c]\n\n        routes.append(route)\n\n    # Improvement loop: intra-route 2-opt, relocate, swap, and split/merge style cleanup.\n    improved = True\n    while improved:\n        improved = False\n\n        # 2-opt within each route\n        r = 0\n        while r < len(routes):\n            route = routes[r]\n            m = len(route)\n            if m >= 4:\n                best_delta = 0.0\n                bi = None\n                bj = None\n                i = 0\n                while i < m - 1:\n                    a = depot if i == 0 else route[i - 1]\n                    b = route[i]\n                    j = i + 2\n                    while j < m:\n                        c = route[j - 1]\n                        d = depot if j == m else route[j]\n                        delta = (dist(a, c) + dist(b, d)) - (dist(a, b) + dist(c, d))\n                        if delta < best_delta - 1e-12:\n                            best_delta = delta\n                            bi = i\n                            bj = j\n                        j += 1\n                    i += 1\n                if bi is not None:\n                    route[bi:bj] = route[bi:bj][::-1]\n                    improved = True\n            r += 1\n\n        # Relocate between routes\n        best_move = None\n        i = 0\n        while i < len(routes):\n            ra = routes[i]\n            da = route_demand(ra)\n            pa = 0\n            while pa < len(ra):\n                c = ra[pa]\n                dc = demands[c]\n                j = 0\n                while j < len(routes):\n                    if i != j:\n                        rb = routes[j]\n                        db = route_demand(rb)\n                        if capacity <= 0 or db + dc <= capacity:\n                            remove_delta = insertion_delta(ra, pa, c) * -1.0\n                            # remove_delta computed via local edges\n                            prev_a = depot if pa == 0 else ra[pa - 1]\n                            next_a = depot if pa + 1 == len(ra) else ra[pa + 1]\n                            remove_delta = (dist(prev_a, next_a) - dist(prev_a, c) - dist(c, next_a))\n                            pb = 0\n                            while pb <= len(rb):\n                                add_delta = insertion_delta(rb, pb, c)\n                                total = remove_delta + add_delta\n                                key = (total, c, i, j, pa, pb)\n                                if best_move is None or key < best_move:\n                                    best_move = key\n                    j += 1\n                pa += 1\n            i += 1\n\n        if best_move is not None and best_move[0] < -1e-12:\n            _, c, i, j, pa, pb = best_move\n            if i < len(routes) and j < len(routes):\n                if pa < len(routes[i]) and routes[i][pa] == c:\n                    routes[i].pop(pa)\n                    routes[j].insert(pb, c)\n                    if len(routes[i]) == 0:\n                        routes.pop(i)\n                    improved = True\n                    continue\n\n        # Swap between routes\n        best_swap = None\n        i = 0\n        while i < len(routes):\n            ra = routes[i]\n            da = route_demand(ra)\n            pa = 0\n            while pa < len(ra):\n                a = ra[pa]\n                daa = demands[a]\n                j = i + 1\n                while j < len(routes):\n                    rb = routes[j]\n                    db = route_demand(rb)\n                    pb = 0\n                    while pb < len(rb):\n                        b = rb[pb]\n                        dbb = demands[b]\n                        if (capacity <= 0 or (da - daa + dbb <= capacity and db - dbb + daa <= capacity)):\n                            prev_a = depot if pa == 0 else ra[pa - 1]\n                            next_a = depot if pa + 1 == len(ra) else ra[pa + 1]\n                            prev_b = depot if pb == 0 else rb[pb - 1]\n                            next_b = depot if pb + 1 == len(rb) else rb[pb + 1]\n                            before = (dist(prev_a, a) + dist(a, next_a) + dist(prev_b, b) + dist(b, next_b))\n                            after = (dist(prev_a, b) + dist(b, next_a) + dist(prev_b, a) + dist(a, next_b))\n                            delta = after - before\n                            key = (delta, a, b, i, j, pa, pb)\n                            if best_swap is None or key < best_swap:\n                                best_swap = key\n                        pb += 1\n                    j += 1\n                pa += 1\n            i += 1\n\n        if best_swap is not None and best_swap[0] < -1e-12:\n            _, a, b, i, j, pa, pb = best_swap\n            if i < len(routes) and j < len(routes):\n                if pa < len(routes[i]) and pb < len(routes[j]) and routes[i][pa] == a and routes[j][pb] == b:\n                    routes[i][pa] = b\n                    routes[j][pb] = a\n                    improved = True\n                    continue\n\n    # Final cleanup: remove any empty routes and ensure all customers appear once.\n    cleaned = []\n    seen = {}\n    for route in routes:\n        if len(route) == 0:\n            continue\n        nr = []\n        for c in route:\n            if c != depot and c not in seen:\n                seen[c] = 1\n                nr.append(c)\n        if len(nr) > 0:\n            cleaned.append(nr)\n\n    missing = []\n    for c in customers:\n        if c not in seen:\n            missing.append(c)\n\n    # Repair missing by greedy insertion into feasible routes; otherwise singleton routes.\n    for c in missing:\n        best_r = None\n        best_p = None\n        best_key = None\n        for r_idx in range(len(cleaned)):\n            route = cleaned[r_idx]\n            if capacity > 0 and route_demand(route) + demands[c] > capacity:\n                continue\n            p = 0\n            while p <= len(route):\n                d = insertion_delta(route, p, c)\n                key = (d, route_cost(route) + d, r_idx, p, c)\n                if best_key is None or key < best_key:\n                    best_key = key\n                    best_r = r_idx\n                    best_p = p\n                p += 1\n        if best_r is None:\n            cleaned.append([c])\n        else:\n            cleaned[best_r].insert(best_p, c)\n\n    # Remove duplicates if any slipped through, preserving first occurrence.\n    final_routes = []\n    used = {}\n    for route in cleaned:\n        nr = []\n        for c in route:\n            if c != depot and c not in used:\n                used[c] = 1\n                nr.append(c)\n        if nr:\n            final_routes.append(nr)\n\n    # Last resort: put any unseen customers in singleton routes.\n    for c in customers:\n        if c not in used:\n            final_routes.append([c])\n            used[c] = 1\n\n    return final_routes",
+    "used_fallback": false,
+    "validation_issues": [
+      "trimmed trailing lines to fit line budget",
+      "salvaged by trimming incomplete trailing block"
+    ]
+  },
+  "novelty": 0.348279,
+  "train_score_for_minimization": 8.958333,
+  "train_summary": {
+    "results": [
+      {
+        "descriptors": {
+          "aspect_ratio": 1.021762,
+          "bottleneck_score": 0.814063,
+          "capacity": 206,
+          "clusteredness_score": 0.907031,
+          "coordinate_spread_norm": 0.925315,
+          "corridor_score": 0.021298,
+          "customer_count": 100,
+          "demand_cv": 0.55785,
+          "demand_max_norm": 0.485437,
+          "demand_mean_norm": 0.249854,
+          "demand_pressure": 0.999417,
+          "distance_cv": 0.498378,
+          "distance_mean_norm": 0.372124,
+          "grid_likeness": 0.11,
+          "nearest_neighbor_trap_score": 0.06403,
+          "nn_distance_cv": 0.688729,
+          "nn_distance_mean_norm": 0.034596,
+          "route_size_hint": 4.0,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 25
+        },
+        "instance_name": "X-n101-k25",
+        "runtime_ms": 122.6375,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "missing 100 customers"
+          ],
+          "feasible": false,
+          "missing_count": 100,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 7.0,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.027749,
+          "bottleneck_score": 0.798788,
+          "capacity": 66,
+          "clusteredness_score": 0.899394,
+          "coordinate_spread_norm": 0.930168,
+          "corridor_score": 0.027,
+          "customer_count": 109,
+          "demand_cv": 0.245851,
+          "demand_max_norm": 0.151515,
+          "demand_mean_norm": 0.113428,
+          "demand_pressure": 0.951049,
+          "distance_cv": 0.472398,
+          "distance_mean_norm": 0.368552,
+          "grid_likeness": 0.165138,
+          "nearest_neighbor_trap_score": 0.053669,
+          "nn_distance_cv": 0.533459,
+          "nn_distance_mean_norm": 0.037079,
+          "route_size_hint": 8.384615,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n110-k13",
+        "runtime_ms": 120.3022,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "missing 109 customers"
+          ],
+          "feasible": false,
+          "missing_count": 109,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 7.45,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.017223,
+          "bottleneck_score": 0.852396,
+          "capacity": 188,
+          "clusteredness_score": 0.926198,
+          "coordinate_spread_norm": 0.89327,
+          "corridor_score": 0.016931,
+          "customer_count": 124,
+          "demand_cv": 0.656149,
+          "demand_max_norm": 0.531915,
+          "demand_mean_norm": 0.237474,
+          "demand_pressure": 0.98156,
+          "distance_cv": 0.598362,
+          "distance_mean_norm": 0.344102,
+          "grid_likeness": 0.193548,
+          "nearest_neighbor_trap_score": 0.077781,
+          "nn_distance_cv": 1.053908,
+          "nn_distance_mean_norm": 0.025395,
+          "route_size_hint": 4.133333,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 30
+        },
+        "instance_name": "X-n125-k30",
+        "runtime_ms": 121.4034,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "missing 124 customers"
+          ],
+          "feasible": false,
+          "missing_count": 124,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 8.2,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.934498,
+          "bottleneck_score": 0.833457,
+          "capacity": 643,
+          "clusteredness_score": 0.916728,
+          "coordinate_spread_norm": 0.689034,
+          "corridor_score": 0.48307,
+          "customer_count": 133,
+          "demand_cv": 0.415926,
+          "demand_max_norm": 0.155521,
+          "demand_mean_norm": 0.096119,
+          "demand_pressure": 0.983371,
+          "distance_cv": 0.622037,
+          "distance_mean_norm": 0.276297,
+          "grid_likeness": 0.233083,
+          "nearest_neighbor_trap_score": 0.074344,
+          "nn_distance_cv": 0.892784,
+          "nn_distance_mean_norm": 0.023008,
+          "route_size_hint": 10.230769,
+          "size_bucket": "medium",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n134-k13",
+        "runtime_ms": 122.8324,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "missing 133 customers"
+          ],
+          "feasible": false,
+          "missing_count": 133,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 8.65,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.118743,
+          "bottleneck_score": 0.893852,
+          "capacity": 12,
+          "clusteredness_score": 0.946926,
+          "coordinate_spread_norm": 0.884056,
+          "corridor_score": 0.106139,
+          "customer_count": 156,
+          "demand_cv": 0.0,
+          "demand_max_norm": 0.083333,
+          "demand_mean_norm": 0.083333,
+          "demand_pressure": 1.0,
+          "distance_cv": 0.716517,
+          "distance_mean_norm": 0.328337,
+          "grid_likeness": 0.282051,
+          "nearest_neighbor_trap_score": 0.058611,
+          "nn_distance_cv": 1.10432,
+          "nn_distance_mean_norm": 0.017426,
+          "route_size_hint": 12.0,
+          "size_bucket": "medium",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n157-k13",
+        "runtime_ms": 123.6921,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "missing 156 customers"
+          ],
+          "feasible": false,
+          "missing_count": 156,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 9.8,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.06015,
+          "bottleneck_score": 0.826299,
+          "capacity": 944,
+          "clusteredness_score": 0.913149,
+          "coordinate_spread_norm": 0.646746,
+          "corridor_score": 0.056738,
+          "customer_count": 213,
+          "demand_cv": 0.595001,
+          "demand_max_norm": 0.105932,
+          "demand_mean_norm": 0.051504,
+          "demand_pressure": 0.997304,
+          "distance_cv": 0.526673,
+          "distance_mean_norm": 0.244639,
+          "grid_likeness": 0.403756,
+          "nearest_neighbor_trap_score": 0.094318,
+          "nn_distance_cv": 1.085984,
+          "nn_distance_mean_norm": 0.021247,
+          "route_size_hint": 19.363636,
+          "size_bucket": "large",
+          "structure_class": "grid_like",
+          "vehicle_count_hint": 11
+        },
+        "instance_name": "X-n214-k11",
+        "runtime_ms": 130.6904,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "missing 213 customers"
+          ],
+          "feasible": false,
+          "missing_count": 213,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 12.65,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      }
+    ],
+    "summary": {
+      "enabled": true,
+      "family_means": [
+        {
+          "count": 1,
+          "family": "grid_like",
+          "feasibility_rate": 0.0,
+          "mean_feasible_gap": null,
+          "mean_penalized_gap": 12.65
+        },
+        {
+          "count": 5,
+          "family": "two_cluster_bottleneck",
+          "feasibility_rate": 0.0,
+          "mean_feasible_gap": null,
+          "mean_penalized_gap": 8.22
+        }
+      ],
+      "feasibility_rate": 0.0,
+      "instance_count": 6,
+      "mean_feasible_gap": null,
+      "mean_penalized_gap": 8.958333,
+      "mean_runtime_ms": 123.593,
+      "panel_name": "train",
+      "worst_instances": [
+        {
+          "errors": [
+            "missing 213 customers"
+          ],
+          "family": "grid_like",
+          "feasible": false,
+          "instance_name": "X-n214-k11",
+          "optimality_gap": null,
+          "penalized_gap": 12.65,
+          "runtime_ms": 130.6904
+        },
+        {
+          "errors": [
+            "missing 156 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n157-k13",
+          "optimality_gap": null,
+          "penalized_gap": 9.8,
+          "runtime_ms": 123.6921
+        },
+        {
+          "errors": [
+            "missing 133 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n134-k13",
+          "optimality_gap": null,
+          "penalized_gap": 8.65,
+          "runtime_ms": 122.8324
+        },
+        {
+          "errors": [
+            "missing 124 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n125-k30",
+          "optimality_gap": null,
+          "penalized_gap": 8.2,
+          "runtime_ms": 121.4034
+        },
+        {
+          "errors": [
+            "missing 109 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n110-k13",
+          "optimality_gap": null,
+          "penalized_gap": 7.45,
+          "runtime_ms": 120.3022
+        }
+      ]
+    },
+    "train_score_for_minimization": 8.958333
+  }
+}

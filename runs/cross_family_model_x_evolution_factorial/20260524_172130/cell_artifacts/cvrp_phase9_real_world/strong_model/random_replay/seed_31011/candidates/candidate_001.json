@@ -1,0 +1,371 @@
+{
+  "accepted": true,
+  "candidate_index": 1,
+  "generation": {
+    "code": "def solve_cvrp(instance):\n    # Generic deterministic CVRP solver: parse, construct, repair, and improve.\n    # Returns list of routes, each route is a list of customer ids (no depot).\n\n    def get_any(d, keys, default=None):\n        if isinstance(d, dict):\n            for k in keys:\n                if k in d:\n                    return d[k]\n        return default\n\n    def is_num(x):\n        return isinstance(x, (int, float)) and not isinstance(x, bool)\n\n    # ---- Parse instance ----\n    depot = get_any(instance, [\"depot\", \"depot_id\", \"source\", \"origin\"], 0)\n    customers = get_any(instance, [\"customers\", \"nodes\", \"points\", \"locations\"], None)\n    demands = get_any(instance, [\"demands\", \"demand\", \"loads\"], None)\n    capacity = get_any(instance, [\"capacity\", \"vehicle_capacity\", \"cap\"], None)\n    dist_matrix = get_any(instance, [\"distance_matrix\", \"distances\", \"matrix\"], None)\n    coords = get_any(instance, [\"coords\", \"coordinates\", \"xy\", \"pos\"], None)\n\n    # Build customer ids.\n    if customers is None:\n        # Infer from demand keys or coordinate keys.\n        if isinstance(demands, dict):\n            customer_ids = [k for k in demands.keys() if k != depot]\n        elif isinstance(coords, dict):\n            customer_ids = [k for k in coords.keys() if k != depot]\n        elif isinstance(instance, dict) and \"n\" in instance and is_num(instance[\"n\"]):\n            n = int(instance[\"n\"])\n            customer_ids = [i for i in range(n) if i != depot]\n        else:\n            customer_ids = []\n    elif isinstance(customers, dict):\n        customer_ids = [k for k in customers.keys() if k != depot]\n    else:\n        customer_ids = []\n        for i, c in enumerate(customers):\n            # if explicit node objects with id, use id; else index.\n            if isinstance(c, dict) and \"id\" in c:\n                cid = c[\"id\"]\n            else:\n                cid = i\n            if cid != depot:\n                customer_ids.append(cid)\n\n    # Deduplicate while preserving order.\n    seen = set()\n    ordered_ids = []\n    for cid in customer_ids:\n        if cid not in seen:\n            seen.add(cid)\n            ordered_ids.append(cid)\n    customer_ids = ordered_ids\n\n    # Demand accessor.\n    def demand_of(cid):\n        if demands is None:\n            return 0\n        if isinstance(demands, dict):\n            return int(demands.get(cid, 0))\n        if isinstance(demands, (list, tuple)):\n            if isinstance(cid, int) and 0 <= cid < len(demands):\n                return int(demands[cid])\n            return 0\n        return 0\n\n    # Coordinates accessor.\n    def coord_of(cid):\n        if coords is None:\n            if isinstance(customers, list):\n                if isinstance(cid, int) and 0 <= cid < len(customers):\n                    c = customers[cid]\n                    if isinstance(c, dict):\n                        if \"x\" in c and \"y\" in c:\n                            return (c[\"x\"], c[\"y\"])\n                        if \"coord\" in c:\n                            return tuple(c[\"coord\"])\n                    elif isinstance(c, (list, tuple)) and len(c) >= 2:\n                        return (c[0], c[1])\n            return None\n        if isinstance(coords, dict):\n            v = coords.get(cid, None)\n            if isinstance(v, dict):\n                if \"x\" in v and \"y\" in v:\n                    return (v[\"x\"], v[\"y\"])\n                if \"coord\" in v:\n                    return tuple(v[\"coord\"])\n            elif isinstance(v, (list, tuple)) and len(v) >= 2:\n                return (v[0], v[1])\n        elif isinstance(coords, (list, tuple)):\n            if isinstance(cid, int) and 0 <= cid < len(coords):\n                v = coords[cid]\n                if isinstance(v, dict):\n                    if \"x\" in v and \"y\" in v:\n                        return (v[\"x\"], v[\"y\"])\n                    if \"coord\" in v:\n                        return tuple(v[\"coord\"])\n                elif isinstance(v, (list, tuple)) and len(v) >= 2:\n                    return (v[0], v[1])\n        return None\n\n    # Distance accessor.\n    def dist(a, b):\n        if a == b:\n            return 0\n        if dist_matrix is not None:\n            try:\n                return dist_matrix[a][b]\n            except Exception:\n                try:\n                    return dist_matrix[b][a]\n                except Exception:\n                    pass\n        ca = coord_of(a)\n        cb = coord_of(b)\n        if ca is not None and cb is not None:\n            dx = ca[0] - cb[0]\n            dy = ca[1] - cb[1]\n            return (dx * dx + dy * dy) ** 0.5\n        # Fallback: ordinal difference (deterministic but weak)\n        try:\n            return abs(a - b)\n        except Exception:\n            return 1\n\n    if capacity is None:\n        total = 0\n        for cid in customer_ids:\n            total += demand_of(cid)\n        capacity = max(total, 1)\n\n    capacity = int(capacity)\n\n    # ---- Sort customers: sweep around depot if coordinates available; else demand then id ----\n    depot_coord = coord_of(depot)\n\n    def sort_key(cid):\n        c = coord_of(cid)\n        if depot_coord is not None and c is not None:\n            dx = c[0] - depot_coord[0]\n            dy = c[1] - depot_coord[1]\n            # angle-like order with distance tiebreak\n            quad = 0\n            if dy < 0:\n                quad = 1\n            ang = (dy / (abs(dx) + abs(dy) + 1e-12))\n            return (round(ang, 8), dx * dx + dy * dy, cid)\n        return (-demand_of(cid), cid)\n\n    customer_ids.sort(key=sort_key)\n\n    # ---- Initial greedy route construction ----\n    unvisited = set(customer_ids)\n    routes = []\n    while unvisited:\n        # start route with a \"hard\" customer: highest demand / farthest\n        start = None\n        best = None\n        for cid in sorted(unvisited):\n            d = demand_of(cid)\n            cdist = dist(depot, cid)\n            score = (d, cdist, -cid if isinstance(cid, int) else 0)\n            if best is None or score > best:\n                best = score\n                start = cid\n        route = [start]\n        load = demand_of(start)\n        unvisited.remove(start)\n\n        # nearest-feasible insertion at route end, but with occasional best insertion.\n        while True:\n            candidates = []\n            last = route[-1]\n            for cid in unvisited:\n                dem = demand_of(cid)\n                if load + dem <= capacity:\n                    candidates.append(cid)\n            if not candidates:\n                break\n\n            # Choose customer minimizing incremental cost at end, with mild preference for nearer to depot too.\n            chosen = None\n            best_cost = None\n            for cid in candidates:\n                inc = dist(last, cid) + dist(cid, depot) - dist(last, depot)\n                # if route length > 1, also consider bringing it closer to the current route.\n                if len(route) >= 2:\n                    prev = route[-2]\n                    inc2 = dist(prev, cid) + dist(cid, last) - dist(prev, last)\n                    inc = min(inc, inc2)\n                key = (round(inc, 10), demand_of(cid), cid)\n                if best_cost is None or key < best_cost:\n                    best_cost = key\n                    chosen = cid\n            route.append(chosen)\n            load += demand_of(chosen)\n            unvisited.remove(chosen)\n\n        routes.append(route)\n\n    # ---- Repair: if any route overweight due to bad demand parsing, split deterministically ----\n    repaired = []\n    for route in routes:\n        cur = []\n        load = 0\n        for cid in route:\n            dem = demand_of(cid)\n            if dem > capacity:\n                # Put alone if possible; otherwise keep alone anyway.\n                if cur:\n                    repaired.append(cur)\n                    cur = []\n                    load = 0\n                repaired.append([cid])\n                continue\n            if load + dem > capacity and cur:\n                repaired.append(cur)\n                cur = [cid]\n                load = dem\n            else:\n                cur.append(cid)\n                load += dem\n        if cur:\n            repaired.append(cur)\n    routes = repaired\n\n    # ---- Local search: relocate from later routes to earlier routes if feasible and beneficial ----\n    def route_load(route):\n        s = 0\n        for cid in route:\n            s += demand_of(cid)\n        return s\n\n    improved = True\n    iters = 0\n    while improved and iters < 50:\n        improved = False\n        iters += 1\n        i = 0\n        while i < len(routes):\n            j = 0\n            while j < len(routes):\n                if i == j:\n                    j += 1\n                    continue\n                r1 = routes[i]\n                r2 = routes[j]\n                best_move = None\n                best_delta = 0\n                load1 = route_load(r1)\n                load2 = route_load(r2)\n                for pos in range(len(r2)):\n                    cid = r2[pos]\n                    dem = demand_of(cid)\n                    if load1 + dem > capacity:\n                        continue\n                    # compute insertion delta into r1 at best position\n                    def route_cost(route):\n                        if not route:\n                            return 0\n                        c = dist(depot, route[0])\n                        for k in range(len(route) - 1):\n                            c += dist(route[k], route[k + 1])\n                        c += dist(route[-1], depot)\n                        return c\n\n                    base = route_cost(r1) + route_cost(r2)\n                    # try all insertion positions in r1\n                    best_pos = 0\n                    best_new = None\n                    for ins in range(len(r1) + 1):\n                        nr1 = r1[:ins] + [cid] + r1[ins:]\n                        nr2 = r2[:pos] + r2[pos + 1:]\n                        if not nr2:\n                            continue\n                        new_cost = route_cost(nr1) + route_cost(nr2)\n                        delta = base - new_cost\n                        if best_new is None or delta > best_new[0] or (delta == best_new[0] and (ins, pos, cid) < (best_new[1], best_new[2], best_new[3])):\n                            best_new = (delta, ins, pos, cid)",
+    "error": null,
+    "model_name": "gpt-5.4-mini",
+    "prompt": "Return only raw Python source code.\nDefine exactly this function:\ndef solve_cvrp(instance):\n    return routes\n\nRules:\n- No imports.\n- Return a list of routes; each route is a list of customer ids and must not include the depot.\n- Visit every customer exactly once and respect vehicle capacity.\n- Build deterministic, interpretable CVRP solver logic using constructive, repair, and local-search ideas.\n- Do not rely on held-out data.\n\nTechnique: random_replay. Candidate 1.\nNo replay archive entries are available yet.",
+    "provider": "openai",
+    "raw_text": "def solve_cvrp(instance):\n    # Generic deterministic CVRP solver: parse, construct, repair, and improve.\n    # Returns list of routes, each route is a list of customer ids (no depot).\n\n    def get_any(d, keys, default=None):\n        if isinstance(d, dict):\n            for k in keys:\n                if k in d:\n                    return d[k]\n        return default\n\n    def is_num(x):\n        return isinstance(x, (int, float)) and not isinstance(x, bool)\n\n    # ---- Parse instance ----\n    depot = get_any(instance, [\"depot\", \"depot_id\", \"source\", \"origin\"], 0)\n    customers = get_any(instance, [\"customers\", \"nodes\", \"points\", \"locations\"], None)\n    demands = get_any(instance, [\"demands\", \"demand\", \"loads\"], None)\n    capacity = get_any(instance, [\"capacity\", \"vehicle_capacity\", \"cap\"], None)\n    dist_matrix = get_any(instance, [\"distance_matrix\", \"distances\", \"matrix\"], None)\n    coords = get_any(instance, [\"coords\", \"coordinates\", \"xy\", \"pos\"], None)\n\n    # Build customer ids.\n    if customers is None:\n        # Infer from demand keys or coordinate keys.\n        if isinstance(demands, dict):\n            customer_ids = [k for k in demands.keys() if k != depot]\n        elif isinstance(coords, dict):\n            customer_ids = [k for k in coords.keys() if k != depot]\n        elif isinstance(instance, dict) and \"n\" in instance and is_num(instance[\"n\"]):\n            n = int(instance[\"n\"])\n            customer_ids = [i for i in range(n) if i != depot]\n        else:\n            customer_ids = []\n    elif isinstance(customers, dict):\n        customer_ids = [k for k in customers.keys() if k != depot]\n    else:\n        customer_ids = []\n        for i, c in enumerate(customers):\n            # if explicit node objects with id, use id; else index.\n            if isinstance(c, dict) and \"id\" in c:\n                cid = c[\"id\"]\n            else:\n                cid = i\n            if cid != depot:\n                customer_ids.append(cid)\n\n    # Deduplicate while preserving order.\n    seen = set()\n    ordered_ids = []\n    for cid in customer_ids:\n        if cid not in seen:\n            seen.add(cid)\n            ordered_ids.append(cid)\n    customer_ids = ordered_ids\n\n    # Demand accessor.\n    def demand_of(cid):\n        if demands is None:\n            return 0\n        if isinstance(demands, dict):\n            return int(demands.get(cid, 0))\n        if isinstance(demands, (list, tuple)):\n            if isinstance(cid, int) and 0 <= cid < len(demands):\n                return int(demands[cid])\n            return 0\n        return 0\n\n    # Coordinates accessor.\n    def coord_of(cid):\n        if coords is None:\n            if isinstance(customers, list):\n                if isinstance(cid, int) and 0 <= cid < len(customers):\n                    c = customers[cid]\n                    if isinstance(c, dict):\n                        if \"x\" in c and \"y\" in c:\n                            return (c[\"x\"], c[\"y\"])\n                        if \"coord\" in c:\n                            return tuple(c[\"coord\"])\n                    elif isinstance(c, (list, tuple)) and len(c) >= 2:\n                        return (c[0], c[1])\n            return None\n        if isinstance(coords, dict):\n            v = coords.get(cid, None)\n            if isinstance(v, dict):\n                if \"x\" in v and \"y\" in v:\n                    return (v[\"x\"], v[\"y\"])\n                if \"coord\" in v:\n                    return tuple(v[\"coord\"])\n            elif isinstance(v, (list, tuple)) and len(v) >= 2:\n                return (v[0], v[1])\n        elif isinstance(coords, (list, tuple)):\n            if isinstance(cid, int) and 0 <= cid < len(coords):\n                v = coords[cid]\n                if isinstance(v, dict):\n                    if \"x\" in v and \"y\" in v:\n                        return (v[\"x\"], v[\"y\"])\n                    if \"coord\" in v:\n                        return tuple(v[\"coord\"])\n                elif isinstance(v, (list, tuple)) and len(v) >= 2:\n                    return (v[0], v[1])\n        return None\n\n    # Distance accessor.\n    def dist(a, b):\n        if a == b:\n            return 0\n        if dist_matrix is not None:\n            try:\n                return dist_matrix[a][b]\n            except Exception:\n                try:\n                    return dist_matrix[b][a]\n                except Exception:\n                    pass\n        ca = coord_of(a)\n        cb = coord_of(b)\n        if ca is not None and cb is not None:\n            dx = ca[0] - cb[0]\n            dy = ca[1] - cb[1]\n            return (dx * dx + dy * dy) ** 0.5\n        # Fallback: ordinal difference (deterministic but weak)\n        try:\n            return abs(a - b)\n        except Exception:\n            return 1\n\n    if capacity is None:\n        total = 0\n        for cid in customer_ids:\n            total += demand_of(cid)\n        capacity = max(total, 1)\n\n    capacity = int(capacity)\n\n    # ---- Sort customers: sweep around depot if coordinates available; else demand then id ----\n    depot_coord = coord_of(depot)\n\n    def sort_key(cid):\n        c = coord_of(cid)\n        if depot_coord is not None and c is not None:\n            dx = c[0] - depot_coord[0]\n            dy = c[1] - depot_coord[1]\n            # angle-like order with distance tiebreak\n            quad = 0\n            if dy < 0:\n                quad = 1\n            ang = (dy / (abs(dx) + abs(dy) + 1e-12))\n            return (round(ang, 8), dx * dx + dy * dy, cid)\n        return (-demand_of(cid), cid)\n\n    customer_ids.sort(key=sort_key)\n\n    # ---- Initial greedy route construction ----\n    unvisited = set(customer_ids)\n    routes = []\n    while unvisited:\n        # start route with a \"hard\" customer: highest demand / farthest\n        start = None\n        best = None\n        for cid in sorted(unvisited):\n            d = demand_of(cid)\n            cdist = dist(depot, cid)\n            score = (d, cdist, -cid if isinstance(cid, int) else 0)\n            if best is None or score > best:\n                best = score\n                start = cid\n        route = [start]\n        load = demand_of(start)\n        unvisited.remove(start)\n\n        # nearest-feasible insertion at route end, but with occasional best insertion.\n        while True:\n            candidates = []\n            last = route[-1]\n            for cid in unvisited:\n                dem = demand_of(cid)\n                if load + dem <= capacity:\n                    candidates.append(cid)\n            if not candidates:\n                break\n\n            # Choose customer minimizing incremental cost at end, with mild preference for nearer to depot too.\n            chosen = None\n            best_cost = None\n            for cid in candidates:\n                inc = dist(last, cid) + dist(cid, depot) - dist(last, depot)\n                # if route length > 1, also consider bringing it closer to the current route.\n                if len(route) >= 2:\n                    prev = route[-2]\n                    inc2 = dist(prev, cid) + dist(cid, last) - dist(prev, last)\n                    inc = min(inc, inc2)\n                key = (round(inc, 10), demand_of(cid), cid)\n                if best_cost is None or key < best_cost:\n                    best_cost = key\n                    chosen = cid\n            route.append(chosen)\n            load += demand_of(chosen)\n            unvisited.remove(chosen)\n\n        routes.append(route)\n\n    # ---- Repair: if any route overweight due to bad demand parsing, split deterministically ----\n    repaired = []\n    for route in routes:\n        cur = []\n        load = 0\n        for cid in route:\n            dem = demand_of(cid)\n            if dem > capacity:\n                # Put alone if possible; otherwise keep alone anyway.\n                if cur:\n                    repaired.append(cur)\n                    cur = []\n                    load = 0\n                repaired.append([cid])\n                continue\n            if load + dem > capacity and cur:\n                repaired.append(cur)\n                cur = [cid]\n                load = dem\n            else:\n                cur.append(cid)\n                load += dem\n        if cur:\n            repaired.append(cur)\n    routes = repaired\n\n    # ---- Local search: relocate from later routes to earlier routes if feasible and beneficial ----\n    def route_load(route):\n        s = 0\n        for cid in route:\n            s += demand_of(cid)\n        return s\n\n    improved = True\n    iters = 0\n    while improved and iters < 50:\n        improved = False\n        iters += 1\n        i = 0\n        while i < len(routes):\n            j = 0\n            while j < len(routes):\n                if i == j:\n                    j += 1\n                    continue\n                r1 = routes[i]\n                r2 = routes[j]\n                best_move = None\n                best_delta = 0\n                load1 = route_load(r1)\n                load2 = route_load(r2)\n                for pos in range(len(r2)):\n                    cid = r2[pos]\n                    dem = demand_of(cid)\n                    if load1 + dem > capacity:\n                        continue\n                    # compute insertion delta into r1 at best position\n                    def route_cost(route):\n                        if not route:\n                            return 0\n                        c = dist(depot, route[0])\n                        for k in range(len(route) - 1):\n                            c += dist(route[k], route[k + 1])\n                        c += dist(route[-1], depot)\n                        return c\n\n                    base = route_cost(r1) + route_cost(r2)\n                    # try all insertion positions in r1\n                    best_pos = 0\n                    best_new = None\n                    for ins in range(len(r1) + 1):\n                        nr1 = r1[:ins] + [cid] + r1[ins:]\n                        nr2 = r2[:pos] + r2[pos + 1:]\n                        if not nr2:\n                            continue\n                        new_cost = route_cost(nr1) + route_cost(nr2)\n                        delta = base - new_cost\n                        if best_new is None or delta > best_new[0] or (delta == best_new[0] and (ins, pos, cid) < (best_new[1], best_new[2], best_new[3])):\n                            best_new = (delta, ins, pos, cid)\n                    if best_new is not None and best_new[0] > best_delta:\n                        best_delta = best_new[0]\n                        best_move = (best_new[1], best_new[2], best_new[3])\n                if best_move is not None and best_delta > 1e-12:\n                    ins, pos, cid = best_move\n                    r1 = routes[i]\n                    r2 = routes[j]\n                    r1.insert(ins, cid)\n                    del r2[pos]\n                    if not r2:\n                        del routes[j]\n                        if j < i:\n                            i -= 1\n                        improved = True\n                        break\n                    improved = True\n                    continue\n                j += 1\n            if improved:\n                break\n            i += 1\n\n    # Remove empty routes if any.\n    routes = [r for r in routes if r]\n\n    # Final sanity: ensure every customer appears exactly once, fixing omissions/duplications deterministically.\n    counts = {}\n    for r in routes:\n        for cid in r:\n            counts[cid] = counts.get(cid, 0) + 1\n\n    missing = [cid for cid in customer_ids if counts.get(cid, 0) == 0]\n    extra = [cid for cid in customer_ids if counts.get(cid, 0) > 1]\n\n    # Remove duplicates beyond first occurrence.\n    if any(v > 1 for v in counts.values()):\n        seen2 = set()\n        for r in routes:\n            k = 0\n            while k < len(r):\n                cid = r[k]\n                if cid in seen2:\n                    del r[k]\n                else:\n                    seen2.add(cid)\n                    k += 1\n\n    # Insert missing customers greedily.\n    for cid in missing:\n        dem = demand_of(cid)\n        best_r = None\n        best_pos = None\n        best_inc = None\n        for ri, r in enumerate(routes):\n            load = route_load(r)\n            if load + dem > capacity:\n                continue\n            for pos in range(len(r) + 1):\n                prev = depot if pos == 0 else r[pos - 1]\n                nxt = depot if pos == len(r) else r[pos]\n                inc = dist(prev, cid) + dist(cid, nxt) - dist(prev, nxt)\n                key = (round(inc, 10), ri, pos, cid)\n                if best_inc is None or key < best_inc:\n                    best_inc = key\n                    best_r = ri\n                    best_pos = pos\n        if best_r is None:\n            routes",
+    "repair_attempted": false,
+    "submitted_code": "def solve_cvrp(instance):\n    # Generic deterministic CVRP solver: parse, construct, repair, and improve.\n    # Returns list of routes, each route is a list of customer ids (no depot).\n\n    def get_any(d, keys, default=None):\n        if isinstance(d, dict):\n            for k in keys:\n                if k in d:\n                    return d[k]\n        return default\n\n    def is_num(x):\n        return isinstance(x, (int, float)) and not isinstance(x, bool)\n\n    # ---- Parse instance ----\n    depot = get_any(instance, [\"depot\", \"depot_id\", \"source\", \"origin\"], 0)\n    customers = get_any(instance, [\"customers\", \"nodes\", \"points\", \"locations\"], None)\n    demands = get_any(instance, [\"demands\", \"demand\", \"loads\"], None)\n    capacity = get_any(instance, [\"capacity\", \"vehicle_capacity\", \"cap\"], None)\n    dist_matrix = get_any(instance, [\"distance_matrix\", \"distances\", \"matrix\"], None)\n    coords = get_any(instance, [\"coords\", \"coordinates\", \"xy\", \"pos\"], None)\n\n    # Build customer ids.\n    if customers is None:\n        # Infer from demand keys or coordinate keys.\n        if isinstance(demands, dict):\n            customer_ids = [k for k in demands.keys() if k != depot]\n        elif isinstance(coords, dict):\n            customer_ids = [k for k in coords.keys() if k != depot]\n        elif isinstance(instance, dict) and \"n\" in instance and is_num(instance[\"n\"]):\n            n = int(instance[\"n\"])\n            customer_ids = [i for i in range(n) if i != depot]\n        else:\n            customer_ids = []\n    elif isinstance(customers, dict):\n        customer_ids = [k for k in customers.keys() if k != depot]\n    else:\n        customer_ids = []\n        for i, c in enumerate(customers):\n            # if explicit node objects with id, use id; else index.\n            if isinstance(c, dict) and \"id\" in c:\n                cid = c[\"id\"]\n            else:\n                cid = i\n            if cid != depot:\n                customer_ids.append(cid)\n\n    # Deduplicate while preserving order.\n    seen = set()\n    ordered_ids = []\n    for cid in customer_ids:\n        if cid not in seen:\n            seen.add(cid)\n            ordered_ids.append(cid)\n    customer_ids = ordered_ids\n\n    # Demand accessor.\n    def demand_of(cid):\n        if demands is None:\n            return 0\n        if isinstance(demands, dict):\n            return int(demands.get(cid, 0))\n        if isinstance(demands, (list, tuple)):\n            if isinstance(cid, int) and 0 <= cid < len(demands):\n                return int(demands[cid])\n            return 0\n        return 0\n\n    # Coordinates accessor.\n    def coord_of(cid):\n        if coords is None:\n            if isinstance(customers, list):\n                if isinstance(cid, int) and 0 <= cid < len(customers):\n                    c = customers[cid]\n                    if isinstance(c, dict):\n                        if \"x\" in c and \"y\" in c:\n                            return (c[\"x\"], c[\"y\"])\n                        if \"coord\" in c:\n                            return tuple(c[\"coord\"])\n                    elif isinstance(c, (list, tuple)) and len(c) >= 2:\n                        return (c[0], c[1])\n            return None\n        if isinstance(coords, dict):\n            v = coords.get(cid, None)\n            if isinstance(v, dict):\n                if \"x\" in v and \"y\" in v:\n                    return (v[\"x\"], v[\"y\"])\n                if \"coord\" in v:\n                    return tuple(v[\"coord\"])\n            elif isinstance(v, (list, tuple)) and len(v) >= 2:\n                return (v[0], v[1])\n        elif isinstance(coords, (list, tuple)):\n            if isinstance(cid, int) and 0 <= cid < len(coords):\n                v = coords[cid]\n                if isinstance(v, dict):\n                    if \"x\" in v and \"y\" in v:\n                        return (v[\"x\"], v[\"y\"])\n                    if \"coord\" in v:\n                        return tuple(v[\"coord\"])\n                elif isinstance(v, (list, tuple)) and len(v) >= 2:\n                    return (v[0], v[1])\n        return None\n\n    # Distance accessor.\n    def dist(a, b):\n        if a == b:\n            return 0\n        if dist_matrix is not None:\n            try:\n                return dist_matrix[a][b]\n            except Exception:\n                try:\n                    return dist_matrix[b][a]\n                except Exception:\n                    pass\n        ca = coord_of(a)\n        cb = coord_of(b)\n        if ca is not None and cb is not None:\n            dx = ca[0] - cb[0]\n            dy = ca[1] - cb[1]\n            return (dx * dx + dy * dy) ** 0.5\n        # Fallback: ordinal difference (deterministic but weak)\n        try:\n            return abs(a - b)\n        except Exception:\n            return 1\n\n    if capacity is None:\n        total = 0\n        for cid in customer_ids:\n            total += demand_of(cid)\n        capacity = max(total, 1)\n\n    capacity = int(capacity)\n\n    # ---- Sort customers: sweep around depot if coordinates available; else demand then id ----\n    depot_coord = coord_of(depot)\n\n    def sort_key(cid):\n        c = coord_of(cid)\n        if depot_coord is not None and c is not None:\n            dx = c[0] - depot_coord[0]\n            dy = c[1] - depot_coord[1]\n            # angle-like order with distance tiebreak\n            quad = 0\n            if dy < 0:\n                quad = 1\n            ang = (dy / (abs(dx) + abs(dy) + 1e-12))\n            return (round(ang, 8), dx * dx + dy * dy, cid)\n        return (-demand_of(cid), cid)\n\n    customer_ids.sort(key=sort_key)\n\n    # ---- Initial greedy route construction ----\n    unvisited = set(customer_ids)\n    routes = []\n    while unvisited:\n        # start route with a \"hard\" customer: highest demand / farthest\n        start = None\n        best = None\n        for cid in sorted(unvisited):\n            d = demand_of(cid)\n            cdist = dist(depot, cid)\n            score = (d, cdist, -cid if isinstance(cid, int) else 0)\n            if best is None or score > best:\n                best = score\n                start = cid\n        route = [start]\n        load = demand_of(start)\n        unvisited.remove(start)\n\n        # nearest-feasible insertion at route end, but with occasional best insertion.\n        while True:\n            candidates = []\n            last = route[-1]\n            for cid in unvisited:\n                dem = demand_of(cid)\n                if load + dem <= capacity:\n                    candidates.append(cid)\n            if not candidates:\n                break\n\n            # Choose customer minimizing incremental cost at end, with mild preference for nearer to depot too.\n            chosen = None\n            best_cost = None\n            for cid in candidates:\n                inc = dist(last, cid) + dist(cid, depot) - dist(last, depot)\n                # if route length > 1, also consider bringing it closer to the current route.\n                if len(route) >= 2:\n                    prev = route[-2]\n                    inc2 = dist(prev, cid) + dist(cid, last) - dist(prev, last)\n                    inc = min(inc, inc2)\n                key = (round(inc, 10), demand_of(cid), cid)\n                if best_cost is None or key < best_cost:\n                    best_cost = key\n                    chosen = cid\n            route.append(chosen)\n            load += demand_of(chosen)\n            unvisited.remove(chosen)\n\n        routes.append(route)\n\n    # ---- Repair: if any route overweight due to bad demand parsing, split deterministically ----\n    repaired = []\n    for route in routes:\n        cur = []\n        load = 0\n        for cid in route:\n            dem = demand_of(cid)\n            if dem > capacity:\n                # Put alone if possible; otherwise keep alone anyway.\n                if cur:\n                    repaired.append(cur)\n                    cur = []\n                    load = 0\n                repaired.append([cid])\n                continue\n            if load + dem > capacity and cur:\n                repaired.append(cur)\n                cur = [cid]\n                load = dem\n            else:\n                cur.append(cid)\n                load += dem\n        if cur:\n            repaired.append(cur)\n    routes = repaired\n\n    # ---- Local search: relocate from later routes to earlier routes if feasible and beneficial ----\n    def route_load(route):\n        s = 0\n        for cid in route:\n            s += demand_of(cid)\n        return s\n\n    improved = True\n    iters = 0\n    while improved and iters < 50:\n        improved = False\n        iters += 1\n        i = 0\n        while i < len(routes):\n            j = 0\n            while j < len(routes):\n                if i == j:\n                    j += 1\n                    continue\n                r1 = routes[i]\n                r2 = routes[j]\n                best_move = None\n                best_delta = 0\n                load1 = route_load(r1)\n                load2 = route_load(r2)\n                for pos in range(len(r2)):\n                    cid = r2[pos]\n                    dem = demand_of(cid)\n                    if load1 + dem > capacity:\n                        continue\n                    # compute insertion delta into r1 at best position\n                    def route_cost(route):\n                        if not route:\n                            return 0\n                        c = dist(depot, route[0])\n                        for k in range(len(route) - 1):\n                            c += dist(route[k], route[k + 1])\n                        c += dist(route[-1], depot)\n                        return c\n\n                    base = route_cost(r1) + route_cost(r2)\n                    # try all insertion positions in r1\n                    best_pos = 0\n                    best_new = None\n                    for ins in range(len(r1) + 1):\n                        nr1 = r1[:ins] + [cid] + r1[ins:]\n                        nr2 = r2[:pos] + r2[pos + 1:]\n                        if not nr2:\n                            continue\n                        new_cost = route_cost(nr1) + route_cost(nr2)\n                        delta = base - new_cost\n                        if best_new is None or delta > best_new[0] or (delta == best_new[0] and (ins, pos, cid) < (best_new[1], best_new[2], best_new[3])):\n                            best_new = (delta, ins, pos, cid)\n                    if best_new is not None and best_new[0] > best_delta:\n                        best_delta = best_new[0]\n                        best_move = (best_new[1], best_new[2], best_new[3])\n                if best_move is not None and best_delta > 1e-12:\n                    ins, pos, cid = best_move\n                    r1 = routes[i]\n                    r2 = routes[j]\n                    r1.insert(ins, cid)\n                    del r2[pos]\n                    if not r2:\n                        del routes[j]\n                        if j < i:\n                            i -= 1\n                        improved = True\n                        break\n                    improved = True\n                    continue\n                j += 1\n            if improved:\n                break\n            i += 1\n\n    # Remove empty routes if any.\n    routes = [r for r in routes if r]\n\n    # Final sanity: ensure every customer appears exactly once, fixing omissions/duplications deterministically.\n    counts = {}\n    for r in routes:\n        for cid in r:\n            counts[cid] = counts.get(cid, 0) + 1\n\n    missing = [cid for cid in customer_ids if counts.get(cid, 0) == 0]\n    extra = [cid for cid in customer_ids if counts.get(cid, 0) > 1]\n\n    # Remove duplicates beyond first occurrence.\n    if any(v > 1 for v in counts.values()):\n        seen2 = set()\n        for r in routes:\n            k = 0\n            while k < len(r):\n                cid = r[k]\n                if cid in seen2:\n                    del r[k]\n                else:\n                    seen2.add(cid)\n                    k += 1\n\n    # Insert missing customers greedily.\n    for cid in missing:\n        dem = demand_of(cid)\n        best_r = None\n        best_pos = None\n        best_inc = None\n        for ri, r in enumerate(routes):\n            load = route_load(r)\n            if load + dem > capacity:\n                continue\n            for pos in range(len(r) + 1):\n                prev = depot if pos == 0 else r[pos - 1]\n                nxt = depot if pos == len(r) else r[pos]\n                inc = dist(prev, cid) + dist(cid, nxt) - dist(prev, nxt)\n                key = (round(inc, 10), ri, pos, cid)\n                if best_inc is None or key < best_inc:\n                    best_inc = key\n                    best_r = ri\n                    best_pos = pos\n        if best_r is None:\n            routes",
+    "used_fallback": false,
+    "validation_issues": [
+      "trimmed to max_characters budget",
+      "trimmed trailing lines to fit line budget"
+    ]
+  },
+  "novelty": 0.0,
+  "train_score_for_minimization": 8.958333,
+  "train_summary": {
+    "results": [
+      {
+        "descriptors": {
+          "aspect_ratio": 1.021762,
+          "bottleneck_score": 0.814063,
+          "capacity": 206,
+          "clusteredness_score": 0.907031,
+          "coordinate_spread_norm": 0.925315,
+          "corridor_score": 0.021298,
+          "customer_count": 100,
+          "demand_cv": 0.55785,
+          "demand_max_norm": 0.485437,
+          "demand_mean_norm": 0.249854,
+          "demand_pressure": 0.999417,
+          "distance_cv": 0.498378,
+          "distance_mean_norm": 0.372124,
+          "grid_likeness": 0.11,
+          "nearest_neighbor_trap_score": 0.06403,
+          "nn_distance_cv": 0.688729,
+          "nn_distance_mean_norm": 0.034596,
+          "route_size_hint": 4.0,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 25
+        },
+        "instance_name": "X-n101-k25",
+        "runtime_ms": 128.3402,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 100 customers"
+          ],
+          "feasible": false,
+          "missing_count": 100,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 7.0,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.027749,
+          "bottleneck_score": 0.798788,
+          "capacity": 66,
+          "clusteredness_score": 0.899394,
+          "coordinate_spread_norm": 0.930168,
+          "corridor_score": 0.027,
+          "customer_count": 109,
+          "demand_cv": 0.245851,
+          "demand_max_norm": 0.151515,
+          "demand_mean_norm": 0.113428,
+          "demand_pressure": 0.951049,
+          "distance_cv": 0.472398,
+          "distance_mean_norm": 0.368552,
+          "grid_likeness": 0.165138,
+          "nearest_neighbor_trap_score": 0.053669,
+          "nn_distance_cv": 0.533459,
+          "nn_distance_mean_norm": 0.037079,
+          "route_size_hint": 8.384615,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n110-k13",
+        "runtime_ms": 128.4284,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 109 customers"
+          ],
+          "feasible": false,
+          "missing_count": 109,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 7.45,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.017223,
+          "bottleneck_score": 0.852396,
+          "capacity": 188,
+          "clusteredness_score": 0.926198,
+          "coordinate_spread_norm": 0.89327,
+          "corridor_score": 0.016931,
+          "customer_count": 124,
+          "demand_cv": 0.656149,
+          "demand_max_norm": 0.531915,
+          "demand_mean_norm": 0.237474,
+          "demand_pressure": 0.98156,
+          "distance_cv": 0.598362,
+          "distance_mean_norm": 0.344102,
+          "grid_likeness": 0.193548,
+          "nearest_neighbor_trap_score": 0.077781,
+          "nn_distance_cv": 1.053908,
+          "nn_distance_mean_norm": 0.025395,
+          "route_size_hint": 4.133333,
+          "size_bucket": "small",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 30
+        },
+        "instance_name": "X-n125-k30",
+        "runtime_ms": 130.762,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 124 customers"
+          ],
+          "feasible": false,
+          "missing_count": 124,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 8.2,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.934498,
+          "bottleneck_score": 0.833457,
+          "capacity": 643,
+          "clusteredness_score": 0.916728,
+          "coordinate_spread_norm": 0.689034,
+          "corridor_score": 0.48307,
+          "customer_count": 133,
+          "demand_cv": 0.415926,
+          "demand_max_norm": 0.155521,
+          "demand_mean_norm": 0.096119,
+          "demand_pressure": 0.983371,
+          "distance_cv": 0.622037,
+          "distance_mean_norm": 0.276297,
+          "grid_likeness": 0.233083,
+          "nearest_neighbor_trap_score": 0.074344,
+          "nn_distance_cv": 0.892784,
+          "nn_distance_mean_norm": 0.023008,
+          "route_size_hint": 10.230769,
+          "size_bucket": "medium",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n134-k13",
+        "runtime_ms": 132.8328,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 133 customers"
+          ],
+          "feasible": false,
+          "missing_count": 133,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 8.65,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.118743,
+          "bottleneck_score": 0.893852,
+          "capacity": 12,
+          "clusteredness_score": 0.946926,
+          "coordinate_spread_norm": 0.884056,
+          "corridor_score": 0.106139,
+          "customer_count": 156,
+          "demand_cv": 0.0,
+          "demand_max_norm": 0.083333,
+          "demand_mean_norm": 0.083333,
+          "demand_pressure": 1.0,
+          "distance_cv": 0.716517,
+          "distance_mean_norm": 0.328337,
+          "grid_likeness": 0.282051,
+          "nearest_neighbor_trap_score": 0.058611,
+          "nn_distance_cv": 1.10432,
+          "nn_distance_mean_norm": 0.017426,
+          "route_size_hint": 12.0,
+          "size_bucket": "medium",
+          "structure_class": "two_cluster_bottleneck",
+          "vehicle_count_hint": 13
+        },
+        "instance_name": "X-n157-k13",
+        "runtime_ms": 156.1625,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 156 customers"
+          ],
+          "feasible": false,
+          "missing_count": 156,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 9.8,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      },
+      {
+        "descriptors": {
+          "aspect_ratio": 1.06015,
+          "bottleneck_score": 0.826299,
+          "capacity": 944,
+          "clusteredness_score": 0.913149,
+          "coordinate_spread_norm": 0.646746,
+          "corridor_score": 0.056738,
+          "customer_count": 213,
+          "demand_cv": 0.595001,
+          "demand_max_norm": 0.105932,
+          "demand_mean_norm": 0.051504,
+          "demand_pressure": 0.997304,
+          "distance_cv": 0.526673,
+          "distance_mean_norm": 0.244639,
+          "grid_likeness": 0.403756,
+          "nearest_neighbor_trap_score": 0.094318,
+          "nn_distance_cv": 1.085984,
+          "nn_distance_mean_norm": 0.021247,
+          "route_size_hint": 19.363636,
+          "size_bucket": "large",
+          "structure_class": "grid_like",
+          "vehicle_count_hint": 11
+        },
+        "instance_name": "X-n214-k11",
+        "runtime_ms": 139.1591,
+        "validation": {
+          "cost": null,
+          "duplicate_count": 0,
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 213 customers"
+          ],
+          "feasible": false,
+          "missing_count": 213,
+          "optimality_gap": null,
+          "over_capacity_routes": 0,
+          "penalized_gap": 12.65,
+          "route_count": 0,
+          "route_count_excess": 0,
+          "routes": []
+        }
+      }
+    ],
+    "summary": {
+      "enabled": true,
+      "family_means": [
+        {
+          "count": 1,
+          "family": "grid_like",
+          "feasibility_rate": 0.0,
+          "mean_feasible_gap": null,
+          "mean_penalized_gap": 12.65
+        },
+        {
+          "count": 5,
+          "family": "two_cluster_bottleneck",
+          "feasibility_rate": 0.0,
+          "mean_feasible_gap": null,
+          "mean_penalized_gap": 8.22
+        }
+      ],
+      "feasibility_rate": 0.0,
+      "instance_count": 6,
+      "mean_feasible_gap": null,
+      "mean_penalized_gap": 8.958333,
+      "mean_runtime_ms": 135.9475,
+      "panel_name": "train",
+      "worst_instances": [
+        {
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 213 customers"
+          ],
+          "family": "grid_like",
+          "feasible": false,
+          "instance_name": "X-n214-k11",
+          "optimality_gap": null,
+          "penalized_gap": 12.65,
+          "runtime_ms": 139.1591
+        },
+        {
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 156 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n157-k13",
+          "optimality_gap": null,
+          "penalized_gap": 9.8,
+          "runtime_ms": 156.1625
+        },
+        {
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 133 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n134-k13",
+          "optimality_gap": null,
+          "penalized_gap": 8.65,
+          "runtime_ms": 132.8328
+        },
+        {
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 124 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n125-k30",
+          "optimality_gap": null,
+          "penalized_gap": 8.2,
+          "runtime_ms": 130.762
+        },
+        {
+          "errors": [
+            "NameError: name 'isinstance' is not defined",
+            "missing 109 customers"
+          ],
+          "family": "two_cluster_bottleneck",
+          "feasible": false,
+          "instance_name": "X-n110-k13",
+          "optimality_gap": null,
+          "penalized_gap": 7.45,
+          "runtime_ms": 128.4284
+        }
+      ]
+    },
+    "train_score_for_minimization": 8.958333
+  }
+}
