@@ -234,7 +234,7 @@ Goal: separate base LLM coding strength from the added value of evolutionary cod
 - [x] Add the key `budget_matched_no_replay` control so replay is not credited for extra API budget alone.
 - [x] Preserve fixed train/held-out splits and existing validators.
 - [x] Aggregate into model x evolution matrices, within-task z-scores, variance decomposition, and effect sizes against both single-shot and budget-matched controls.
-- [ ] Run the full paid campaign and interpret replay/failure/compression only when they beat `budget_matched_no_replay`.
+- [x] Run the full paid campaign and interpret replay/failure/compression only when they beat `budget_matched_no_replay`.
 
 Research basis:
 
@@ -245,7 +245,30 @@ Research basis:
 Current status:
 - The implementation is on branch `model-strength-factorial`.
 - The no-cost smoke artifacts are intentionally written under `DO NOT COMMIT/`.
-- The official campaign should be run only after the smoke test passes and model access is confirmed.
+- The official campaign is complete and archived under `runs/cross_family_model_x_evolution_factorial/20260524_172130`.
+- The negative replay result remains valid, but the mixed nano/mini/full ladder is not clean enough for final model-strength claims.
+
+## 14. Clean Model-Strength Continuum
+
+Goal: rerun the model-strength axis with a cleaner same-family GPT-5 frontier continuum, explicit calibration, TSP saturation handling, and CVRP feasibility/optimization decomposition.
+
+- [x] Define the five pinned GPT-5 snapshot continuum requested by the supervisor.
+- [x] Add a small empirical calibration suite before the full run.
+- [x] Add realized-budget accounting for successful generations, executable candidates, fallbacks, repairs, and materialization timeouts.
+- [x] Treat TSP saturation explicitly through a changed TSP primary metric plus pooled-without-TSP analysis.
+- [x] Audit TSP materialization fallback/timeout rows.
+- [x] Split CVRP analysis into feasibility escape, penalized objective, and feasible-only quality.
+- [x] Preserve paired/bootstrap effect sizes as the primary replay/budget-control inference layer.
+
+Research basis:
+
+- Model-strength claims are cleaner when the model axis changes one major factor at a time; a pinned same-family frontier continuum avoids mixing model family, size tier, and generation class.
+- Saturated benchmarks should be diagnosed or analyzed separately because near-zero endpoint variance weakens pooled variance decompositions.
+- Feasibility-constrained optimization should separate feasibility escape from feasible-solution quality when penalty terms dominate the objective.
+
+Current status:
+- The implementation is on branch `codex/clean-model-strength-continuum`.
+- Use [configs/model_strength_continuum/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/model_strength_continuum/RUNBOOK.md).
 
 ## Exit Condition
 

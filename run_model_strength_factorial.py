@@ -23,7 +23,6 @@ from llm_cvrp_phase9.config import Phase9SuiteConfig
 from llm_cvrp_phase9.llm import default_solver_code, generate_code as generate_cvrp_code
 from llm_cvrp_phase9.validation import summarize_panel
 from model_strength_factorial_common import (
-    MODEL_TIERS,
     TASK_FAMILIES,
     TECHNIQUES,
     code_novelty,
@@ -188,6 +187,7 @@ def _generate_candidate(
     temperature = float(model_spec.get("temperature", generation_cfg.get("temperature", 0.2)))
     max_tokens = int(model_spec.get("max_tokens", generation_cfg.get("max_tokens", 2500)))
     timeout = float(generation_cfg.get("llm_timeout_seconds", 180.0))
+    reasoning_effort = str(model_spec.get("reasoning_effort", generation_cfg.get("reasoning_effort", "low")))
     if task_family == "simple_games":
         result = generate_game_code(
             provider=provider,
@@ -196,6 +196,7 @@ def _generate_candidate(
             user_prompt=prompt,
             temperature=temperature,
             max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
             pre_execution_validation=True,
             repair_invalid_submissions=bool(generation_cfg.get("repair_invalid_submissions", True)),
             timeout=timeout,
@@ -208,6 +209,7 @@ def _generate_candidate(
             user_prompt=prompt,
             temperature=temperature,
             max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
             repair_invalid_submissions=bool(generation_cfg.get("repair_invalid_submissions", True)),
             timeout=timeout,
         )
@@ -219,6 +221,7 @@ def _generate_candidate(
             user_prompt=prompt,
             temperature=temperature,
             max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort,
             repair_invalid_submissions=bool(generation_cfg.get("repair_invalid_submissions", True)),
             timeout=timeout,
             max_non_empty_lines=int(generation_cfg.get("max_non_empty_lines", 260)),
@@ -240,6 +243,8 @@ def _generate_candidate(
         "validation_issues": list(result.validation_issues),
         "used_fallback": bool(result.used_fallback),
         "repair_attempted": bool(getattr(result, "repair_attempted", False)),
+        "salvage_attempted": bool(getattr(result, "salvage_attempted", False)),
+        "reasoning_effort": reasoning_effort,
     }
 
 
@@ -381,11 +386,34 @@ def _evaluate_tsp_holdout(code: str, bundle: Any, *, seed: int) -> dict[str, Any
         (float(tsplib["mean_optimality_gap"]) * len(tsplib_results))
         + (float(synthetic["mean_optimality_gap"]) * len(synthetic_results))
     ) / combined_count
+    all_results = [*tsplib_results, *synthetic_results]
+    gaps = [float(item["optimality_gap"]) for item in all_results]
+    worst_gap = max(gaps) if gaps else 0.0
+    gap_range = (max(gaps) - min(gaps)) if len(gaps) >= 2 else 0.0
     return {
         "final_tsplib_gap": float(tsplib["mean_optimality_gap"]),
         "final_transfer_gap": round(transfer, 6),
+        "final_synthetic_holdout_gap": float(synthetic["mean_optimality_gap"]),
+        "final_worst_gap": round(worst_gap, 6),
+        "final_gap_range": round(gap_range, 6),
         "panels": {"heldout_tsplib": tsplib, "synthetic_holdout": synthetic},
     }
+
+
+def _select_tsp_primary_gap(final_eval: dict[str, Any], task_cfg: dict[str, Any]) -> tuple[str, float]:
+    metric = str(task_cfg.get("primary_metric", "tsplib_gap")).strip().lower()
+    metric_to_key = {
+        "tsplib_gap": "final_tsplib_gap",
+        "transfer_gap": "final_transfer_gap",
+        "synthetic_holdout_gap": "final_synthetic_holdout_gap",
+        "worst_gap": "final_worst_gap",
+    }
+    if metric not in metric_to_key:
+        raise SystemExit(
+            "Unknown TSP primary_metric "
+            f"{metric!r}. Valid values: {', '.join(sorted(metric_to_key))}."
+        )
+    return metric, float(final_eval[metric_to_key[metric]])
 
 
 def _phase9_config(path: str | Path) -> Any:
@@ -498,6 +526,15 @@ def _run_cell(
     first_train_score: float | None = None
     accepted_epochs = 0
     generation_success_count = 0
+    fallback_generation_count = 0
+    generation_error_count = 0
+    repair_attempt_count = 0
+    salvage_attempt_count = 0
+    executable_candidate_count = 0
+    materialization_fallback_count = 0
+    materialization_timeout_count = 0
+    accepted_fallback_epochs = 0
+    accepted_executable_epochs = 0
     novelty_values: list[float] = []
     accepted_novelty_values: list[float] = []
     candidate_payloads = []
@@ -521,6 +558,14 @@ def _run_cell(
         previous_code = candidate_code
         if not generated["error"] and not generated["used_fallback"]:
             generation_success_count += 1
+        if generated["error"]:
+            generation_error_count += 1
+        if generated["used_fallback"]:
+            fallback_generation_count += 1
+        if generated.get("repair_attempted"):
+            repair_attempt_count += 1
+        if generated.get("salvage_attempted"):
+            salvage_attempt_count += 1
 
         if task_family == "simple_games":
             train_summary = _evaluate_simple_game_train(
@@ -537,10 +582,20 @@ def _run_cell(
                 seed=seed + int(task_cfg.get("seed_base", 0)) + (candidate_index * 1000),
             )
             train_score_for_minimization = float(train_summary["train_score_for_minimization"])
+            if train_summary.get("materialization_used_fallback"):
+                materialization_fallback_count += 1
+            materialization_issues = [str(item).lower() for item in train_summary.get("materialization_issues", [])]
+            if any("timeout" in item for item in materialization_issues):
+                materialization_timeout_count += 1
         else:
             cvrp_config, train_instances, _holdout_instances = task_state
             train_summary = _evaluate_cvrp_train(candidate_code, train_instances, cvrp_config)
             train_score_for_minimization = float(train_summary["train_score_for_minimization"])
+        candidate_executable = bool(not generated["used_fallback"])
+        if task_family == "tsp" and train_summary.get("materialization_used_fallback"):
+            candidate_executable = False
+        if candidate_executable:
+            executable_candidate_count += 1
         if first_train_score is None:
             first_train_score = train_score_for_minimization
 
@@ -553,6 +608,10 @@ def _run_cell(
             incumbent_code = candidate_code
             incumbent_train_score = train_score_for_minimization
             accepted_epochs += 1
+            if candidate_executable:
+                accepted_executable_epochs += 1
+            else:
+                accepted_fallback_epochs += 1
             if candidate_index > 1:
                 accepted_novelty_values.append(novelty)
 
@@ -577,6 +636,7 @@ def _run_cell(
         candidate_payload = {
             "candidate_index": candidate_index,
             "accepted": accept,
+            "candidate_executable": candidate_executable,
             "generation": generated,
             "novelty": novelty,
             "train_score_for_minimization": train_score_for_minimization,
@@ -598,8 +658,12 @@ def _run_cell(
         extra_metrics = {
             "primary_holdout_win_rate": performance_raw,
             "primary_holdout_score_margin": secondary_raw,
+            "tsp_primary_metric": None,
             "final_tsplib_gap": None,
             "final_transfer_gap": None,
+            "final_synthetic_holdout_gap": None,
+            "final_worst_gap": None,
+            "final_gap_range": None,
             "adaptation_efficiency": None,
             "heldout_feasibility_rate": None,
             "heldout_penalized_gap": None,
@@ -608,7 +672,8 @@ def _run_cell(
         }
     elif task_family == "tsp":
         final_eval = _evaluate_tsp_holdout(final_code, task_state, seed=seed + int(task_cfg.get("seed_base", 0)) + 900_000)
-        performance_raw = -float(final_eval["final_tsplib_gap"])
+        tsp_primary_metric, primary_gap = _select_tsp_primary_gap(final_eval, task_cfg)
+        performance_raw = -primary_gap
         secondary_raw = -float(final_eval["final_transfer_gap"])
         feasibility_rate = None
         runtime_ms = None
@@ -623,8 +688,12 @@ def _run_cell(
         extra_metrics = {
             "primary_holdout_win_rate": None,
             "primary_holdout_score_margin": None,
+            "tsp_primary_metric": tsp_primary_metric,
             "final_tsplib_gap": float(final_eval["final_tsplib_gap"]),
             "final_transfer_gap": float(final_eval["final_transfer_gap"]),
+            "final_synthetic_holdout_gap": float(final_eval["final_synthetic_holdout_gap"]),
+            "final_worst_gap": float(final_eval["final_worst_gap"]),
+            "final_gap_range": float(final_eval["final_gap_range"]),
             "adaptation_efficiency": adaptation_efficiency,
             "heldout_feasibility_rate": None,
             "heldout_penalized_gap": None,
@@ -644,8 +713,12 @@ def _run_cell(
         extra_metrics = {
             "primary_holdout_win_rate": None,
             "primary_holdout_score_margin": None,
+            "tsp_primary_metric": None,
             "final_tsplib_gap": None,
             "final_transfer_gap": None,
+            "final_synthetic_holdout_gap": None,
+            "final_worst_gap": None,
+            "final_gap_range": None,
             "adaptation_efficiency": None,
             "heldout_feasibility_rate": feasibility_rate,
             "heldout_penalized_gap": float(summary["heldout_penalized_gap"]),
@@ -670,13 +743,27 @@ def _run_cell(
         "feasibility_rate": feasibility_rate,
         "runtime_ms": runtime_ms,
         "generation_success_rate": generation_success_count / max(1, candidate_budget),
+        "successful_generations": generation_success_count,
+        "generation_error_count": generation_error_count,
+        "fallback_generation_count": fallback_generation_count,
+        "repair_attempt_count": repair_attempt_count,
+        "salvage_attempt_count": salvage_attempt_count,
+        "executable_candidate_count": executable_candidate_count,
+        "materialization_fallback_count": materialization_fallback_count,
+        "materialization_timeout_count": materialization_timeout_count,
+        "accepted_fallback_epochs": accepted_fallback_epochs,
+        "accepted_executable_epochs": accepted_executable_epochs,
         "accepted_epochs": accepted_epochs,
         "acceptance_rate": accepted_epochs / max(1, candidate_budget),
         "mean_code_novelty": fmean(novelty_values) if novelty_values else 0.0,
         "primary_holdout_win_rate": extra_metrics.get("primary_holdout_win_rate"),
         "primary_holdout_score_margin": extra_metrics.get("primary_holdout_score_margin"),
+        "tsp_primary_metric": extra_metrics.get("tsp_primary_metric"),
         "final_tsplib_gap": extra_metrics.get("final_tsplib_gap"),
         "final_transfer_gap": extra_metrics.get("final_transfer_gap"),
+        "final_synthetic_holdout_gap": extra_metrics.get("final_synthetic_holdout_gap"),
+        "final_worst_gap": extra_metrics.get("final_worst_gap"),
+        "final_gap_range": extra_metrics.get("final_gap_range"),
         "adaptation_efficiency": extra_metrics.get("adaptation_efficiency"),
         "heldout_feasibility_rate": extra_metrics.get("heldout_feasibility_rate"),
         "heldout_penalized_gap": extra_metrics.get("heldout_penalized_gap"),
@@ -757,10 +844,11 @@ def _validate_config(config: dict[str, Any]) -> None:
                 int(task_cfg["seed_base"])
             except (TypeError, ValueError) as exc:
                 raise SystemExit(f"Task family {task} must define integer seed_base.") from exc
-    official_full_config = str(config.get("output_root", "")).replace("\\", "/").startswith("runs/") and set(config["task_families"]) == set(TASK_FAMILIES)
-    if official_full_config:
-        if model_tiers != MODEL_TIERS:
-            raise SystemExit(f"Official factorial config must define model tiers in order: {', '.join(MODEL_TIERS)}")
+    official_output = str(config.get("output_root", "")).replace("\\", "/").startswith("runs/") and set(config["task_families"]) == set(TASK_FAMILIES)
+    required_tiers = [str(item) for item in config.get("required_model_tiers", [])]
+    if official_output and required_tiers and model_tiers != required_tiers:
+        raise SystemExit(f"Official factorial config must define model tiers in order: {', '.join(required_tiers)}")
+    if bool(config.get("enforce_full_factorial_budgets", False)):
         expected_budgets = {
             "simple_games": {"seeds": 10, "epochs": 100},
             "tsp": {"seeds": 20, "epochs": 8},

@@ -1,5 +1,7 @@
 # Model Strength x Evolution Factorial Protocol
 
+Follow-up note: the archived 750-row mixed-ladder phase remains valid as a limitation result, but the next clean model-strength phase is specified in [docs/CLEAN_MODEL_STRENGTH_CONTINUUM_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CLEAN_MODEL_STRENGTH_CONTINUUM_PROTOCOL.md). Use that protocol for the five-snapshot GPT-5 continuum, calibration suite, TSP saturation handling, CVRP decomposition, and pooled-without-TSP analyses.
+
 ## Purpose
 
 This phase tests whether evolutionary code search contributes performance above base LLM coding strength across the three completed project families:

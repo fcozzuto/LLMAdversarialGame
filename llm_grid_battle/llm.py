@@ -604,6 +604,7 @@ def _generate_text(
     temperature: float,
     max_tokens: int,
     timeout: float = 60.0,
+    reasoning_effort: str = "minimal",
 ) -> tuple[str, str | None]:
     if provider == "builtin":
         return builtin_strategy_code(model), None
@@ -641,16 +642,21 @@ def _generate_text(
     try:
         if provider == "openai":
             last_error: str | None = None
+            configured_effort = reasoning_effort.strip().lower()
+            fallback_efforts = [configured_effort]
+            for fallback_effort in ("minimal", "low", "none"):
+                if fallback_effort not in fallback_efforts:
+                    fallback_efforts.append(fallback_effort)
             payloads: list[dict[str, Any]] = [
                 {
                     "model": model,
                     "instructions": system_prompt,
                     "input": user_prompt,
-                    "reasoning": {"effort": reasoning_effort},
+                    "reasoning": {"effort": effort},
                     "text": {"verbosity": "low"},
                     "max_output_tokens": max_tokens,
                 }
-                for reasoning_effort in ("minimal", "low", "none")
+                for effort in fallback_efforts
             ]
             payloads.append(
                 {
@@ -888,6 +894,7 @@ def generate_code(
     pre_execution_validation: bool = True,
     repair_invalid_submissions: bool = True,
     timeout: float = 60.0,
+    reasoning_effort: str = "minimal",
 ) -> GenerationResult:
     if provider == "builtin":
         code = builtin_strategy_code(model)
@@ -901,6 +908,7 @@ def generate_code(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
     )
     if error:
         return GenerationResult(
@@ -940,6 +948,7 @@ def generate_code(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
     )
     combined_raw_text = text
     if repaired_text:

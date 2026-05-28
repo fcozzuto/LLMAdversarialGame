@@ -39,6 +39,7 @@ def generate_code(
     max_tokens: int,
     repair_invalid_submissions: bool = True,
     timeout: float = 60.0,
+    reasoning_effort: str = "minimal",
 ) -> GenerationResult:
     if provider == "builtin":
         code = builtin_heuristic_code(model)
@@ -52,6 +53,7 @@ def generate_code(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
     )
     if error:
         return GenerationResult(
@@ -85,6 +87,7 @@ def generate_code(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
     )
     combined_raw = f"{text}\n\n--- REPAIR ATTEMPT ---\n\n{repaired_text}" if repaired_text else text
     if repair_error:

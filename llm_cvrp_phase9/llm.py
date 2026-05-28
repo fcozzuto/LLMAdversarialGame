@@ -97,6 +97,7 @@ def generate_code(
     timeout: float = 120.0,
     max_non_empty_lines: int = 220,
     max_characters: int = 12000,
+    reasoning_effort: str = "minimal",
 ) -> GenerationResult:
     if provider == "builtin":
         code = builtin_solver_code(model)
@@ -110,6 +111,7 @@ def generate_code(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
     )
     if error:
         fallback = default_solver_code()
@@ -156,6 +158,7 @@ def generate_code(
         temperature=temperature,
         max_tokens=max_tokens,
         timeout=timeout,
+        reasoning_effort=reasoning_effort,
     )
     combined_raw = f"{text}\n\n--- REPAIR ATTEMPT ---\n\n{repaired_text}" if repaired_text else text
     if repair_error:

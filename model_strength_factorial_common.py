@@ -17,7 +17,13 @@ TECHNIQUES = [
     "failure_replay",
     "failure_replay_compression",
 ]
-MODEL_TIERS = ["weak_model", "medium_model", "strong_model"]
+MODEL_TIERS = [
+    "gpt5_2025_08_07",
+    "gpt5_1_2025_11_13",
+    "gpt5_2_2025_12_11",
+    "gpt5_4_2026_03_05",
+    "gpt5_5_2026_04_23",
+]
 
 
 def load_jsonish_config(path: str | Path) -> dict[str, Any]:
@@ -155,13 +161,27 @@ def performance_columns() -> list[str]:
         "feasibility_rate",
         "runtime_ms",
         "generation_success_rate",
+        "successful_generations",
+        "generation_error_count",
+        "fallback_generation_count",
+        "repair_attempt_count",
+        "salvage_attempt_count",
+        "executable_candidate_count",
+        "materialization_fallback_count",
+        "materialization_timeout_count",
+        "accepted_fallback_epochs",
+        "accepted_executable_epochs",
         "accepted_epochs",
         "acceptance_rate",
         "mean_code_novelty",
         "primary_holdout_win_rate",
         "primary_holdout_score_margin",
+        "tsp_primary_metric",
         "final_tsplib_gap",
         "final_transfer_gap",
+        "final_synthetic_holdout_gap",
+        "final_worst_gap",
+        "final_gap_range",
         "adaptation_efficiency",
         "heldout_feasibility_rate",
         "heldout_penalized_gap",
