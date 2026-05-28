@@ -253,6 +253,7 @@ Current status:
 Goal: rerun the model-strength axis with a cleaner same-family GPT-5 frontier continuum, explicit calibration, TSP saturation handling, and CVRP feasibility/optimization decomposition.
 
 - [x] Define the five pinned GPT-5 snapshot continuum requested by the supervisor.
+- [x] Add a low-cost reasoning-effort preflight for the pinned model continuum.
 - [x] Add a small empirical calibration suite before the full run.
 - [x] Add realized-budget accounting for successful generations, executable candidates, fallbacks, repairs, and materialization timeouts.
 - [x] Treat TSP saturation explicitly through a changed TSP primary metric plus pooled-without-TSP analysis.

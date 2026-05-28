@@ -17,6 +17,7 @@ This phase keeps the previous negative replay result intact, but reruns the mode
 - same configured reasoning effort (`low`, with reasoning-effort fallback disabled for this clean-continuum phase),
 - same validator stack,
 - same candidate budgets,
+- preflight check that the pinned models accept the configured reasoning efforts,
 - empirical calibration before the full run,
 - TSP saturation diagnostics and pooled analyses with and without TSP,
 - CVRP split into feasibility escape, penalized objective, and feasible-only quality.
@@ -39,6 +40,16 @@ Test-Path "DO NOT COMMIT/model_strength_continuum_smoke/$smokeStamp/cell_means.c
 Test-Path "DO NOT COMMIT/model_strength_continuum_smoke/$smokeStamp/variance_decomposition/variance_partition_summary.csv"
 Test-Path "DO NOT COMMIT/model_strength_continuum_smoke/$smokeStamp/final_report.md"
 ```
+
+## Reasoning-Effort Preflight
+
+Run this before any larger paid campaign if you are considering `low`, `medium`, or `high` reasoning. It sends one tiny Responses API request per pinned model x effort, writes the result to `DO NOT COMMIT`, and does not retry with alternate efforts.
+
+```powershell
+python probe_openai_reasoning_efforts.py --config configs/model_strength_continuum_factorial.yaml --efforts low,medium,high --max-output-tokens 16
+```
+
+Confirm that the printed `common_supported_efforts` includes the effort you plan to use. Keep `allow_reasoning_effort_fallback=false` for official runs so the campaign fails fast instead of silently switching a model to a different reasoning setting.
 
 ## Paid Calibration Suite
 

@@ -12,6 +12,7 @@ This is a new phase because it changes the model-strength axis and analysis plan
 
 - the model ladder moves from mixed nano/mini/full aliases to five pinned GPT-5 frontier-family snapshots,
 - empirical calibration is added before the full run,
+- reasoning-effort support is probed before paid campaigns,
 - TSP is explicitly tested as a saturation case,
 - CVRP is decomposed into feasibility escape and optimization quality,
 - paired/bootstrap comparisons become the primary inferential layer.
@@ -31,6 +32,8 @@ The full run should use the calibrated config produced by `derive_model_strength
 The full template sets `require_empirical_model_strength_scores=true`, so the runner fails fast if the official campaign is launched before calibration-derived scores replace the pending score sources.
 
 All five snapshots use the same configured reasoning effort, `low`, because it is supported across the requested GPT-5, GPT-5.1, GPT-5.2, GPT-5.4, and GPT-5.5 model pages. Reasoning-effort fallback is disabled for this phase, so the run fails fast instead of silently switching one model to a different effort regime.
+
+`probe_openai_reasoning_efforts.py` records a low-cost empirical compatibility check for the pinned models and candidate efforts. The 2026-05-28 preflight found `low`, `medium`, and `high` accepted by all five configured snapshots. This confirms that fallback-disabled official runs can use any of those efforts without silent per-model effort drift.
 
 ## Calibration
 
