@@ -605,6 +605,7 @@ def _generate_text(
     max_tokens: int,
     timeout: float = 60.0,
     reasoning_effort: str = "minimal",
+    allow_reasoning_effort_fallback: bool = True,
 ) -> tuple[str, str | None]:
     if provider == "builtin":
         return builtin_strategy_code(model), None
@@ -644,9 +645,10 @@ def _generate_text(
             last_error: str | None = None
             configured_effort = reasoning_effort.strip().lower()
             fallback_efforts = [configured_effort]
-            for fallback_effort in ("minimal", "low", "none"):
-                if fallback_effort not in fallback_efforts:
-                    fallback_efforts.append(fallback_effort)
+            if allow_reasoning_effort_fallback:
+                for fallback_effort in ("minimal", "low", "none"):
+                    if fallback_effort not in fallback_efforts:
+                        fallback_efforts.append(fallback_effort)
             payloads: list[dict[str, Any]] = [
                 {
                     "model": model,
@@ -658,32 +660,33 @@ def _generate_text(
                 }
                 for effort in fallback_efforts
             ]
-            payloads.append(
-                {
-                    "model": model,
-                    "instructions": system_prompt,
-                    "input": user_prompt,
-                    "text": {"verbosity": "low"},
-                    "max_output_tokens": max_tokens,
-                }
-            )
-            payloads.append(
-                {
-                    "model": model,
-                    "instructions": system_prompt,
-                    "input": user_prompt,
-                    "text": {"verbosity": "medium"},
-                    "max_output_tokens": max_tokens,
-                }
-            )
-            payloads.append(
-                {
-                    "model": model,
-                    "instructions": system_prompt,
-                    "input": user_prompt,
-                    "max_output_tokens": max_tokens,
-                }
-            )
+            if allow_reasoning_effort_fallback:
+                payloads.append(
+                    {
+                        "model": model,
+                        "instructions": system_prompt,
+                        "input": user_prompt,
+                        "text": {"verbosity": "low"},
+                        "max_output_tokens": max_tokens,
+                    }
+                )
+                payloads.append(
+                    {
+                        "model": model,
+                        "instructions": system_prompt,
+                        "input": user_prompt,
+                        "text": {"verbosity": "medium"},
+                        "max_output_tokens": max_tokens,
+                    }
+                )
+                payloads.append(
+                    {
+                        "model": model,
+                        "instructions": system_prompt,
+                        "input": user_prompt,
+                        "max_output_tokens": max_tokens,
+                    }
+                )
             for payload in payloads:
                 try:
                     response = _post_json(url, headers, payload, timeout)
@@ -895,6 +898,7 @@ def generate_code(
     repair_invalid_submissions: bool = True,
     timeout: float = 60.0,
     reasoning_effort: str = "minimal",
+    allow_reasoning_effort_fallback: bool = True,
 ) -> GenerationResult:
     if provider == "builtin":
         code = builtin_strategy_code(model)
@@ -909,6 +913,7 @@ def generate_code(
         max_tokens=max_tokens,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
+        allow_reasoning_effort_fallback=allow_reasoning_effort_fallback,
     )
     if error:
         return GenerationResult(
@@ -949,6 +954,7 @@ def generate_code(
         max_tokens=max_tokens,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
+        allow_reasoning_effort_fallback=allow_reasoning_effort_fallback,
     )
     combined_raw_text = text
     if repaired_text:

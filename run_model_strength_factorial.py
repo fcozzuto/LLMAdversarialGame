@@ -188,6 +188,7 @@ def _generate_candidate(
     max_tokens = int(model_spec.get("max_tokens", generation_cfg.get("max_tokens", 2500)))
     timeout = float(generation_cfg.get("llm_timeout_seconds", 180.0))
     reasoning_effort = str(model_spec.get("reasoning_effort", generation_cfg.get("reasoning_effort", "low")))
+    allow_reasoning_effort_fallback = bool(generation_cfg.get("allow_reasoning_effort_fallback", True))
     if task_family == "simple_games":
         result = generate_game_code(
             provider=provider,
@@ -197,6 +198,7 @@ def _generate_candidate(
             temperature=temperature,
             max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
+            allow_reasoning_effort_fallback=allow_reasoning_effort_fallback,
             pre_execution_validation=True,
             repair_invalid_submissions=bool(generation_cfg.get("repair_invalid_submissions", True)),
             timeout=timeout,
@@ -210,6 +212,7 @@ def _generate_candidate(
             temperature=temperature,
             max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
+            allow_reasoning_effort_fallback=allow_reasoning_effort_fallback,
             repair_invalid_submissions=bool(generation_cfg.get("repair_invalid_submissions", True)),
             timeout=timeout,
         )
@@ -222,6 +225,7 @@ def _generate_candidate(
             temperature=temperature,
             max_tokens=max_tokens,
             reasoning_effort=reasoning_effort,
+            allow_reasoning_effort_fallback=allow_reasoning_effort_fallback,
             repair_invalid_submissions=bool(generation_cfg.get("repair_invalid_submissions", True)),
             timeout=timeout,
             max_non_empty_lines=int(generation_cfg.get("max_non_empty_lines", 260)),
@@ -245,6 +249,7 @@ def _generate_candidate(
         "repair_attempted": bool(getattr(result, "repair_attempted", False)),
         "salvage_attempted": bool(getattr(result, "salvage_attempted", False)),
         "reasoning_effort": reasoning_effort,
+        "allow_reasoning_effort_fallback": allow_reasoning_effort_fallback,
     }
 
 
@@ -502,6 +507,8 @@ def _run_cell(
     candidates_dir = cell_dir / "candidates"
     candidates_dir.mkdir(exist_ok=True)
     generation_cfg = config.get("generation", {})
+    run_reasoning_effort = str(model_spec.get("reasoning_effort", generation_cfg.get("reasoning_effort", "low")))
+    run_allow_reasoning_effort_fallback = bool(generation_cfg.get("allow_reasoning_effort_fallback", True))
 
     if task_family == "simple_games":
         task_state = _simple_game_configs(task_cfg["suite_config"])
@@ -733,6 +740,8 @@ def _run_cell(
         "model_name": _task_model(model_spec, task_family)[1],
         "benchmark_strength_score": float(model_spec["benchmark_strength_score"]),
         "benchmark_score_source": model_spec["benchmark_score_source"],
+        "reasoning_effort": run_reasoning_effort,
+        "allow_reasoning_effort_fallback": run_allow_reasoning_effort_fallback,
         "evolution_technique": technique,
         "seed": seed,
         "epochs_budget": epochs_budget,
@@ -862,6 +871,23 @@ def _validate_config(config: dict[str, Any]) -> None:
                     raise SystemExit(
                         f"Official factorial config must define {task}.{key}={expected_value}, found {actual_value}."
                     )
+    if bool(config.get("require_empirical_model_strength_scores", False)):
+        pending_sources = {
+            "frontier_snapshot_order_pending_calibration",
+            "calibration_pending",
+            "ordinal_proxy",
+        }
+        uncalibrated = [
+            str(spec.get("model_tier", "<unknown>"))
+            for spec in config.get("model_tiers", [])
+            if str(spec.get("benchmark_score_source", "")) in pending_sources
+        ]
+        if uncalibrated:
+            raise SystemExit(
+                "Official clean-continuum runs require empirical model-strength scores. "
+                "Run derive_model_strength_scores.py after the calibration suite and use the calibrated config. "
+                f"Uncalibrated tiers: {', '.join(uncalibrated)}."
+            )
 
 
 def _seed_values(task_cfg: dict[str, Any], requested_seed: int | None) -> list[int]:

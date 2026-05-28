@@ -267,7 +267,7 @@ Research basis:
 - Feasibility-constrained optimization should separate feasibility escape from feasible-solution quality when penalty terms dominate the objective.
 
 Current status:
-- The implementation is on branch `codex/clean-model-strength-continuum`.
+- The implementation is on branch `clean-model-strength-continuum` in this workspace.
 - Use [configs/model_strength_continuum/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/model_strength_continuum/RUNBOOK.md).
 
 ## Exit Condition

@@ -151,6 +151,8 @@ def performance_columns() -> list[str]:
         "model_name",
         "benchmark_strength_score",
         "benchmark_score_source",
+        "reasoning_effort",
+        "allow_reasoning_effort_fallback",
         "evolution_technique",
         "seed",
         "epochs_budget",

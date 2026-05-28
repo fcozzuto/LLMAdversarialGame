@@ -28,7 +28,9 @@ The required snapshots are:
 
 The full run should use the calibrated config produced by `derive_model_strength_scores.py`, not the placeholder ordinal scores in `configs/model_strength_continuum_factorial.yaml`.
 
-All five snapshots use the same configured reasoning effort, `low`, because it is supported across the requested GPT-5, GPT-5.1, GPT-5.2, GPT-5.4, and GPT-5.5 model pages. This avoids one model silently receiving a different reasoning-effort regime.
+The full template sets `require_empirical_model_strength_scores=true`, so the runner fails fast if the official campaign is launched before calibration-derived scores replace the pending score sources.
+
+All five snapshots use the same configured reasoning effort, `low`, because it is supported across the requested GPT-5, GPT-5.1, GPT-5.2, GPT-5.4, and GPT-5.5 model pages. Reasoning-effort fallback is disabled for this phase, so the run fails fast instead of silently switching one model to a different effort regime.
 
 ## Calibration
 
@@ -79,6 +81,8 @@ The runner now records:
 
 These fields make it possible to separate model capability from failure to produce valid executable code.
 
+The same fields are also summarized in `cell_means.csv`, so post-run checks can quickly identify cells where poor performance reflects invalid generations, fallback use, materialization timeouts, or failure to accept executable candidates.
+
 ## Inference Policy
 
 The primary inferential layer is paired/bootstrap comparison against:
@@ -90,7 +94,7 @@ OLS/ANOVA variance decomposition is retained as a secondary diagnostic, especial
 
 ## Research Basis
 
-The protocol follows standard practice for stochastic adaptive systems: fixed budgets, predeclared task splits, independent seeds, budget-matched controls, held-out evaluation, effect sizes, and uncertainty estimates. This matches the project’s existing references to Henderson et al. 2018 (`Deep Reinforcement Learning That Matters`) and Agarwal et al. 2021 (`Deep RL at the Edge of the Statistical Precipice`), and it follows the algorithm-selection framing introduced by Rice 1976.
+The protocol follows standard practice for stochastic adaptive systems: fixed budgets, predeclared task splits, independent seeds, budget-matched controls, held-out evaluation, effect sizes, and uncertainty estimates. This matches the project's existing references to Henderson et al. 2018 (`Deep Reinforcement Learning That Matters`) and Agarwal et al. 2021 (`Deep RL at the Edge of the Statistical Precipice`), and it follows the algorithm-selection framing introduced by Rice 1976.
 
 ## Runbook
 

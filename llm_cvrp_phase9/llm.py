@@ -98,6 +98,7 @@ def generate_code(
     max_non_empty_lines: int = 220,
     max_characters: int = 12000,
     reasoning_effort: str = "minimal",
+    allow_reasoning_effort_fallback: bool = True,
 ) -> GenerationResult:
     if provider == "builtin":
         code = builtin_solver_code(model)
@@ -112,6 +113,7 @@ def generate_code(
         max_tokens=max_tokens,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
+        allow_reasoning_effort_fallback=allow_reasoning_effort_fallback,
     )
     if error:
         fallback = default_solver_code()
@@ -159,6 +161,7 @@ def generate_code(
         max_tokens=max_tokens,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
+        allow_reasoning_effort_fallback=allow_reasoning_effort_fallback,
     )
     combined_raw = f"{text}\n\n--- REPAIR ATTEMPT ---\n\n{repaired_text}" if repaired_text else text
     if repair_error:

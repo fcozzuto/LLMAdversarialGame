@@ -1,6 +1,6 @@
 # Clean Model-Strength Continuum Runbook
 
-Use branch `codex/clean-model-strength-continuum`.
+Use branch `clean-model-strength-continuum` in this workspace.
 
 Activate your environment first:
 
@@ -14,7 +14,7 @@ This phase keeps the previous negative replay result intact, but reruns the mode
 
 - five pinned GPT-5 frontier-family snapshots,
 - same prompting setup,
-- same configured reasoning effort (`low`, supported across all five requested snapshots),
+- same configured reasoning effort (`low`, with reasoning-effort fallback disabled for this clean-continuum phase),
 - same validator stack,
 - same candidate budgets,
 - empirical calibration before the full run,
@@ -54,9 +54,11 @@ python derive_model_strength_scores.py --calibration-run-root "runs/model_streng
 
 Use the generated calibrated config for the full run. It replaces ordinal snapshot scores with train-validator calibration scores and keeps the calibration source path in `model_strength_table.csv`.
 
+The uncalibrated full template intentionally fails if passed directly to `run_model_strength_factorial.py`. This prevents accidentally launching the official paid campaign with placeholder snapshot-order scores instead of the required empirical calibration scores.
+
 ## Cost Estimate
 
-Run this before the full campaign. It uses empirical prompt/response sizes from the completed 750-row campaign, current model price assumptions in the estimator, and a default 20% balance buffer.
+Run this before the full campaign. It uses empirical prompt/response sizes from the completed 750-row campaign, current model price assumptions in the estimator, and a default 20% balance buffer. By default it samples up to 250 old candidate artifacts per task x technique for speed; use `--max-reference-candidates-per-task-technique 0` if you want to scan every prior candidate artifact.
 
 ```powershell
 python estimate_model_strength_continuum_cost.py --config "DO NOT COMMIT/model_strength_continuum_factorial_calibrated_$calStamp.yaml"

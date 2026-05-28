@@ -40,6 +40,7 @@ def generate_code(
     repair_invalid_submissions: bool = True,
     timeout: float = 60.0,
     reasoning_effort: str = "minimal",
+    allow_reasoning_effort_fallback: bool = True,
 ) -> GenerationResult:
     if provider == "builtin":
         code = builtin_heuristic_code(model)
@@ -54,6 +55,7 @@ def generate_code(
         max_tokens=max_tokens,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
+        allow_reasoning_effort_fallback=allow_reasoning_effort_fallback,
     )
     if error:
         return GenerationResult(
@@ -88,6 +90,7 @@ def generate_code(
         max_tokens=max_tokens,
         timeout=timeout,
         reasoning_effort=reasoning_effort,
+        allow_reasoning_effort_fallback=allow_reasoning_effort_fallback,
     )
     combined_raw = f"{text}\n\n--- REPAIR ATTEMPT ---\n\n{repaired_text}" if repaired_text else text
     if repair_error:

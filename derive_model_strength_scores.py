@@ -154,6 +154,7 @@ def _write_calibrated_config(base_config_path: Path, output_config_path: Path, s
             f"mean_task_train_z={float(score['mean_task_train_z']):.6f}; "
             f"mean_generation_quality={float(score['mean_generation_quality']):.6f}."
         )
+    config["require_empirical_model_strength_scores"] = True
     output_config_path.parent.mkdir(parents=True, exist_ok=True)
     write_json(output_config_path, config)
 
