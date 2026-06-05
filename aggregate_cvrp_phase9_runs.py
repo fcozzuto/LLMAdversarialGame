@@ -130,8 +130,13 @@ def summarize_paired_comparisons(run_condition_tables: list[dict[str, dict[str, 
 
 
 def render_markdown_report(aggregate_summary: dict[str, Any]) -> str:
+    condition_names = [str(item.get("condition_name", "")) for item in aggregate_summary.get("conditions", [])]
+    if any(name.startswith("phase9_closeout_") for name in condition_names):
+        title = "# Phase 9 Closeout Budget-Control CVRP Aggregate Report"
+    else:
+        title = "# Phase 9 CVRP Suite Aggregate Report"
     lines = [
-        "# Phase 9 CVRP Suite Aggregate Report",
+        title,
         "",
         "## Overview",
         f"- Run count: {aggregate_summary.get('run_count', 0)}.",

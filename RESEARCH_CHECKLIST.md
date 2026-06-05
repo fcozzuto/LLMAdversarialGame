@@ -291,6 +291,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Aggregate the phase-8 adaptive heuristic portfolio suite and compare the fixed, random, oracle, supervised, static-LLM, adaptive-LLM, replay-aware, and full-solver conditions on held-out TSPLIB gap and selector regret.
 - [x] Run the phase-9 bounded CVRP whole-solver suite across paired replicate seed offsets.
 - [x] Aggregate the phase-9 bounded CVRP whole-solver suite and compare solver evolution against the explicit CVRP baselines on held-out feasibility, penalized gap, and runtime.
+- [x] Run the phase-9 closeout bounded CVRP suite across paired replicate seed offsets.
+- [x] Aggregate the phase-9 closeout bounded CVRP suite and compare direct synthesis, budget-matched no-replay search, and replay-aware iterative search against both each other and the fixed CVRP baselines on held-out feasibility, penalized gap, and runtime.
 - [x] Run the phase-5B ATSP suite across paired replicate seed offsets.
 - [x] Aggregate the phase-5B ATSP suite and compare no replay, random replay, failure replay, and compression-aware replay on held-out optimality gap.
 - [x] Run the phase-5C CVRP suite across paired replicate seed offsets.
@@ -313,6 +315,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] At least 5 replicated suite runs for the phase-7 modular operator comparison.
 - [x] At least 5 replicated suite runs for the phase-8 adaptive heuristic portfolio comparison.
 - [x] At least 5 replicated suite runs for the phase-9 bounded CVRP whole-solver comparison.
+- [x] At least 5 replicated suite runs for the phase-9 closeout bounded CVRP comparison.
 - [x] At least 5 replicated suite runs for the phase-5B ATSP benchmark comparison.
 - [x] At least 5 replicated suite runs for the phase-5C CVRP benchmark comparison.
 
@@ -332,7 +335,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - The current phase-8 interpretation note is tracked in [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md).
 - The project is now evidence-complete for phase 9: the official 20-offset bounded real-world CVRP whole-solver campaign was run and aggregated, solver evolution stayed fully feasible and beat the weaker nearest-neighbor and regret-insertion baselines, but it did not beat the strongest fixed Clarke-Wright baseline on held-out CVRPLIB X instances.
 - The current phase-9 interpretation note is tracked in [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md).
-- The project now has a phase-9 closeout protocol and runner path for the budget-control follow-up, but the official replicated closeout evidence has not been run yet.
+- The project is now evidence-complete for the phase-9 closeout budget-control study: the official 20-offset campaign was run and aggregated, `replay_solver_evolution` was the only learned arm that stayed fully feasible in all 20 runs, it beat both the `budget_matched_no_replay` and `direct_generate_plus_one_repair` controls on held-out penalized gap, and it still did not beat the strongest fixed Clarke-Wright baseline on the primary endpoint.
+- The current phase-9 closeout interpretation note is tracked in [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md).
 - The project now has a cross-family synthesis over the simple-game, TSP, and real-world CVRP loops: the current unified story is capability-bounded adaptation, with code novelty common across families but held-out wins constrained by validator pressure, baseline strength, and benchmark headroom.
 - The cross-family synthesis note is tracked in [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md).
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.

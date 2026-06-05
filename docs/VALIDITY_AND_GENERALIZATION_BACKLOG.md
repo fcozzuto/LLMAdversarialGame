@@ -213,7 +213,7 @@ Goal: answer the remaining mechanism question from phase 9 without changing benc
 - [x] Add a `replay_solver_evolution` closeout arm that reuses the bounded phase-9 validation path.
 - [x] Keep the original phase-9 fixed baselines available for contextual comparison.
 - [x] Add a no-cost smoke config that exercises the full closeout condition set.
-- [ ] Run the official replicated closeout campaign and aggregate paired deltas against both the strongest fixed baseline and the budget-matched control.
+- [x] Run the official replicated closeout campaign and aggregate paired deltas against both the strongest fixed baseline and the budget-matched control.
 
 Research basis:
 
@@ -224,7 +224,10 @@ Current status:
 - The implementation is on branch `cvrp-closeout-budget-control`.
 - The protocol is [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md).
 - The runbook is [configs/cvrp_phase9_closeout/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_closeout/RUNBOOK.md).
-- The no-cost smoke path passes locally, but the official replicated evidence has not been run yet.
+- The official 20-offset campaign is now complete under `runs/cvrp_phase9_closeout/budget_control`, with aggregate results in `aggregate_20260605_050930_t`.
+- `replay_solver_evolution` was the only learned arm that stayed fully feasible in all 20 official runs, and it beat both `budget_matched_no_replay` and `direct_generate_plus_one_repair` on held-out penalized gap.
+- The closeout did not overturn the strongest fixed-baseline result: Clarke-Wright remained the best condition on the primary held-out endpoint.
+- The permanent interpretation note is [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md).
 
 ## 12. Cross-Family Code-Evolution Synthesis
 
