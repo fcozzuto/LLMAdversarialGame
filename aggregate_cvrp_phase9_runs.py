@@ -15,7 +15,10 @@ AGGREGATE_METRICS = [
     ("heldout_penalized_gap", True, "heldout_penalized_gap", 13),
     ("heldout_feasible_gap", True, "heldout_feasible_gap", 17),
     ("heldout_runtime_ms", True, "heldout_runtime_ms", 19),
-    ("mean_code_novelty", False, "mean_code_novelty", 23),
+    ("accepted_epoch_count", False, "accepted_epoch_count", 21),
+    ("fallback_epoch_count", True, "fallback_epoch_count", 22),
+    ("generation_error_epoch_count", True, "generation_error_epoch_count", 23),
+    ("mean_code_novelty", False, "mean_code_novelty", 27),
     ("mean_complexity", True, "mean_complexity", 29),
     ("robustness_dispersion", True, "robustness_dispersion", 31),
 ]
@@ -67,7 +70,10 @@ def summarize_paired_comparisons(run_condition_tables: list[dict[str, dict[str, 
     nn = find_condition_by_suffix(condition_names, "_baseline_nearest_neighbor_constructive")
     savings = find_condition_by_suffix(condition_names, "_baseline_clarke_wright_savings")
     insertion = find_condition_by_suffix(condition_names, "_baseline_regret_insertion_local_search")
-    evolved = find_condition_by_suffix(condition_names, "_solver_evolution")
+    evolved = find_condition_by_suffix(condition_names, "phase9_solver_evolution")
+    direct = find_condition_by_suffix(condition_names, "_direct_generate_plus_one_repair")
+    budget = find_condition_by_suffix(condition_names, "_budget_matched_no_replay")
+    replay = find_condition_by_suffix(condition_names, "_replay_solver_evolution")
     if savings and nn:
         specs.append({"name": "savings_vs_nearest_neighbor", "candidate": savings, "reference": nn})
     if insertion and savings:
@@ -78,6 +84,18 @@ def summarize_paired_comparisons(run_condition_tables: list[dict[str, dict[str, 
         specs.append({"name": "evolved_vs_clarke_wright", "candidate": evolved, "reference": savings})
     if evolved and insertion:
         specs.append({"name": "evolved_vs_regret_insertion", "candidate": evolved, "reference": insertion})
+    if direct and savings:
+        specs.append({"name": "direct_vs_clarke_wright", "candidate": direct, "reference": savings})
+    if budget and savings:
+        specs.append({"name": "budget_matched_vs_clarke_wright", "candidate": budget, "reference": savings})
+    if replay and savings:
+        specs.append({"name": "replay_vs_clarke_wright", "candidate": replay, "reference": savings})
+    if direct and budget:
+        specs.append({"name": "direct_vs_budget_matched", "candidate": direct, "reference": budget})
+    if replay and budget:
+        specs.append({"name": "replay_vs_budget_matched", "candidate": replay, "reference": budget})
+    if replay and direct:
+        specs.append({"name": "replay_vs_direct", "candidate": replay, "reference": direct})
     comparisons = []
     for spec_index, spec in enumerate(specs):
         metric_payload = {}
@@ -112,8 +130,13 @@ def summarize_paired_comparisons(run_condition_tables: list[dict[str, dict[str, 
 
 
 def render_markdown_report(aggregate_summary: dict[str, Any]) -> str:
+    condition_names = [str(item.get("condition_name", "")) for item in aggregate_summary.get("conditions", [])]
+    if any(name.startswith("phase9_closeout_") for name in condition_names):
+        title = "# Phase 9 Closeout Budget-Control CVRP Aggregate Report"
+    else:
+        title = "# Phase 9 CVRP Suite Aggregate Report"
     lines = [
-        "# Phase 9 Aggregate Report",
+        title,
         "",
         "## Overview",
         f"- Run count: {aggregate_summary.get('run_count', 0)}.",
@@ -121,17 +144,20 @@ def render_markdown_report(aggregate_summary: dict[str, Any]) -> str:
         f"- Best held-out condition: `{aggregate_summary.get('best_heldout_condition')}`.",
         "",
         "## Condition Means",
-        "| Condition | Held-out Feasibility | Held-out Penalized Gap | Held-out Feasible Gap | Held-out Runtime (ms) | Mean Novelty | Mean Complexity | Robustness Dispersion |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Condition | Held-out Feasibility | Held-out Penalized Gap | Held-out Feasible Gap | Held-out Runtime (ms) | Accepted Epochs | Fallback Epochs | Generation Errors | Mean Novelty | Mean Complexity | Robustness Dispersion |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for item in aggregate_summary.get("conditions", []):
         lines.append(
-            "| {condition_name} | {feasibility} | {penalized} | {feasible_gap} | {runtime_ms} | {novelty} | {complexity} | {robustness} |".format(
+            "| {condition_name} | {feasibility} | {penalized} | {feasible_gap} | {runtime_ms} | {accepted_epochs} | {fallback_epochs} | {generation_errors} | {novelty} | {complexity} | {robustness} |".format(
                 condition_name=item["condition_name"],
                 feasibility=item["heldout_feasibility_rate"]["mean"],
                 penalized=item["heldout_penalized_gap"]["mean"],
                 feasible_gap=item["heldout_feasible_gap"]["mean"],
                 runtime_ms=item["heldout_runtime_ms"]["mean"],
+                accepted_epochs=item["accepted_epoch_count"]["mean"],
+                fallback_epochs=item["fallback_epoch_count"]["mean"],
+                generation_errors=item["generation_error_epoch_count"]["mean"],
                 novelty=item["mean_code_novelty"]["mean"],
                 complexity=item["mean_complexity"]["mean"],
                 robustness=item["robustness_dispersion"]["mean"],
@@ -153,7 +179,7 @@ def render_markdown_report(aggregate_summary: dict[str, Any]) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Aggregate repeated phase-9 CVRP whole-solver runs.")
+    parser = argparse.ArgumentParser(description="Aggregate repeated phase-9 CVRP suite runs, including closeout control studies.")
     parser.add_argument("--runs-root", required=True, help="Directory containing phase-9 run_* folders.")
     args = parser.parse_args()
     runs_root = Path(args.runs_root)

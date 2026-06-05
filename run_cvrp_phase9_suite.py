@@ -229,6 +229,233 @@ def _epoch_score(summary: dict[str, Any]) -> tuple[float, float, float]:
     )
 
 
+def _closeout_score(summary: dict[str, Any]) -> tuple[float, float]:
+    return (
+        -float(summary["feasibility_rate"]),
+        float(summary["mean_penalized_gap"]),
+    )
+
+
+def _phase9_context_bundle(config: Phase9ConditionConfig) -> tuple[list[CVRPInstance], list[CVRPInstance], list[dict[str, Any]], list[dict[str, Any]]]:
+    train_instances, holdout_instances, _manifest = _load_instances(
+        config.benchmark.manifest_path,
+        train_limit=int(config.benchmark.train_instance_limit),
+        holdout_limit=int(config.benchmark.holdout_instance_limit),
+    )
+    return (
+        train_instances,
+        holdout_instances,
+        _instance_summaries(train_instances),
+        _baseline_train_summaries(train_instances, config),
+    )
+
+
+def _generation_valid_for_acceptance(generation_result: Any) -> bool:
+    return generation_result.error is None and not bool(generation_result.used_fallback)
+
+
+def _write_epoch_artifact(condition_dir: Path, epoch_payload: dict[str, Any]) -> None:
+    epoch_dir = condition_dir / "epochs" / f"epoch_{int(epoch_payload['epoch_index']):03d}"
+    epoch_dir.mkdir(parents=True, exist_ok=True)
+    _json_dump(epoch_dir / "artifact.json", epoch_payload)
+
+
+def _epoch_payload(
+    *,
+    epoch_index: int,
+    prompt: str,
+    generation_result: Any,
+    candidate_train_summary: dict[str, Any],
+    accepted: bool,
+    generation_valid: bool,
+    novelty_reference_code: str,
+) -> dict[str, Any]:
+    return {
+        "epoch_index": epoch_index,
+        "accepted": bool(accepted),
+        "generation_error": generation_result.error,
+        "generation_fallback_used": bool(generation_result.used_fallback),
+        "generation_valid_for_acceptance": bool(generation_valid),
+        "repair_attempted": bool(generation_result.repair_attempted),
+        "salvage_attempted": bool(generation_result.salvage_attempted),
+        "validation_issues": list(generation_result.validation_issues),
+        "prompt": prompt,
+        "raw_text": generation_result.raw_text,
+        "submitted_code": generation_result.submitted_code,
+        "executed_code": generation_result.code,
+        "candidate_train_summary": candidate_train_summary,
+        "code_novelty": round(1.0 - code_similarity(novelty_reference_code, generation_result.code), 6),
+        "complexity": round(complexity_score(generation_result.code), 6),
+        "fingerprint": fingerprint_record(generation_result.code),
+    }
+
+
+def _write_training_plots(condition_dir: Path, condition_name: str, epochs_payload: list[dict[str, Any]]) -> None:
+    if not epochs_payload:
+        return
+    training_penalized_gap = [float(epoch["candidate_train_summary"]["mean_penalized_gap"]) for epoch in epochs_payload]
+    training_feasibility = [float(epoch["candidate_train_summary"]["feasibility_rate"]) for epoch in epochs_payload]
+    write_metric_plot_svg(
+        path=condition_dir / "training_gap.svg",
+        title=f"{condition_name} training penalized gap",
+        series={"train_penalized_gap": training_penalized_gap},
+        y_label="penalized gap",
+        series_labels={"train_penalized_gap": "train_penalized_gap"},
+    )
+    write_metric_plot_png(
+        path=condition_dir / "training_gap.png",
+        title=f"{condition_name} training penalized gap",
+        series={"train_penalized_gap": training_penalized_gap},
+        y_label="penalized gap",
+        series_labels={"train_penalized_gap": "train_penalized_gap"},
+    )
+    write_metric_plot_svg(
+        path=condition_dir / "feasibility.svg",
+        title=f"{condition_name} training feasibility",
+        series={"feasibility_rate": training_feasibility},
+        y_label="feasibility",
+        series_labels={"feasibility_rate": "feasibility_rate"},
+    )
+    write_metric_plot_png(
+        path=condition_dir / "feasibility.png",
+        title=f"{condition_name} training feasibility",
+        series={"feasibility_rate": training_feasibility},
+        y_label="feasibility",
+        series_labels={"feasibility_rate": "feasibility_rate"},
+    )
+
+
+def _replay_archive_entry(epoch_payload: dict[str, Any]) -> dict[str, Any]:
+    summary = epoch_payload["candidate_train_summary"]
+    worst_instances = list(summary.get("worst_instances", []))
+    top_issue = worst_instances[0] if worst_instances else None
+    return {
+        "epoch_index": int(epoch_payload["epoch_index"]),
+        "accepted": bool(epoch_payload["accepted"]),
+        "train_feasibility_rate": float(summary["feasibility_rate"]),
+        "train_penalized_gap": float(summary["mean_penalized_gap"]),
+        "train_feasible_gap": summary["mean_feasible_gap"],
+        "generation_error": epoch_payload.get("generation_error"),
+        "generation_fallback_used": bool(epoch_payload.get("generation_fallback_used", False)),
+        "repair_attempted": bool(epoch_payload.get("repair_attempted", False)),
+        "validation_issues": list(epoch_payload.get("validation_issues", [])),
+        "top_issue": top_issue,
+    }
+
+
+def _replay_summary_lines(archive: list[dict[str, Any]]) -> list[str]:
+    if not archive:
+        return [
+            "Replay archive status:",
+            "- No prior candidate summaries are archived yet; rely on the incumbent and baseline panel only.",
+        ]
+    selected = sorted(archive, key=lambda item: float(item.get("train_penalized_gap", 0.0)), reverse=True)[:3]
+    lines = ["Replay archive summaries from prior weaker candidates:"]
+    for index, item in enumerate(selected, start=1):
+        top_issue = item.get("top_issue") or {}
+        top_issue_text = (
+            f"worst_family={top_issue.get('family', 'unknown')}, "
+            f"worst_gap={top_issue.get('penalized_gap', 'n/a')}, "
+            f"errors={top_issue.get('errors', [])}"
+        )
+        lines.append(
+            "- archive_case_{index}: accepted={accepted}, feasibility={feasibility}, penalized gap {gap}, "
+            "fallback={fallback}, {top_issue_text}".format(
+                index=index,
+                accepted=item.get("accepted", False),
+                feasibility=item.get("train_feasibility_rate", 0.0),
+                gap=item.get("train_penalized_gap", 0.0),
+                fallback=item.get("generation_fallback_used", False),
+                top_issue_text=top_issue_text,
+            )
+        )
+    lines.extend(
+        [
+            "- Avoid repeating the failure signatures summarized above.",
+            "- Preserve any incumbent logic that already protects feasibility on the non-failing training cases.",
+        ]
+    )
+    return lines
+
+
+def _build_closeout_prompt(
+    *,
+    config: Phase9ConditionConfig,
+    context: dict[str, Any],
+    technique: str,
+    candidate_index: int,
+    candidate_budget: int,
+    replay_archive: list[dict[str, Any]] | None = None,
+) -> str:
+    extra_sections = [
+        "Closeout study framing:",
+        f"- Technique: {technique}.",
+        f"- Candidate {candidate_index} of {candidate_budget}.",
+    ]
+    strategy_instruction = "Treat this as mutation-based solver evolution, not a fresh rewrite."
+    if technique == "phase9_closeout_direct_generate_plus_one_repair_initial":
+        strategy_instruction = "Treat this as a fresh direct CVRP solver synthesis candidate."
+        extra_sections.extend(
+            [
+                "- This first round must stand on its own.",
+                "- Do not assume replay memory, archived failures, or multiple search branches.",
+            ]
+        )
+    elif technique == "phase9_closeout_direct_generate_plus_one_repair_repair":
+        strategy_instruction = "Treat this as a one-step evaluation-driven repair of the current candidate."
+        extra_sections.extend(
+            [
+                "- Use the current candidate and its training feedback as the only repair target.",
+                "- Do not branch into multi-candidate search or replay archives.",
+            ]
+        )
+    elif technique == "phase9_closeout_budget_matched_no_replay":
+        strategy_instruction = "Treat this as an independent fresh CVRP solver synthesis candidate."
+        extra_sections.extend(
+            [
+                "- This arm is budget-matched against iterative search but must remain memoryless.",
+                "- Do not use prior candidates, archived failures, or replay summaries.",
+            ]
+        )
+    elif technique == "phase9_closeout_replay_solver_evolution":
+        strategy_instruction = "Treat this as replay-aware iterative solver evolution grounded in the incumbent and prior failures."
+        extra_sections.extend(
+            [
+                "- Use the incumbent conservatively when it already protects feasibility.",
+                "- Use replay summaries only to avoid repeated failure patterns and target high-gap cases.",
+                *(_replay_summary_lines(replay_archive or [])),
+            ]
+        )
+    return build_generation_prompt(
+        context=context,
+        max_non_empty_lines=int(config.generation.max_non_empty_lines),
+        max_characters=int(config.generation.max_characters),
+        strategy_instruction=strategy_instruction,
+        extra_sections=extra_sections,
+    )
+
+
+def _closeout_final_payload(
+    *,
+    config: Phase9ConditionConfig,
+    epochs_payload: list[dict[str, Any]],
+    final_code: str,
+    final_train_summary: dict[str, Any],
+    holdout_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "condition_name": config.name,
+        "execution_mode": config.execution.mode,
+        "skipped": False,
+        "epochs": epochs_payload,
+        "final_code": final_code,
+        "final_evaluation": {
+            "train": final_train_summary,
+            "holdout": summarize_panel(holdout_results, panel_name="holdout"),
+        },
+    }
+
+
 def _evolution_condition_payload(config: Phase9ConditionConfig, condition_dir: Path) -> dict[str, Any]:
     train_instances, holdout_instances, _manifest = _load_instances(
         config.benchmark.manifest_path,
@@ -303,9 +530,7 @@ def _evolution_condition_payload(config: Phase9ConditionConfig, condition_dir: P
             "fingerprint": fingerprint_record(generation_result.code),
         }
         epochs_payload.append(epoch_payload)
-        epoch_dir = condition_dir / "epochs" / f"epoch_{epoch_index:03d}"
-        epoch_dir.mkdir(parents=True, exist_ok=True)
-        _json_dump(epoch_dir / "artifact.json", epoch_payload)
+        _write_epoch_artifact(condition_dir, epoch_payload)
 
     holdout_results = _evaluate_code_panel(incumbent_code, holdout_instances, config)
     payload = {
@@ -320,45 +545,289 @@ def _evolution_condition_payload(config: Phase9ConditionConfig, condition_dir: P
         },
     }
     _json_dump(condition_dir / "condition_summary.json", payload)
+    _write_training_plots(condition_dir, config.name, epochs_payload)
+    return payload
 
-    training_penalized_gap = [float(epoch["candidate_train_summary"]["mean_penalized_gap"]) for epoch in epochs_payload]
-    training_feasibility = [float(epoch["candidate_train_summary"]["feasibility_rate"]) for epoch in epochs_payload]
-    write_metric_plot_svg(
-        path=condition_dir / "training_gap.svg",
-        title=f"{config.name} training penalized gap",
-        series={"train_penalized_gap": training_penalized_gap},
-        y_label="penalized gap",
-        series_labels={"train_penalized_gap": "train_penalized_gap"},
+
+def _direct_generate_plus_one_repair_condition_payload(config: Phase9ConditionConfig, condition_dir: Path) -> dict[str, Any]:
+    train_instances, holdout_instances, train_instance_summaries, baseline_summaries = _phase9_context_bundle(config)
+    default_code = default_solver_code()
+    epochs_payload: list[dict[str, Any]] = []
+    valid_candidates: list[tuple[tuple[float, float], str, dict[str, Any]]] = []
+
+    first_context = {
+        "train_instance_summaries": train_instance_summaries,
+        "baseline_summaries": baseline_summaries,
+    }
+    first_prompt = _build_closeout_prompt(
+        config=config,
+        context=first_context,
+        technique="phase9_closeout_direct_generate_plus_one_repair_initial",
+        candidate_index=1,
+        candidate_budget=2,
     )
-    write_metric_plot_png(
-        path=condition_dir / "training_gap.png",
-        title=f"{config.name} training penalized gap",
-        series={"train_penalized_gap": training_penalized_gap},
-        y_label="penalized gap",
-        series_labels={"train_penalized_gap": "train_penalized_gap"},
+    first_generation = generate_code(
+        provider=config.agent.provider,
+        model=config.agent.model,
+        system_prompt=config.agent.system_prompt,
+        user_prompt=first_prompt,
+        temperature=float(config.agent.temperature),
+        max_tokens=int(config.agent.max_tokens),
+        repair_invalid_submissions=bool(config.generation.repair_invalid_submissions),
+        timeout=float(config.generation.llm_timeout_seconds),
+        max_non_empty_lines=int(config.generation.max_non_empty_lines),
+        max_characters=int(config.generation.max_characters),
     )
-    write_metric_plot_svg(
-        path=condition_dir / "feasibility.svg",
-        title=f"{config.name} training feasibility",
-        series={"feasibility_rate": training_feasibility},
-        y_label="feasibility",
-        series_labels={"feasibility_rate": "feasibility_rate"},
+    first_train_results = _evaluate_code_panel(first_generation.code, train_instances, config)
+    first_train_summary = summarize_panel(first_train_results, panel_name="train")
+    first_valid = _generation_valid_for_acceptance(first_generation)
+    first_epoch_payload = _epoch_payload(
+        epoch_index=1,
+        prompt=first_prompt,
+        generation_result=first_generation,
+        candidate_train_summary=first_train_summary,
+        accepted=bool(first_valid),
+        generation_valid=first_valid,
+        novelty_reference_code=default_code,
     )
-    write_metric_plot_png(
-        path=condition_dir / "feasibility.png",
-        title=f"{config.name} training feasibility",
-        series={"feasibility_rate": training_feasibility},
-        y_label="feasibility",
-        series_labels={"feasibility_rate": "feasibility_rate"},
+    epochs_payload.append(first_epoch_payload)
+    _write_epoch_artifact(condition_dir, first_epoch_payload)
+    if first_valid:
+        valid_candidates.append((_closeout_score(first_train_summary), first_generation.code, first_train_summary))
+
+    second_context = {
+        "train_instance_summaries": train_instance_summaries,
+        "baseline_summaries": baseline_summaries,
+        "incumbent_summary": first_train_summary,
+        "incumbent_code": first_generation.code,
+        "worst_cases": first_train_summary.get("worst_instances", []),
+    }
+    second_prompt = _build_closeout_prompt(
+        config=config,
+        context=second_context,
+        technique="phase9_closeout_direct_generate_plus_one_repair_repair",
+        candidate_index=2,
+        candidate_budget=2,
     )
+    second_generation = generate_code(
+        provider=config.agent.provider,
+        model=config.agent.model,
+        system_prompt=config.agent.system_prompt,
+        user_prompt=second_prompt,
+        temperature=float(config.agent.temperature),
+        max_tokens=int(config.agent.max_tokens),
+        repair_invalid_submissions=bool(config.generation.repair_invalid_submissions),
+        timeout=float(config.generation.llm_timeout_seconds),
+        max_non_empty_lines=int(config.generation.max_non_empty_lines),
+        max_characters=int(config.generation.max_characters),
+    )
+    second_train_results = _evaluate_code_panel(second_generation.code, train_instances, config)
+    second_train_summary = summarize_panel(second_train_results, panel_name="train")
+    second_valid = _generation_valid_for_acceptance(second_generation)
+    second_accepted = False
+    if second_valid:
+        second_score = _closeout_score(second_train_summary)
+        if not valid_candidates or second_score < valid_candidates[0][0]:
+            second_accepted = True
+        valid_candidates.append((second_score, second_generation.code, second_train_summary))
+        valid_candidates.sort(key=lambda item: item[0])
+    second_epoch_payload = _epoch_payload(
+        epoch_index=2,
+        prompt=second_prompt,
+        generation_result=second_generation,
+        candidate_train_summary=second_train_summary,
+        accepted=second_accepted,
+        generation_valid=second_valid,
+        novelty_reference_code=first_generation.code,
+    )
+    epochs_payload.append(second_epoch_payload)
+    _write_epoch_artifact(condition_dir, second_epoch_payload)
+
+    if valid_candidates:
+        _best_score, final_code, final_train_summary = valid_candidates[0]
+    else:
+        final_code = default_code
+        final_train_summary = summarize_panel(_evaluate_code_panel(final_code, train_instances, config), panel_name="train")
+    holdout_results = _evaluate_code_panel(final_code, holdout_instances, config)
+    payload = _closeout_final_payload(
+        config=config,
+        epochs_payload=epochs_payload,
+        final_code=final_code,
+        final_train_summary=final_train_summary,
+        holdout_results=holdout_results,
+    )
+    _json_dump(condition_dir / "condition_summary.json", payload)
+    _write_training_plots(condition_dir, config.name, epochs_payload)
+    return payload
+
+
+def _budget_matched_no_replay_condition_payload(config: Phase9ConditionConfig, condition_dir: Path) -> dict[str, Any]:
+    train_instances, holdout_instances, train_instance_summaries, baseline_summaries = _phase9_context_bundle(config)
+    default_code = default_solver_code()
+    epochs_payload: list[dict[str, Any]] = []
+    best_valid: tuple[tuple[float, float], str, dict[str, Any]] | None = None
+    previous_code = default_code
+
+    for candidate_index in range(1, int(config.optimization.epochs) + 1):
+        prompt = _build_closeout_prompt(
+            config=config,
+            context={
+                "train_instance_summaries": train_instance_summaries,
+                "baseline_summaries": baseline_summaries,
+            },
+            technique="phase9_closeout_budget_matched_no_replay",
+            candidate_index=candidate_index,
+            candidate_budget=int(config.optimization.epochs),
+        )
+        generation_result = generate_code(
+            provider=config.agent.provider,
+            model=config.agent.model,
+            system_prompt=config.agent.system_prompt,
+            user_prompt=prompt,
+            temperature=float(config.agent.temperature),
+            max_tokens=int(config.agent.max_tokens),
+            repair_invalid_submissions=bool(config.generation.repair_invalid_submissions),
+            timeout=float(config.generation.llm_timeout_seconds),
+            max_non_empty_lines=int(config.generation.max_non_empty_lines),
+            max_characters=int(config.generation.max_characters),
+        )
+        candidate_train_results = _evaluate_code_panel(generation_result.code, train_instances, config)
+        candidate_train_summary = summarize_panel(candidate_train_results, panel_name="train")
+        generation_valid = _generation_valid_for_acceptance(generation_result)
+        accepted = False
+        if generation_valid:
+            candidate_score = _closeout_score(candidate_train_summary)
+            if best_valid is None or candidate_score < best_valid[0]:
+                best_valid = (candidate_score, generation_result.code, candidate_train_summary)
+                accepted = True
+        epoch_payload = _epoch_payload(
+            epoch_index=candidate_index,
+            prompt=prompt,
+            generation_result=generation_result,
+            candidate_train_summary=candidate_train_summary,
+            accepted=accepted,
+            generation_valid=generation_valid,
+            novelty_reference_code=previous_code,
+        )
+        epochs_payload.append(epoch_payload)
+        _write_epoch_artifact(condition_dir, epoch_payload)
+        previous_code = generation_result.code
+
+    if best_valid is None:
+        final_code = default_code
+        final_train_summary = summarize_panel(_evaluate_code_panel(final_code, train_instances, config), panel_name="train")
+    else:
+        _best_score, final_code, final_train_summary = best_valid
+    holdout_results = _evaluate_code_panel(final_code, holdout_instances, config)
+    payload = _closeout_final_payload(
+        config=config,
+        epochs_payload=epochs_payload,
+        final_code=final_code,
+        final_train_summary=final_train_summary,
+        holdout_results=holdout_results,
+    )
+    _json_dump(condition_dir / "condition_summary.json", payload)
+    _write_training_plots(condition_dir, config.name, epochs_payload)
+    return payload
+
+
+def _replay_solver_evolution_condition_payload(config: Phase9ConditionConfig, condition_dir: Path) -> dict[str, Any]:
+    train_instances, holdout_instances, train_instance_summaries, baseline_summaries = _phase9_context_bundle(config)
+    incumbent_code = default_solver_code()
+    incumbent_train_results = _evaluate_code_panel(incumbent_code, train_instances, config)
+    incumbent_train_summary = summarize_panel(incumbent_train_results, panel_name="train")
+    replay_archive: list[dict[str, Any]] = []
+    epochs_payload: list[dict[str, Any]] = []
+
+    for epoch_index in range(1, int(config.optimization.epochs) + 1):
+        prior_incumbent_code = incumbent_code
+        prompt = _build_closeout_prompt(
+            config=config,
+            context={
+                "train_instance_summaries": train_instance_summaries,
+                "baseline_summaries": baseline_summaries,
+                "incumbent_summary": incumbent_train_summary,
+                "incumbent_code": incumbent_code,
+                "worst_cases": incumbent_train_summary.get("worst_instances", []),
+            },
+            technique="phase9_closeout_replay_solver_evolution",
+            candidate_index=epoch_index,
+            candidate_budget=int(config.optimization.epochs),
+            replay_archive=replay_archive,
+        )
+        generation_result = generate_code(
+            provider=config.agent.provider,
+            model=config.agent.model,
+            system_prompt=config.agent.system_prompt,
+            user_prompt=prompt,
+            temperature=float(config.agent.temperature),
+            max_tokens=int(config.agent.max_tokens),
+            repair_invalid_submissions=bool(config.generation.repair_invalid_submissions),
+            timeout=float(config.generation.llm_timeout_seconds),
+            max_non_empty_lines=int(config.generation.max_non_empty_lines),
+            max_characters=int(config.generation.max_characters),
+        )
+        candidate_train_results = _evaluate_code_panel(generation_result.code, train_instances, config)
+        candidate_train_summary = summarize_panel(candidate_train_results, panel_name="train")
+        candidate_score = _closeout_score(candidate_train_summary)
+        incumbent_score = _closeout_score(incumbent_train_summary)
+        generation_valid = _generation_valid_for_acceptance(generation_result)
+        accepted = False
+        if generation_valid:
+            accepted = candidate_score < incumbent_score or (
+                abs(candidate_score[1] - incumbent_score[1]) <= float(config.optimization.acceptance_tolerance)
+                and candidate_score[0] < incumbent_score[0]
+            )
+        if accepted:
+            incumbent_code = generation_result.code
+            incumbent_train_summary = candidate_train_summary
+        epoch_payload = _epoch_payload(
+            epoch_index=epoch_index,
+            prompt=prompt,
+            generation_result=generation_result,
+            candidate_train_summary=candidate_train_summary,
+            accepted=accepted,
+            generation_valid=generation_valid,
+            novelty_reference_code=prior_incumbent_code,
+        )
+        epochs_payload.append(epoch_payload)
+        _write_epoch_artifact(condition_dir, epoch_payload)
+        if not accepted:
+            replay_archive.append(_replay_archive_entry(epoch_payload))
+
+    holdout_results = _evaluate_code_panel(incumbent_code, holdout_instances, config)
+    payload = _closeout_final_payload(
+        config=config,
+        epochs_payload=epochs_payload,
+        final_code=incumbent_code,
+        final_train_summary=incumbent_train_summary,
+        holdout_results=holdout_results,
+    )
+    _json_dump(condition_dir / "condition_summary.json", payload)
+    _write_training_plots(condition_dir, config.name, epochs_payload)
     return payload
 
 
 def build_judge_prompt(suite_summary: dict[str, Any]) -> str:
+    execution_modes = {str(item.get("execution_mode")) for item in suite_summary.get("conditions", [])}
+    if {
+        "direct_generate_plus_one_repair",
+        "budget_matched_no_replay",
+        "replay_solver_evolution",
+    } & execution_modes:
+        framing_lines = [
+            "Summarize this phase-9 CVRP closeout suite conservatively.",
+            "Focus on direct synthesis, budget-matched independent search, replay-aware iterative search, fixed-baseline context, feasibility, objective gap, runtime, and robustness across held-out structure families.",
+            "State whether any learned condition clearly beat the fixed baselines and whether replay beat the budget-matched no-replay control.",
+        ]
+    else:
+        framing_lines = [
+            "Summarize this phase-9 CVRP suite conservatively.",
+            "Focus on feasibility, objective gap, runtime, and robustness across held-out structure families.",
+            "State whether the evolved solver clearly beat the fixed baselines or not.",
+        ]
     lines = [
-        "Summarize this phase-9 CVRP solver-evolution suite conservatively.",
-        "Focus on feasibility, objective gap, runtime, and robustness across held-out structure families.",
-        "State whether the evolved solver clearly beat the fixed baselines or not.",
+        *framing_lines,
         "",
         json.dumps(suite_summary, indent=2, sort_keys=True),
     ]
@@ -366,7 +835,7 @@ def build_judge_prompt(suite_summary: dict[str, Any]) -> str:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the phase-9 bounded CVRP whole-solver evolution suite.")
+    parser = argparse.ArgumentParser(description="Run the phase-9 bounded CVRP suite, including whole-solver evolution and closeout control arms.")
     parser.add_argument("--config", required=True, help="Path to the phase-9 suite JSON config.")
     parser.add_argument("--seed-offset", type=int, default=0, help="Offset added to every condition seed.")
     parser.add_argument("--replicate-label", default="", help="Optional suffix like b/c/d for replicated runs.")
@@ -401,6 +870,12 @@ def main() -> None:
             payload = _baseline_condition_payload(config, condition_dir, solver_name=config.execution.mode.removeprefix("baseline_"))
         elif config.execution.mode == "solver_evolution":
             payload = _evolution_condition_payload(config, condition_dir)
+        elif config.execution.mode == "direct_generate_plus_one_repair":
+            payload = _direct_generate_plus_one_repair_condition_payload(config, condition_dir)
+        elif config.execution.mode == "budget_matched_no_replay":
+            payload = _budget_matched_no_replay_condition_payload(config, condition_dir)
+        elif config.execution.mode == "replay_solver_evolution":
+            payload = _replay_solver_evolution_condition_payload(config, condition_dir)
         else:
             raise ValueError(f"Unsupported phase-9 execution mode: {config.execution.mode}")
         condition_payloads.append(payload)
