@@ -1,16 +1,39 @@
 from __future__ import annotations
 
 from typing import Any
+from typing import Sequence
 
 
-def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int, max_characters: int) -> str:
+def build_generation_prompt(
+    *,
+    context: dict[str, Any],
+    max_non_empty_lines: int,
+    max_characters: int,
+    strategy_instruction: str = "Treat this as mutation-based solver evolution, not a fresh rewrite.",
+    extra_sections: Sequence[str] | None = None,
+) -> str:
     instance_summaries = context["train_instance_summaries"]
     baseline_summaries = context["baseline_summaries"]
     incumbent = context.get("incumbent_summary")
     worst_cases = context.get("worst_cases", [])
+    previous_code = str(context.get("incumbent_code", "")).strip()
+    if incumbent is not None or previous_code:
+        candidate_scope_lines = [
+            "- Prefer 1 to 3 focused edits to the incumbent instead of a whole new design.",
+            "- Preserve the incumbent structure, helper functions, and return path unless a specific change is necessary.",
+            "- If you are unsure how to improve the solver safely, return the incumbent unchanged rather than emitting broken code.",
+            "",
+        ]
+    else:
+        candidate_scope_lines = [
+            "- Prefer one compact constructive-plus-repair scaffold rather than many disconnected heuristics.",
+            "- Keep helper functions minimal and ensure the returned solver is complete on its own.",
+            "- If you are unsure how to improve quality safely, favor a conservative feasible solver over a brittle ambitious design.",
+            "",
+        ]
     prompt_lines = [
         "Design a deterministic CVRP solver in raw Python.",
-        "Treat this as mutation-based solver evolution, not a fresh rewrite.",
+        strategy_instruction,
         "Return only raw Python source code.",
         "The first line must be exactly: def solve_cvrp(instance):",
         "Do not use markdown fences.",
@@ -19,10 +42,7 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
         f"- Stay within {max_non_empty_lines} non-empty lines when feasible.",
         f"- Stay within {max_characters} characters when feasible.",
         "- Oversized submissions are rejected; prefer a compact solver with only a few short helper functions.",
-        "- Prefer 1 to 3 focused edits to the incumbent instead of a whole new design.",
-        "- Preserve the incumbent structure, helper functions, and return path unless a specific change is necessary.",
-        "- If you are unsure how to improve the solver safely, return the incumbent unchanged rather than emitting broken code.",
-        "",
+        *candidate_scope_lines,
         "Your solver must return a full solution as a list of routes.",
         "Each route must be a Python list of zero-based customer node ids.",
         "Do not include the depot in any route.",
@@ -81,7 +101,6 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
                 "- Make small, targeted changes that improve the worst training cases without destabilizing the rest of the solver.",
             ]
         )
-    previous_code = str(context.get("incumbent_code", "")).strip()
     if previous_code:
         prompt_lines.extend(
             [
@@ -99,6 +118,8 @@ def build_generation_prompt(*, context: dict[str, Any], max_non_empty_lines: int
                     **item
                 )
             )
+    if extra_sections:
+        prompt_lines.extend(["", *list(extra_sections)])
     prompt_lines.extend(
         [
             "",

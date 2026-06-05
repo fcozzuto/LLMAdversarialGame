@@ -67,6 +67,13 @@ This checklist is the fixed research protocol for the project. It separates infr
 3. Does the evolved solver remain robust across held-out CVRP structure families, including both two-cluster and grid-like `X` regimes under the project descriptor basis, instead of only one narrow instance regime?
 4. Can the system synthesize interpretable constructive, repair, local-search, or restart logic rather than only brittle code churn?
 
+## Phase 9 Closeout Questions
+
+1. When the bounded phase-9 CVRP setup improves over weaker baselines, how much of that gain is better explained by direct synthesis, by extra candidate budget, or by replay-aware iterative search?
+2. Does `replay_solver_evolution` beat the correct `budget_matched_no_replay` control on held-out penalized gap under paired offsets?
+3. Does `direct_generate_plus_one_repair` already explain most of the descriptive direct-solver advantage observed in the retained thesis evidence?
+4. Do the closeout arms preserve feasibility while changing the tradeoff among held-out gap, runtime, and accepted-candidate count?
+
 ## Cross-Family Synthesis Questions
 
 1. Do comparable LLM-driven code-evolution loops show recurring improvement, churn, or failure-mode patterns across simple games, TSP, and real-world CVRP?
@@ -133,6 +140,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - Phase-8 secondary endpoints: selector regret versus the oracle portfolio, runtime-adjusted gap, runtime inflation, Pareto efficiency, synthetic-family transfer, code novelty, controller complexity, and adaptation efficiency.
 - Phase-9 primary endpoint: final held-out CVRPLIB mean penalized gap for the whole-solver evolution condition.
 - Phase-9 secondary endpoints: held-out feasibility rate, held-out feasible-instance objective gap, runtime, robustness across held-out structure families, code novelty, and solver complexity.
+- Phase-9 closeout primary endpoint: final held-out CVRPLIB mean penalized gap for `direct_generate_plus_one_repair`, `budget_matched_no_replay`, and `replay_solver_evolution`.
+- Phase-9 closeout secondary endpoints: held-out feasibility rate, held-out feasible-instance objective gap, runtime, accepted-candidate count, code novelty, and solver complexity.
 - Cross-family synthesis endpoints: normalized endpoint performance, code novelty, generation reliability, accepted/update rate where available, train-time trend direction, and domain-specific failure-mode counts across the simple-game, TSP, and CVRP archives.
 - Direct Codex endpoint: phase-9 CVRP held-out feasibility rate, held-out penalized gap, feasible-instance gap, and runtime for the single-shot direct solver.
 - Model-strength factorial endpoints: `performance_raw`, within-task `performance_z`, `secondary_performance_raw`, generation success, code novelty, accepted epochs, acceptance rate, feasibility where applicable, runtime where applicable, model x evolution matrices, variance decomposition, and effect sizes against both `single_shot` and `budget_matched_no_replay`.
@@ -177,6 +186,8 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] A phase-9 bounded CVRP benchmark-preparation script exists in [prepare_cvrp_phase9_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_cvrp_phase9_benchmarks.py).
 - [x] A phase-9 bounded CVRP aggregation tool exists in [aggregate_cvrp_phase9_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_cvrp_phase9_runs.py).
 - [x] A phase-9 bounded CVRP runbook exists in [configs/cvrp_phase9_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_suite/RUNBOOK.md).
+- [x] A phase-9 closeout protocol exists in [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md).
+- [x] A phase-9 closeout runbook exists in [configs/cvrp_phase9_closeout/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_closeout/RUNBOOK.md).
 - [x] A cross-family synthesis analyzer exists in [analyze_cross_family_evolution.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/analyze_cross_family_evolution.py).
 - [x] A cross-family synthesis runbook exists in [configs/cross_family_synthesis/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cross_family_synthesis/RUNBOOK.md).
 - [x] A final model-strength x evolution factorial runner exists in [run_model_strength_factorial.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_model_strength_factorial.py).
@@ -246,6 +257,9 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] Phase-9 Clarke-Wright savings baseline exists.
 - [x] Phase-9 regret-insertion plus local-search baseline exists.
 - [x] Phase-9 whole-solver evolution condition exists.
+- [x] Phase-9 closeout direct-generate-plus-one-repair condition exists.
+- [x] Phase-9 closeout budget-matched no-replay condition exists.
+- [x] Phase-9 closeout replay-solver-evolution condition exists.
 - [x] Direct Codex CVRP single-shot baseline exists as a descriptive non-API artifact.
 - [x] No-replay ATSP condition exists.
 - [x] Random-replay ATSP condition exists.
@@ -318,6 +332,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - The current phase-8 interpretation note is tracked in [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md).
 - The project is now evidence-complete for phase 9: the official 20-offset bounded real-world CVRP whole-solver campaign was run and aggregated, solver evolution stayed fully feasible and beat the weaker nearest-neighbor and regret-insertion baselines, but it did not beat the strongest fixed Clarke-Wright baseline on held-out CVRPLIB X instances.
 - The current phase-9 interpretation note is tracked in [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md).
+- The project now has a phase-9 closeout protocol and runner path for the budget-control follow-up, but the official replicated closeout evidence has not been run yet.
 - The project now has a cross-family synthesis over the simple-game, TSP, and real-world CVRP loops: the current unified story is capability-bounded adaptation, with code novelty common across families but held-out wins constrained by validator pressure, baseline strength, and benchmark headroom.
 - The cross-family synthesis note is tracked in [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md).
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.

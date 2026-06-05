@@ -201,7 +201,30 @@ Current status:
 - Phase 9 is now evidence-complete on branch `real-world-vrp`.
 - The official 20-offset campaign was technically valid: all runs completed, all solver-evolution final incumbents were feasible on both train and held-out panels, and the accepted path contained no fallback, generation-error, or solver-timeout contamination.
 - Solver evolution beat the weaker nearest-neighbor and regret-insertion baselines on held-out CVRPLIB X instances, but it did not beat the strongest fixed Clarke-Wright baseline on the primary endpoint.
-- That makes the next sensible step a cross-family synthesis across the simple-game, benchmark-routing, and real-world-CVRP phases rather than another immediate phase-9 engineering extension.
+- Cross-family synthesis was completed from that evidence base, and the current narrow follow-up is a bounded phase-9 closeout study that disentangles direct synthesis, budget-matched search, and replay-aware iterative search without reopening the broader model-strength branch.
+
+## 11A. Phase 9 Closeout: Budget-Control CVRP Study
+
+Goal: answer the remaining mechanism question from phase 9 without changing benchmark family, validator, train/held-out split, or model tier.
+
+- [x] Freeze a dedicated closeout protocol that keeps the bounded Uchoa `X` setup unchanged.
+- [x] Add a `direct_generate_plus_one_repair` closeout arm.
+- [x] Add a `budget_matched_no_replay` closeout arm with the same candidate budget as replay-aware search.
+- [x] Add a `replay_solver_evolution` closeout arm that reuses the bounded phase-9 validation path.
+- [x] Keep the original phase-9 fixed baselines available for contextual comparison.
+- [x] Add a no-cost smoke config that exercises the full closeout condition set.
+- [ ] Run the official replicated closeout campaign and aggregate paired deltas against both the strongest fixed baseline and the budget-matched control.
+
+Research basis:
+
+- Budget matching is required before replay can be credited for anything beyond additional candidate budget; that is the same methodological point emphasized in the project's model-strength factorial protocol.
+- Replicated run summaries, paired uncertainty intervals, and avoiding best-run-only interpretation follow the same empirical-discipline concerns raised in [Deep Reinforcement Learning That Matters](https://arxiv.org/abs/1709.06560) and [Deep RL at the Edge of the Statistical Precipice](https://arxiv.org/abs/2108.13264).
+
+Current status:
+- The implementation is on branch `cvrp-closeout-budget-control`.
+- The protocol is [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md).
+- The runbook is [configs/cvrp_phase9_closeout/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_closeout/RUNBOOK.md).
+- The no-cost smoke path passes locally, but the official replicated evidence has not been run yet.
 
 ## 12. Cross-Family Code-Evolution Synthesis
 

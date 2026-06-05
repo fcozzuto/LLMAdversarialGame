@@ -6,6 +6,8 @@ from typing import Any
 def summarize_condition(condition_payload: dict[str, Any]) -> dict[str, Any]:
     epochs = condition_payload.get("epochs", [])
     accepted_epochs = [epoch for epoch in epochs if bool(epoch.get("accepted", False))]
+    generation_error_epochs = [epoch for epoch in epochs if epoch.get("generation_error")]
+    fallback_epochs = [epoch for epoch in epochs if bool(epoch.get("generation_fallback_used", False))]
     final = condition_payload["final_evaluation"]
     holdout = final["holdout"]
     return {
@@ -13,6 +15,8 @@ def summarize_condition(condition_payload: dict[str, Any]) -> dict[str, Any]:
         "execution_mode": condition_payload["execution_mode"],
         "epoch_count": len(epochs),
         "accepted_epoch_count": len(accepted_epochs),
+        "generation_error_epoch_count": len(generation_error_epochs),
+        "fallback_epoch_count": len(fallback_epochs),
         "train_feasibility_rate": float(final["train"]["feasibility_rate"]),
         "train_penalized_gap": float(final["train"]["mean_penalized_gap"]),
         "train_feasible_gap": float(final["train"]["mean_feasible_gap"] or 0.0),
@@ -41,26 +45,29 @@ def summarize_suite(condition_payloads: list[dict[str, Any]]) -> dict[str, Any]:
 
 def render_markdown_report(condition_payloads: list[dict[str, Any]], suite_summary: dict[str, Any], *, judge_text_value: str | None = None) -> str:
     lines = [
-        "# Phase 9 CVRP Solver Evolution Report",
+        "# Phase 9 CVRP Suite Report",
         "",
         "## Overview",
         f"- Condition count: {suite_summary.get('condition_count', 0)}.",
         f"- Best held-out condition: `{suite_summary.get('best_heldout_condition')}`.",
         "",
         "## Condition Summary",
-        "| Condition | Mode | Held-out Feasibility | Held-out Penalized Gap | Held-out Feasible Gap | Held-out Runtime (ms) | Mean Novelty | Mean Complexity |",
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| Condition | Mode | Held-out Feasibility | Held-out Penalized Gap | Held-out Feasible Gap | Held-out Runtime (ms) | Accepted Epochs | Fallback Epochs | Generation Errors | Mean Novelty | Mean Complexity |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for item in suite_summary.get("conditions", []):
         feasible_gap = item["heldout_feasible_gap"] if item["heldout_feasibility_rate"] > 0 else "n/a"
         lines.append(
-            "| {condition_name} | {execution_mode} | {heldout_feasibility_rate} | {heldout_penalized_gap} | {feasible_gap} | {heldout_runtime_ms} | {mean_code_novelty} | {mean_complexity} |".format(
+            "| {condition_name} | {execution_mode} | {heldout_feasibility_rate} | {heldout_penalized_gap} | {feasible_gap} | {heldout_runtime_ms} | {accepted_epoch_count} | {fallback_epoch_count} | {generation_error_epoch_count} | {mean_code_novelty} | {mean_complexity} |".format(
                 condition_name=item["condition_name"],
                 execution_mode=item["execution_mode"],
                 heldout_feasibility_rate=item["heldout_feasibility_rate"],
                 heldout_penalized_gap=item["heldout_penalized_gap"],
                 feasible_gap=feasible_gap,
                 heldout_runtime_ms=item["heldout_runtime_ms"],
+                accepted_epoch_count=item["accepted_epoch_count"],
+                fallback_epoch_count=item["fallback_epoch_count"],
+                generation_error_epoch_count=item["generation_error_epoch_count"],
                 mean_code_novelty=item["mean_code_novelty"],
                 mean_complexity=item["mean_complexity"],
             )
@@ -76,6 +83,9 @@ def render_markdown_report(condition_payloads: list[dict[str, Any]], suite_summa
                 f"- Held-out feasibility rate: {item['heldout_feasibility_rate']}.",
                 f"- Held-out penalized gap: {item['heldout_penalized_gap']}.",
                 f"- Held-out runtime ms: {item['heldout_runtime_ms']}.",
+                f"- Accepted epoch count: {item['accepted_epoch_count']}.",
+                f"- Fallback epoch count: {item['fallback_epoch_count']}.",
+                f"- Generation-error epoch count: {item['generation_error_epoch_count']}.",
                 f"- Robustness dispersion across held-out structure families: {item['robustness_dispersion']}.",
             ]
         )
