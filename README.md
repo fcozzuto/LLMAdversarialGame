@@ -51,8 +51,12 @@ reported evidence. Branch names are working labels, not the empirical record.
   artifacts.
 - `benchmarks/` contains benchmark preparation material and local benchmark
   documentation.
-- `games/`, `agents/`, `analysis/`, `evolution/`, `operators/`, and `scripts/`
-  contain the experiment harnesses and supporting code.
+- `llm_grid_battle/`, `llm_tsp/`, `llm_atsp/`, `llm_cvrp/`,
+  `llm_cvrp_phase9/`, `llm_tsp_operator/`, and `llm_tsp_portfolio/` contain
+  the experiment harnesses and supporting code.
+- Top-level `run_*`, `aggregate_*`, `prepare_*`, and `analyze_*` scripts run
+  the official campaigns, rebuild benchmark manifests, and regenerate aggregate
+  evidence from archived outputs.
 - `run_cvrp_phase12_sota_hgs_baseline.py` runs the PyVRP HGS-style CVRP
   calibration used as the final state-of-the-art baseline check.
 
