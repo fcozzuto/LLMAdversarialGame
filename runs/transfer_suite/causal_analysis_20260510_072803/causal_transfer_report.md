@@ -1,7 +1,7 @@
 # Phase 4 Causal Transfer Analysis
 
 ## Scope
-- Recipe roots analyzed: `C:\Users\kaaro\Documents\GitHub\LLMAdversarialGame\runs\transfer_suite\rotating_opponents_holdout_endpoint`, `C:\Users\kaaro\Documents\GitHub\LLMAdversarialGame\runs\transfer_suite\rotating_plus_nemesis_novelty_replay`, `C:\Users\kaaro\Documents\GitHub\LLMAdversarialGame\runs\transfer_suite\rotating_plus_replay_aware_selection`.
+- Recipe roots analyzed: `runs/transfer_suite/rotating_opponents_holdout_endpoint`, `runs/transfer_suite/rotating_plus_nemesis_novelty_replay`, `runs/transfer_suite/rotating_plus_replay_aware_selection`.
 - Recipes compared: Rotating opponents, Rotating + nemesis + novelty + replay, Rotating + replay-aware selection.
 - Baseline recipe for delta metrics: `rotating_opponents_holdout_endpoint`.
 - Condition observations: 90.

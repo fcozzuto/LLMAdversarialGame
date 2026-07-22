@@ -155,52 +155,52 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [x] The report includes threats-to-validity language instead of only optimistic conclusions.
 - [x] The report includes deterministic notable-epoch hooks for qualitative follow-up.
 - [x] Condition metadata is preserved so ablations and controls can be grouped later.
-- [x] Research ablation configs exist in [configs/research_ablations_suite.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/research_ablations_suite.json).
-- [x] Research control/baseline configs exist in [configs/research_controls_suite.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/research_controls_suite.json).
-- [x] An explicit undocumented-field opportunity suite exists in [configs/research_cheating_opportunity_suite.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/research_cheating_opportunity_suite.json).
-- [x] A cross-run aggregation tool exists in [aggregate_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_runs.py).
+- [x] Research ablation configs exist in [configs/research_ablations_suite.json](configs/research_ablations_suite.json).
+- [x] Research control/baseline configs exist in [configs/research_controls_suite.json](configs/research_controls_suite.json).
+- [x] An explicit undocumented-field opportunity suite exists in [configs/research_cheating_opportunity_suite.json](configs/research_cheating_opportunity_suite.json).
+- [x] A cross-run aggregation tool exists in [aggregate_runs.py](aggregate_runs.py).
 - [x] Curriculum condition configs can define fixed predators, rotating opponent pools, nemesis archives, loss-triggered mutation pressure, novelty-gated selection, and holdout panels.
 - [x] Replay-aware selection checks can compare a candidate against recent nemeses before acceptance.
 - [x] A focal-policy elite archive can preserve accepted policies across behavioral cells.
 - [x] Per-epoch artifacts store behavioral descriptors, code fingerprints, and curriculum trace fields.
 - [x] Aggregate reports summarize curriculum loop, exploration, and pressure-response heuristics.
 - [x] The curriculum runbook defines a three-replicate seed-offset campaign instead of relying on single-run evidence.
-- [x] A holdout-first factorial suite exists in [configs/factorial_holdout_suite/01_factorial_holdout.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/factorial_holdout_suite/01_factorial_holdout.json).
-- [x] A novelty-review tool exists in [review_novelty_spikes.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/review_novelty_spikes.py).
-- [x] A transfer-suite generator exists in [build_transfer_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/build_transfer_suite.py).
-- [x] A cross-environment transfer runbook exists in [configs/transfer_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/transfer_suite/RUNBOOK.md).
-- [x] A phase-5 TSP benchmark-preparation script exists in [prepare_tsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_tsp_benchmarks.py).
-- [x] A phase-5 TSP runner exists in [run_tsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_suite.py).
-- [x] A phase-5 TSP aggregation tool exists in [aggregate_tsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_runs.py).
-- [x] A phase-5 TSP runbook exists in [configs/tsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_suite/RUNBOOK.md).
-- [x] A phase-6 TSP replay-mechanism aggregation tool exists in [aggregate_tsp_phase6_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_phase6_runs.py).
-- [x] A phase-6 TSP runbook exists in [configs/tsp_phase6_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase6_suite/RUNBOOK.md).
-- [x] A phase-7 modular operator runner exists in [run_tsp_operator_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_operator_suite.py).
-- [x] A phase-7 modular operator aggregation tool exists in [aggregate_tsp_operator_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_operator_runs.py).
-- [x] A phase-7 modular operator validation pipeline exists in [llm_tsp_operator/validation.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/llm_tsp_operator/validation.py).
-- [x] A phase-7 TSP runbook exists in [configs/tsp_phase7_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase7_suite/RUNBOOK.md).
-- [x] A phase-8 adaptive heuristic portfolio runner exists in [run_tsp_phase8_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_phase8_suite.py).
-- [x] A phase-8 adaptive heuristic portfolio aggregation tool exists in [aggregate_tsp_phase8_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_phase8_runs.py).
-- [x] A phase-8 adaptive heuristic portfolio runbook exists in [configs/tsp_phase8_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase8_suite/RUNBOOK.md).
-- [x] A phase-9 bounded CVRP whole-solver runner exists in [run_cvrp_phase9_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_cvrp_phase9_suite.py).
-- [x] A phase-9 bounded CVRP benchmark-preparation script exists in [prepare_cvrp_phase9_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_cvrp_phase9_benchmarks.py).
-- [x] A phase-9 bounded CVRP aggregation tool exists in [aggregate_cvrp_phase9_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_cvrp_phase9_runs.py).
-- [x] A phase-9 bounded CVRP runbook exists in [configs/cvrp_phase9_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_suite/RUNBOOK.md).
-- [x] A phase-9 closeout protocol exists in [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md).
-- [x] A phase-9 closeout runbook exists in [configs/cvrp_phase9_closeout/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_closeout/RUNBOOK.md).
-- [x] A cross-family synthesis analyzer exists in [analyze_cross_family_evolution.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/analyze_cross_family_evolution.py).
-- [x] A cross-family synthesis runbook exists in [configs/cross_family_synthesis/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cross_family_synthesis/RUNBOOK.md).
-- [x] A final model-strength x evolution factorial runner exists in [run_model_strength_factorial.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_model_strength_factorial.py).
-- [x] A final model-strength x evolution factorial aggregator exists in [aggregate_model_strength_factorial.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_model_strength_factorial.py).
-- [x] A final model-strength x evolution factorial runbook exists in [configs/model_strength_factorial/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/model_strength_factorial/RUNBOOK.md).
-- [x] A phase-5B ATSP benchmark-preparation script exists in [prepare_atsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_atsp_benchmarks.py).
-- [x] A phase-5B ATSP runner exists in [run_atsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_atsp_suite.py).
-- [x] A phase-5B ATSP aggregation tool exists in [aggregate_atsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_atsp_runs.py).
-- [x] A phase-5B ATSP runbook exists in [configs/atsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/atsp_suite/RUNBOOK.md).
-- [x] A phase-5C CVRP benchmark-preparation script exists in [prepare_cvrp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_cvrp_benchmarks.py).
-- [x] A phase-5C CVRP runner exists in [run_cvrp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_cvrp_suite.py).
-- [x] A phase-5C CVRP aggregation tool exists in [aggregate_cvrp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_cvrp_runs.py).
-- [x] A phase-5C CVRP runbook exists in [configs/cvrp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_suite/RUNBOOK.md).
+- [x] A holdout-first factorial suite exists in [configs/factorial_holdout_suite/01_factorial_holdout.json](configs/factorial_holdout_suite/01_factorial_holdout.json).
+- [x] A novelty-review tool exists in [review_novelty_spikes.py](review_novelty_spikes.py).
+- [x] A transfer-suite generator exists in [build_transfer_suite.py](build_transfer_suite.py).
+- [x] A cross-environment transfer runbook exists in [configs/transfer_suite/RUNBOOK.md](configs/transfer_suite/RUNBOOK.md).
+- [x] A phase-5 TSP benchmark-preparation script exists in [prepare_tsp_benchmarks.py](prepare_tsp_benchmarks.py).
+- [x] A phase-5 TSP runner exists in [run_tsp_suite.py](run_tsp_suite.py).
+- [x] A phase-5 TSP aggregation tool exists in [aggregate_tsp_runs.py](aggregate_tsp_runs.py).
+- [x] A phase-5 TSP runbook exists in [configs/tsp_suite/RUNBOOK.md](configs/tsp_suite/RUNBOOK.md).
+- [x] A phase-6 TSP replay-mechanism aggregation tool exists in [aggregate_tsp_phase6_runs.py](aggregate_tsp_phase6_runs.py).
+- [x] A phase-6 TSP runbook exists in [configs/tsp_phase6_suite/RUNBOOK.md](configs/tsp_phase6_suite/RUNBOOK.md).
+- [x] A phase-7 modular operator runner exists in [run_tsp_operator_suite.py](run_tsp_operator_suite.py).
+- [x] A phase-7 modular operator aggregation tool exists in [aggregate_tsp_operator_runs.py](aggregate_tsp_operator_runs.py).
+- [x] A phase-7 modular operator validation pipeline exists in [llm_tsp_operator/validation.py](llm_tsp_operator/validation.py).
+- [x] A phase-7 TSP runbook exists in [configs/tsp_phase7_suite/RUNBOOK.md](configs/tsp_phase7_suite/RUNBOOK.md).
+- [x] A phase-8 adaptive heuristic portfolio runner exists in [run_tsp_phase8_suite.py](run_tsp_phase8_suite.py).
+- [x] A phase-8 adaptive heuristic portfolio aggregation tool exists in [aggregate_tsp_phase8_runs.py](aggregate_tsp_phase8_runs.py).
+- [x] A phase-8 adaptive heuristic portfolio runbook exists in [configs/tsp_phase8_suite/RUNBOOK.md](configs/tsp_phase8_suite/RUNBOOK.md).
+- [x] A phase-9 bounded CVRP whole-solver runner exists in [run_cvrp_phase9_suite.py](run_cvrp_phase9_suite.py).
+- [x] A phase-9 bounded CVRP benchmark-preparation script exists in [prepare_cvrp_phase9_benchmarks.py](prepare_cvrp_phase9_benchmarks.py).
+- [x] A phase-9 bounded CVRP aggregation tool exists in [aggregate_cvrp_phase9_runs.py](aggregate_cvrp_phase9_runs.py).
+- [x] A phase-9 bounded CVRP runbook exists in [configs/cvrp_phase9_suite/RUNBOOK.md](configs/cvrp_phase9_suite/RUNBOOK.md).
+- [x] A phase-9 closeout protocol exists in [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md](docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md).
+- [x] A phase-9 closeout runbook exists in [configs/cvrp_phase9_closeout/RUNBOOK.md](configs/cvrp_phase9_closeout/RUNBOOK.md).
+- [x] A cross-family synthesis analyzer exists in [analyze_cross_family_evolution.py](analyze_cross_family_evolution.py).
+- [x] A cross-family synthesis runbook exists in [configs/cross_family_synthesis/RUNBOOK.md](configs/cross_family_synthesis/RUNBOOK.md).
+- [x] A final model-strength x evolution factorial runner exists in [run_model_strength_factorial.py](run_model_strength_factorial.py).
+- [x] A final model-strength x evolution factorial aggregator exists in [aggregate_model_strength_factorial.py](aggregate_model_strength_factorial.py).
+- [x] A final model-strength x evolution factorial runbook exists in [configs/model_strength_factorial/RUNBOOK.md](configs/model_strength_factorial/RUNBOOK.md).
+- [x] A phase-5B ATSP benchmark-preparation script exists in [prepare_atsp_benchmarks.py](prepare_atsp_benchmarks.py).
+- [x] A phase-5B ATSP runner exists in [run_atsp_suite.py](run_atsp_suite.py).
+- [x] A phase-5B ATSP aggregation tool exists in [aggregate_atsp_runs.py](aggregate_atsp_runs.py).
+- [x] A phase-5B ATSP runbook exists in [configs/atsp_suite/RUNBOOK.md](configs/atsp_suite/RUNBOOK.md).
+- [x] A phase-5C CVRP benchmark-preparation script exists in [prepare_cvrp_benchmarks.py](prepare_cvrp_benchmarks.py).
+- [x] A phase-5C CVRP runner exists in [run_cvrp_suite.py](run_cvrp_suite.py).
+- [x] A phase-5C CVRP aggregation tool exists in [aggregate_cvrp_runs.py](aggregate_cvrp_runs.py).
+- [x] A phase-5C CVRP runbook exists in [configs/cvrp_suite/RUNBOOK.md](configs/cvrp_suite/RUNBOOK.md).
 
 ## Required Ablations And Controls
 
@@ -306,7 +306,7 @@ This checklist is the fixed research protocol for the project. It separates infr
 - [ ] At least 3 repeated runs for the main ablation suite or a justified subset of its conditions.
 - [ ] At least 3 repeated runs for the main curriculum suite family or a justified subset of its conditions.
 - [ ] Curriculum-family claims should be based on learner-centric summaries, not on averaged learner-plus-opponent curriculum metrics.
-- [x] At least 1 aggregate report generated with [aggregate_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_runs.py) for each main suite family.
+- [x] At least 1 aggregate report generated with [aggregate_runs.py](aggregate_runs.py) for each main suite family.
 - [x] Final claims checked against deterministic summaries, aggregate reports, and qualitative epoch review, not judge prose alone.
 - [x] At least 5 replicated suite runs for the factorial holdout comparison.
 - [x] At least 5 replicated suite runs for the cross-environment transfer comparison.
@@ -326,18 +326,18 @@ This checklist is the fixed research protocol for the project. It separates infr
 - The project now has a 10-replicate phase-4 causal-transfer archive, per-recipe aggregates, paired causal-transfer analysis, and manual novelty-review packets for the three transfer recipes.
 - The project is now evidence-complete for the first routing-benchmark pass across TSP, ATSP, and CVRP: the official 20-offset suites were run, aggregated, and interpreted with paired bootstrap deltas.
 - The current phase-5 routing evidence is mixed: TSP favors `random_replay`, ATSP is weakly favorable to `failure_replay_compression` on combined transfer only, and CVRP favors `no_replay`.
-- The routing interpretation note is tracked in [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md).
+- The routing interpretation note is tracked in [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md).
 - The project is now evidence-complete for phase 6: the official 20-offset mechanism campaign was run and aggregated, naive raw-failure replay did not beat random replay, archive hardness tracked held-out TSPLIB gap better than archive diversity, and compression hurt the winning replay arms.
 - The project is now evidence-complete for phase 7: the official 20-offset modular operator campaign was run and aggregated, the repaired modular path showed real operator diversity without fallback collapse, and no operator survived transplant/ablation/Pareto validation.
 - The official phase-6 interpretation note is versioned on branch `replay-mechanism` as `docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md`.
-- The current phase-7 interpretation note is tracked in [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md).
+- The current phase-7 interpretation note is tracked in [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md](docs/PHASE_7_TSP_OPERATOR_DISCOVERY_RESULTS_2026-05-20.md).
 - The project is now evidence-complete for phase 8: the official 20-offset adaptive-portfolio campaign was run and aggregated, the adaptive LLM controller beat the one-shot static LLM selector, but it did not beat the best fixed heuristic or the supervised selector on held-out TSPLIB.
-- The current phase-8 interpretation note is tracked in [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md).
+- The current phase-8 interpretation note is tracked in [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md).
 - The project is now evidence-complete for phase 9: the official 20-offset bounded real-world CVRP whole-solver campaign was run and aggregated, solver evolution stayed fully feasible and beat the weaker nearest-neighbor and regret-insertion baselines, but it did not beat the strongest fixed Clarke-Wright baseline on held-out CVRPLIB X instances.
-- The current phase-9 interpretation note is tracked in [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md).
+- The current phase-9 interpretation note is tracked in [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md).
 - The project is now evidence-complete for the phase-9 closeout budget-control study: the official 20-offset campaign was run and aggregated, `replay_solver_evolution` was the only learned arm that stayed fully feasible in all 20 runs, it beat both the `budget_matched_no_replay` and `direct_generate_plus_one_repair` controls on held-out penalized gap, and it still did not beat the strongest fixed Clarke-Wright baseline on the primary endpoint.
-- The current phase-9 closeout interpretation note is tracked in [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md).
+- The current phase-9 closeout interpretation note is tracked in [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md](docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md).
 - The project now has a cross-family synthesis over the simple-game, TSP, and real-world CVRP loops: the current unified story is capability-bounded adaptation, with code novelty common across families but held-out wins constrained by validator pressure, baseline strength, and benchmark headroom.
-- The cross-family synthesis note is tracked in [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md).
+- The cross-family synthesis note is tracked in [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md).
 - The project is not research-conclusion-complete until the evidence checklist above is satisfied.
-- Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).
+- Deeper follow-up work on metric validation, broader generalization, and report-language tightening is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).
