@@ -57,7 +57,7 @@ They look closer to differently tuned members of the same scaffold family than t
 
 ## Interpretation
 
-Phase 6 is still scientifically useful. It narrows the mechanism claim:
+Phase 6 narrows the mechanism claim:
 
 - naive raw-failure replay is not the right default
 - replay curation matters

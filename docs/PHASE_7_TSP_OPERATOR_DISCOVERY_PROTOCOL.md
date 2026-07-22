@@ -87,7 +87,7 @@ Interpretation target:
 
 - whether modular operators are more reusable than whole-solver edits
 - whether replay and compression still help when the evolved object is a single operator
-- whether Pareto-aware selection uncovers operators that are not best on gap alone but are still scientifically useful
+- whether Pareto-aware selection uncovers operators that are not best on gap alone but still clarify performance tradeoffs
 
 ## Validation Pipeline
 

@@ -110,7 +110,7 @@
 | post_loss_novelty_spike_rate | delta_vs_baseline_margin | -0.0488 | 60 |
 
 ## Interpretation Guardrails
-- These correlations are exploratory and should not be treated as causal proof on their own.
+- These correlations are exploratory. They do not establish causality on their own.
 - The behavioral descriptors remain heuristic proxies, but they are closer to functional adaptation than lexical code novelty alone.
 - Paired-seed transfer comparisons should be weighted more heavily than unpaired aggregate differences.
-- Persistent weak archetypes are scientifically useful evidence of uneven robustness, not a nuisance to be hidden.
+- Persistent weak archetypes provide evidence of uneven robustness and remain visible in the report.

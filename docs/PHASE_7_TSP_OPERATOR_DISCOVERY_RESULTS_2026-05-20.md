@@ -52,7 +52,7 @@ Repeated families included perturbation operators, restart controllers, candidat
 
 ## Interpretation
 
-Phase 7 produced a negative or boundary result that is still scientifically useful.
+Phase 7 produced a negative or boundary result that supports a narrower conclusion.
 
 - The modular operator pipeline is functioning as intended after the operator-specific generation-path fix.
 - The pipeline is capable of generating diverse operator proposals and recurring operator families.

@@ -96,7 +96,7 @@ The strongest defensible reading is:
 - the current routing results do not justify a general replay-dominance claim
 - the current routing results also do not justify a strong "reusable heuristic compression" claim across all three families
 
-That is still scientifically useful. It narrows the thesis claim from "replay always helps" to "replay pressure interacts with problem structure, and its benefits do not transfer uniformly across routing families."
+This narrows the thesis claim from "replay always helps" to "replay pressure interacts with problem structure, and its benefits do not transfer uniformly across routing families."
 
 ## Primary Sources
 

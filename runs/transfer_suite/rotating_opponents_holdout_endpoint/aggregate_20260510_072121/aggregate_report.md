@@ -6,7 +6,7 @@
 - Runs: `run_20260507_201051_a`, `run_20260507_210350_b`, `run_20260507_220338_c`, `run_20260507_225407_d`, `run_20260507_234515_e`, `run_20260508_205712_g`, `run_20260508_224455_h`, `run_20260509_002410_i`, `run_20260509_020516_j`, `run_20260509_094819_f`.
 
 ## Cross-Run Summary
-- This aggregate uses curriculum-style learner-versus-opponent-pool conditions, so same-model versus cross-model summaries are intentionally de-emphasized.
+- This aggregate uses curriculum-style learner-versus-opponent-pool conditions, so same-model versus cross-model summaries are secondary.
 - Curriculum loop count mean 0.0 (std 0.0, 95% CI 0.0 to 0.0).
 - Curriculum strategy switches mean 45.5333 (std 3.104, 95% CI 43.6095 to 47.4572).
 - Curriculum post-loss novelty spikes mean 34.8 (std 2.4047, 95% CI 33.3095 to 36.2905).
@@ -185,4 +185,4 @@
 
 ### Claims Not Supported Yet
 - The aggregate does not by itself establish causality; the strongest causal interpretations should come from replicated ablation conditions rather than from mixed-condition summaries alone.
-- Code novelty should not be treated as equivalent to strategic innovation without qualitative review of notable epochs and behavior traces.
+- Code novelty is not equivalent to strategic innovation. Notable epochs and behavior traces require qualitative review.

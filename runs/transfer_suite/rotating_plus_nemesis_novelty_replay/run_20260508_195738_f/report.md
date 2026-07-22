@@ -216,7 +216,7 @@
   
 **Inference:**
 - agent_a sometimes failed generation leading to fallback default code, slightly compromising data quality but not indicative of cheating.
-- No direct evidence agent_a or agent_b intentionally exploit loopholes or cheat.
+- No direct evidence shows that agent_a or agent_b exploit loopholes or cheat.
 - Both agents mainly adhere to task spirit, albeit agent_a shows minor code generation instability.
 
 # Research Question 2: Plateau or Innovation

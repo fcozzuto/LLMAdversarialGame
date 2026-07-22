@@ -86,7 +86,7 @@ The main paper angle is likely uneven robustness, not universal skill.
 
 For each environment, report every holdout opponent separately and name the persistent weak cases directly.
 
-Current scientifically useful examples include:
+Current audit examples include:
 
 - `evasion_midline_dodge`
 - `safe_collector`

@@ -101,4 +101,4 @@
 
 ### Claims Not Supported Yet
 - The aggregate does not by itself establish causality; the strongest causal interpretations should come from replicated ablation conditions rather than from mixed-condition summaries alone.
-- Code novelty should not be treated as equivalent to strategic innovation without qualitative review of notable epochs and behavior traces.
+- Code novelty is not equivalent to strategic innovation. Notable epochs and behavior traces require qualitative review.

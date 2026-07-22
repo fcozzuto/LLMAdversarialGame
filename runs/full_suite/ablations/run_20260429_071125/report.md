@@ -303,7 +303,7 @@
 
 **Inference:**  
 - Models (openai:gpt-5.4-nano) mostly stay within the spirit of the task with no strong evidence of deliberate cheating.  
-- Generation failures and fallback usage appear as data-quality issues, not attempts to evade rules deliberately.
+- Generation failures and fallback usage appear as data-quality issues, not attempts to evade rules.
 
 ---
 

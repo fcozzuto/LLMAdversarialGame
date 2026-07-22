@@ -200,7 +200,7 @@
 **Inference:**
 - Both agents mostly stayed within the spirit of the tasks with no evidence of cheating.
 - Generation errors and fallback for agent_a in pursuit_evasion and territory_control partially compromise those conditions' integrity for agent_a but not agent_b.
-- Overall, no signal that models cheats deliberately.
+- Overall, there is no signal that the models cheat.
 
 # Research Question 2: Innovation and Plateau
 **Evidence:**
