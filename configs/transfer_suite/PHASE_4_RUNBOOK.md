@@ -2,7 +2,7 @@
 
 This runbook operationalizes the phase-4 goal: strengthen the causal interpretation of the transfer result before adding new curriculum mechanisms.
 
-For the conceptual protocol, use [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md).
+For the conceptual protocol, use [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](../../docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md).
 
 ## Step 1: Choose The Paired Recipes
 

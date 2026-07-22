@@ -78,7 +78,7 @@ Without that, another selector campaign is unlikely to beat the strongest fixed 
 
 ## Sources
 
-- [Phase 8 aggregate report](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/tsp_phase8_suite/adaptive_portfolio/aggregate_20260521_003344_t/aggregate_report.md)
-- [Phase 8 aggregate summary JSON](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/tsp_phase8_suite/adaptive_portfolio/aggregate_20260521_003344_t/aggregate_summary.json)
-- [Phase 8 final run suite summary](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/tsp_phase8_suite/adaptive_portfolio/run_20260521_003344_t/suite_summary.json)
-- Representative adaptive-controller artifacts under [runs/tsp_phase8_suite/adaptive_portfolio](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/tsp_phase8_suite/adaptive_portfolio)
+- [Phase 8 aggregate report](../runs/tsp_phase8_suite/adaptive_portfolio/aggregate_20260521_003344_t/aggregate_report.md)
+- [Phase 8 aggregate summary JSON](../runs/tsp_phase8_suite/adaptive_portfolio/aggregate_20260521_003344_t/aggregate_summary.json)
+- [Phase 8 final run suite summary](../runs/tsp_phase8_suite/adaptive_portfolio/run_20260521_003344_t/suite_summary.json)
+- Representative adaptive-controller artifacts under [runs/tsp_phase8_suite/adaptive_portfolio](../runs/tsp_phase8_suite/adaptive_portfolio)

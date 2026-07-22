@@ -2,7 +2,7 @@
 
 This document tracks the research-limit reductions that are still worth doing after the project is stable and the current curriculum results are acceptable.
 
-It is intentionally separate from [RESEARCH_CHECKLIST.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/RESEARCH_CHECKLIST.md). The checklist defines the minimum evidence bar for the active study. This document covers the harder follow-up work needed to make the claims narrower, stronger, and easier to defend under review.
+It is intentionally separate from [RESEARCH_CHECKLIST.md](../RESEARCH_CHECKLIST.md). The checklist defines the minimum evidence bar for the active study. This document covers the harder follow-up work needed to make the claims narrower, stronger, and easier to defend under review.
 
 ## How To Use This Backlog
 
@@ -46,7 +46,7 @@ Why this matters:
 
 Goal: reduce the chance that reported effects are artifacts of one seed, one run family, or one noisy comparison.
 
-The current operational path for this work is [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) plus [analyze_causal_transfer.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/analyze_causal_transfer.py).
+The current operational path for this work is [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) plus [analyze_causal_transfer.py](../analyze_causal_transfer.py).
 
 - [ ] Run at least three replicated live runs for every family used in claims.
 - [ ] Prefer five replicates for the strongest behavioral claims if cost allows.
@@ -94,7 +94,7 @@ Why this matters:
 
 Goal: make diversity-aware selection claims more rigorous and less dependent on lexical novelty.
 
-The current operational path for this work is [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) plus [analyze_causal_transfer.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/analyze_causal_transfer.py).
+The current operational path for this work is [docs/PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md](PHASE_4_CAUSAL_TRANSFER_PROTOCOL.md) plus [analyze_causal_transfer.py](../analyze_causal_transfer.py).
 
 - [ ] Compare lexical novelty and behavioral novelty directly across accepted and rejected candidates.
 - [ ] Check whether behavior-cell coverage predicts held-out robustness better than code novelty.
@@ -222,12 +222,12 @@ Research basis:
 
 Current status:
 - The implementation is on branch `cvrp-closeout-budget-control`.
-- The protocol is [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md).
-- The runbook is [configs/cvrp_phase9_closeout/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_closeout/RUNBOOK.md).
+- The protocol is [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md](PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_PROTOCOL.md).
+- The runbook is [configs/cvrp_phase9_closeout/RUNBOOK.md](../configs/cvrp_phase9_closeout/RUNBOOK.md).
 - The official 20-offset campaign is now complete under `runs/cvrp_phase9_closeout/budget_control`, with aggregate results in `aggregate_20260605_050930_t`.
 - `replay_solver_evolution` was the only learned arm that stayed fully feasible in all 20 official runs, and it beat both `budget_matched_no_replay` and `direct_generate_plus_one_repair` on held-out penalized gap.
 - The closeout did not overturn the strongest fixed-baseline result: Clarke-Wright remained the best condition on the primary held-out endpoint.
-- The permanent interpretation note is [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md).
+- The permanent interpretation note is [docs/PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md](PHASE_9_CLOSEOUT_BUDGET_CONTROL_CVRP_RESULTS_2026-06-05.md).
 
 ## 12. Cross-Family Code-Evolution Synthesis
 
@@ -235,8 +235,8 @@ Goal: turn the completed simple-game, TSP, and real-world CVRP evidence into a u
 
 - [x] Normalize endpoint performance, code novelty, reliability, update/acceptance rate, and train-time trend signals across the completed official archives.
 - [x] Keep train-time dynamics separate from held-out endpoint results.
-- [x] Add a direct Codex-authored CVRP solver baseline that is evaluated through the phase-9 validator without API calls.
-- [x] State the direct Codex result as descriptive unless a future protocol freezes and replicates it.
+- [x] Add a historical direct Codex-authored CVRP check that is evaluated through the phase-9 validator without API calls.
+- [x] State the direct Codex result as descriptive and non-retained as thesis evidence unless a future protocol freezes and replicates direct-Codex prompting.
 - [x] Preserve conservative wording: the synthesis supports capability-bounded adaptation, not a broad claim that LLM evolution beats mature optimization solvers.
 
 Research basis:
@@ -248,8 +248,8 @@ Research basis:
 Current status:
 - Cross-family synthesis is now implemented on branch `cross-family-synthesis`.
 - The official synthesis artifact is under `runs/cross_family_synthesis/meta_patterns_20260522_165500`.
-- The permanent report is [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md).
-- The direct Codex CVRP solver was feasible on all phase-9 train and held-out instances and descriptively beat the fixed Clarke-Wright baseline on mean held-out penalized gap, but this remains a single-shot descriptive baseline rather than replicated stochastic evidence.
+- The permanent report is [docs/CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md](CROSS_FAMILY_CODE_EVOLUTION_SYNTHESIS_2026-05-22.md).
+- The direct Codex CVRP solver was feasible on all phase-9 train and held-out instances and descriptively beat the fixed Clarke-Wright baseline on mean held-out penalized gap, but this remains a historical single-shot descriptive check rather than replicated stochastic evidence or retained thesis evidence.
 
 ## 13. Model Strength Versus Evolution Technique
 

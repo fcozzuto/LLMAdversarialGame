@@ -210,11 +210,11 @@ The required deliverable is a short adaptive-portfolio report that answers:
 
 ## Operational Entry Points
 
-- Prepare the benchmark manifest with [prepare_tsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_tsp_benchmarks.py)
-- Run the suite with [run_tsp_phase8_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_phase8_suite.py) and [configs/tsp_phase8_suite/01_adaptive_portfolio.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase8_suite/01_adaptive_portfolio.json)
-- Use [configs/tsp_phase8_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase8_suite/RUNBOOK.md) for concrete commands
-- Aggregate repeated runs with [aggregate_tsp_phase8_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_phase8_runs.py)
-- The official phase-8 evidence readout is tracked in [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md)
+- Prepare the benchmark manifest with [prepare_tsp_benchmarks.py](../prepare_tsp_benchmarks.py)
+- Run the suite with [run_tsp_phase8_suite.py](../run_tsp_phase8_suite.py) and [configs/tsp_phase8_suite/01_adaptive_portfolio.json](../configs/tsp_phase8_suite/01_adaptive_portfolio.json)
+- Use [configs/tsp_phase8_suite/RUNBOOK.md](../configs/tsp_phase8_suite/RUNBOOK.md) for concrete commands
+- Aggregate repeated runs with [aggregate_tsp_phase8_runs.py](../aggregate_tsp_phase8_runs.py)
+- The official phase-8 evidence readout is tracked in [docs/PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md](PHASE_8_ADAPTIVE_HEURISTIC_PORTFOLIO_RESULTS_2026-05-21.md)
 
 ## Relationship To Phase 7
 

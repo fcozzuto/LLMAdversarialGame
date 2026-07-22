@@ -80,8 +80,8 @@ The final synthesis should connect this result back to the earlier cross-family 
 
 ## Sources
 
-- [Official factorial final report](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cross_family_model_x_evolution_factorial/20260524_172130/final_report.md)
-- [Official factorial final report PDF](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cross_family_model_x_evolution_factorial/20260524_172130/final_report.pdf)
-- [All runs long CSV](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cross_family_model_x_evolution_factorial/20260524_172130/all_runs_long.csv)
-- [Variance partition summary](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cross_family_model_x_evolution_factorial/20260524_172130/variance_decomposition/variance_partition_summary.csv)
-- [Budget-matched effect sizes](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cross_family_model_x_evolution_factorial/20260524_172130/effect_sizes/evolution_vs_budget_matched_effects.csv)
+- [Official factorial final report](../runs/cross_family_model_x_evolution_factorial/20260524_172130/final_report.md)
+- [Official factorial final report PDF](../runs/cross_family_model_x_evolution_factorial/20260524_172130/final_report.pdf)
+- [All runs long CSV](../runs/cross_family_model_x_evolution_factorial/20260524_172130/all_runs_long.csv)
+- [Variance partition summary](../runs/cross_family_model_x_evolution_factorial/20260524_172130/variance_decomposition/variance_partition_summary.csv)
+- [Budget-matched effect sizes](../runs/cross_family_model_x_evolution_factorial/20260524_172130/effect_sizes/evolution_vs_budget_matched_effects.csv)

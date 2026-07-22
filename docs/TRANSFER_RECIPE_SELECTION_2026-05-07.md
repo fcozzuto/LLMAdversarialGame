@@ -1,6 +1,6 @@
 # Transfer Recipe Selection
 
-This note explains why the transfer stage carries forward two recipes rather than only the single highest mean from the factorial holdout study. The decision is based mainly on [aggregate_report.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/factorial_holdout_suite/aggregate_20260507_071128/aggregate_report.md) and cross-checked against [novelty_review.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/factorial_holdout_suite/novelty_review/novelty_review.md).
+This note explains why the transfer stage carries forward two recipes rather than only the single highest mean from the factorial holdout study. The decision is based mainly on [aggregate_report.md](../runs/factorial_holdout_suite/aggregate_20260507_071128/aggregate_report.md) and cross-checked against [novelty_review.md](../runs/factorial_holdout_suite/novelty_review/novelty_review.md).
 
 The six factorial candidates were:
 

@@ -139,19 +139,19 @@ Keep the benchmark manifest, held-out set, and synthetic families fixed across c
 
 ## Operational Entry Points
 
-- Prepare benchmarks with [prepare_tsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_tsp_benchmarks.py)
-- Run the suite with [run_tsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_suite.py)
-- Use [configs/tsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_suite/RUNBOOK.md) for concrete commands
-- Aggregate replicated runs with [aggregate_tsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_runs.py)
-- For the asymmetric and vehicle-routing follow-on phases, use [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md)
+- Prepare benchmarks with [prepare_tsp_benchmarks.py](../prepare_tsp_benchmarks.py)
+- Run the suite with [run_tsp_suite.py](../run_tsp_suite.py)
+- Use [configs/tsp_suite/RUNBOOK.md](../configs/tsp_suite/RUNBOOK.md) for concrete commands
+- Aggregate replicated runs with [aggregate_tsp_runs.py](../aggregate_tsp_runs.py)
+- For the asymmetric and vehicle-routing follow-on phases, use [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](ROUTING_PHASE_5B_5C_PROTOCOL.md)
 
 ## Current Evidence Note
 
-The first completed 20-offset routing pass is summarized in [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md).
+The first completed 20-offset routing pass is summarized in [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](PHASE_5_ROUTING_RESULTS_2026-05-14.md).
 
 For this TSP family, the strongest result was not `failure_replay`; it was `random_replay`. That means this protocol remains useful as the benchmark recipe, but the completed evidence should be read through the results note rather than through the original expectation alone.
 
 The two direct follow-on phases are now:
 
-- [docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md) for the mechanism study
-- [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md) for modular operator discovery
+- [docs/PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md](PHASE_6_TSP_REPLAY_MECHANISM_PROTOCOL.md) for the mechanism study
+- [docs/PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md](PHASE_7_TSP_OPERATOR_DISCOVERY_PROTOCOL.md) for modular operator discovery

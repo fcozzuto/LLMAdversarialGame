@@ -6,6 +6,8 @@ Generated: 2026-05-22T17:06:56
 
 This artifact answers the requested cross-family question: whether comparable LLM-driven code-evolution loops show recurring capability and limitation patterns across the simple-game, TSP, and real-world CVRP experiment families.
 
+Public-archive note: the direct Codex CVRP check below is preserved as a historical descriptive artifact. It is not retained as replicated thesis evidence.
+
 The analysis is intentionally conservative. It reuses completed official artifacts instead of creating a new paid campaign, normalizes only metrics that are present in the archived runs, and keeps train-time search dynamics separate from held-out endpoint evidence.
 
 ## Evidence Base
@@ -13,7 +15,7 @@ The analysis is intentionally conservative. It reuses completed official artifac
 - Simple game transfer suite: 10 runs, 3 conditions, 3000 epochs.
 - Symmetric TSP replay suite: 20 runs, 4 conditions, 640 epochs.
 - Real-world CVRP phase-9 suite: 20 runs, 4 conditions, 160 solver-evolution epochs.
-- Direct Codex experiment: one deterministic CVRP solver authored locally by Codex and evaluated through the phase-9 sandbox/validator.
+- Historical direct Codex check: one deterministic CVRP solver authored locally by Codex and evaluated through the phase-9 sandbox/validator.
 
 ## Family-Level Results
 
@@ -43,7 +45,7 @@ The analysis is intentionally conservative. It reuses completed official artifac
 | phase9_baseline_regret_insertion_local_search | 1 | 0.466391 | 1473.49 | 0 |
 | phase9_solver_evolution | 1 | 0.182231 | 821.706 | 0.471587 |
 
-## Direct Codex Experiment
+## Historical Direct Codex Check
 
 Codex produced a single deterministic Clarke-Wright-style CVRP solver with bounded local route improvement. This is not an API-generated candidate and not an evolved loop. It is a direct single-shot coding baseline evaluated on the same phase-9 train and held-out split.
 
@@ -52,7 +54,7 @@ Codex produced a single deterministic Clarke-Wright-style CVRP solver with bound
 | train | 1 | 0.064271 | 0.064271 | 243.964 |
 | holdout | 1 | 0.06778 | 0.06778 | 687.264 |
 
-Interpretation: the direct Codex solver is useful as a sanity baseline for what a single interactive Codex pass can author, but it should not be treated as a replicated stochastic condition. The fair comparison remains descriptive unless it is rerun under a frozen direct-Codex protocol.
+Interpretation: the direct Codex solver is useful as a historical sanity check for what a single interactive Codex pass can author, but it should not be treated as a replicated stochastic condition or as retained thesis evidence. The fair comparison remains descriptive unless it is rerun under a frozen direct-Codex protocol.
 
 ## Meta-Patterns
 

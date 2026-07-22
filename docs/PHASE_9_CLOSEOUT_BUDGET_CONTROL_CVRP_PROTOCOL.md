@@ -16,7 +16,7 @@ This is a phase-9 closeout study, not a new broad phase in the sense of phases 7
 
 - Phase 9 established that bounded whole-solver evolution on real-world `CVRP` is technically feasible and can beat weaker fixed baselines on held-out instances.
 - Phase 9 did not show a win over the strongest fixed `Clarke--Wright` baseline on the primary endpoint.
-- The descriptive direct Codex-authored `CVRP` solver was stronger than the replicated autonomous mean, but that result was not a frozen replicated condition.
+- A historical descriptive direct Codex-authored `CVRP` check was stronger than the replicated autonomous mean, but that result was not a frozen replicated condition and is not retained as thesis evidence.
 
 The closeout study exists to convert that descriptive gap into a controlled budget-comparison result, or else to falsify the stronger interpretation cleanly.
 

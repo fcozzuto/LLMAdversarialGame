@@ -14,7 +14,7 @@ conda activate Python3_14
 python prepare_atsp_benchmarks.py
 ```
 
-That downloads the selected TSPLIB95 ATSP subset, assigns official best-known costs, and writes [benchmarks/atsp/manifest.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/benchmarks/atsp/manifest.json).
+That downloads the selected TSPLIB95 ATSP subset, assigns official best-known costs, and writes [benchmarks/atsp/manifest.json](../../benchmarks/atsp/manifest.json).
 
 ## 2. Offline Smoke Test
 

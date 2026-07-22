@@ -2,7 +2,7 @@
 
 This runbook reproduces the cross-family synthesis over the completed official experiment families.
 
-It does not call paid model APIs. It reads archived official run artifacts and evaluates the direct Codex CVRP solver locally through the phase-9 sandbox and validator.
+It does not call paid model APIs. It reads archived official run artifacts and evaluates the historical direct Codex CVRP check locally through the phase-9 sandbox and validator.
 
 ## Inputs
 
@@ -33,12 +33,12 @@ The script writes a new directory under `runs/cross_family_synthesis/meta_patter
 - `cross_family_summary.json`: normalized metrics and meta-pattern payload.
 - `cross_family_report.md`: human-readable synthesis report.
 - `cross_family_report.pdf`: PDF version of the synthesis report.
-- `codex_direct_cvrp_solver.py`: direct Codex-authored deterministic CVRP solver.
-- `codex_direct_cvrp_summary.json`: train/holdout validation results for the direct solver.
+- `codex_direct_cvrp_solver.py`: historical direct Codex-authored deterministic CVRP solver.
+- `codex_direct_cvrp_summary.json`: train/holdout validation results for the historical direct solver.
 
 ## Interpretation Rules
 
 - Treat the cross-family synthesis as an analysis artifact over completed official campaigns, not a new replicated paid experiment.
-- Treat the direct Codex CVRP solver as a single-shot descriptive baseline unless a future protocol freezes and replicates direct-Codex prompting.
+- Treat the direct Codex CVRP solver as a historical single-shot descriptive check, not as retained thesis evidence, unless a future protocol freezes and replicates direct-Codex prompting.
 - Keep train-time search dynamics separate from held-out endpoint evidence.
 - Do not infer that code novelty means behavioral novelty unless the relevant family has behavioral validation or held-out transfer evidence.

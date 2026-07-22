@@ -2,7 +2,7 @@
 
 This document defines the phase-2 research design built on top of the original adversarial grid framework.
 
-For the follow-on holdout-first factorial study and the cross-environment transfer study, use [docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md).
+For the follow-on holdout-first factorial study and the cross-environment transfer study, use [docs/FACTORIAL_AND_TRANSFER_PROTOCOL.md](FACTORIAL_AND_TRANSFER_PROTOCOL.md).
 
 ## Goal
 
@@ -68,9 +68,9 @@ Per epoch, the framework should preserve:
 
 Curriculum conditions are training conditions. Holdout panels are evaluation conditions. Do not treat a curriculum run as evidence of generalization unless the accepted policy also performs meaningfully on the holdout panel.
 
-Replicate every curriculum family with the fixed seed-offset schedule in [configs/curriculum_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/curriculum_suite/RUNBOOK.md) before drawing claims about stable effects.
+Replicate every curriculum family with the fixed seed-offset schedule in [configs/curriculum_suite/RUNBOOK.md](../configs/curriculum_suite/RUNBOOK.md) before drawing claims about stable effects.
 
-Deferred follow-up work on metric validation, stronger held-out evaluation, and broader generalization scope is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md).
+Deferred follow-up work on metric validation, stronger held-out evaluation, and broader generalization scope is tracked in [docs/VALIDITY_AND_GENERALIZATION_BACKLOG.md](VALIDITY_AND_GENERALIZATION_BACKLOG.md).
 
 ## Reporting
 

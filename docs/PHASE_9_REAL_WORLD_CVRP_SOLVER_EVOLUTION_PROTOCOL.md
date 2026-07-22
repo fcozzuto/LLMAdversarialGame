@@ -163,8 +163,8 @@ That keeps the phase bounded and directly answers the supervisor's request witho
 
 ## Operational Entry Points
 
-- prepare the benchmark with [prepare_cvrp_phase9_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_cvrp_phase9_benchmarks.py)
-- run the suite with [run_cvrp_phase9_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_cvrp_phase9_suite.py)
-- aggregate repeated runs with [aggregate_cvrp_phase9_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_cvrp_phase9_runs.py)
-- use [configs/cvrp_phase9_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_phase9_suite/RUNBOOK.md) for smoke and official commands
-- the official evidence readout is tracked in [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md)
+- prepare the benchmark with [prepare_cvrp_phase9_benchmarks.py](../prepare_cvrp_phase9_benchmarks.py)
+- run the suite with [run_cvrp_phase9_suite.py](../run_cvrp_phase9_suite.py)
+- aggregate repeated runs with [aggregate_cvrp_phase9_runs.py](../aggregate_cvrp_phase9_runs.py)
+- use [configs/cvrp_phase9_suite/RUNBOOK.md](../configs/cvrp_phase9_suite/RUNBOOK.md) for smoke and official commands
+- the official evidence readout is tracked in [docs/PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md](PHASE_9_REAL_WORLD_CVRP_SOLVER_EVOLUTION_RESULTS_2026-05-21.md)

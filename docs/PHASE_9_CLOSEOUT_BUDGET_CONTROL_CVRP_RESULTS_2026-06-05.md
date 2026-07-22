@@ -76,7 +76,7 @@ That gives the dissertation a cleaner final message than the original phase-9 re
 
 ## Sources
 
-- [Closeout aggregate report](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_phase9_closeout/budget_control/aggregate_20260605_050930_t/aggregate_report.md)
-- [Closeout aggregate summary JSON](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_phase9_closeout/budget_control/aggregate_20260605_050930_t/aggregate_summary.json)
-- [Closeout final run suite summary](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_phase9_closeout/budget_control/run_20260605_050930_t/suite_summary.json)
-- Representative closeout artifacts under [runs/cvrp_phase9_closeout/budget_control](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_phase9_closeout/budget_control)
+- [Closeout aggregate report](../runs/cvrp_phase9_closeout/budget_control/aggregate_20260605_050930_t/aggregate_report.md)
+- [Closeout aggregate summary JSON](../runs/cvrp_phase9_closeout/budget_control/aggregate_20260605_050930_t/aggregate_summary.json)
+- [Closeout final run suite summary](../runs/cvrp_phase9_closeout/budget_control/run_20260605_050930_t/suite_summary.json)
+- Representative closeout artifacts under [runs/cvrp_phase9_closeout/budget_control](../runs/cvrp_phase9_closeout/budget_control)

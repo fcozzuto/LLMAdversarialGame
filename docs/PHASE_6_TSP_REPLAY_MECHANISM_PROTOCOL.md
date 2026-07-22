@@ -156,10 +156,10 @@ The required deliverable is a short mechanism report that answers:
 
 ## Operational Entry Points
 
-- Prepare the benchmark manifest with [prepare_tsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_tsp_benchmarks.py)
-- Run the suite with [run_tsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_tsp_suite.py) and [configs/tsp_phase6_suite/01_replay_mechanism.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase6_suite/01_replay_mechanism.json)
-- Use [configs/tsp_phase6_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/tsp_phase6_suite/RUNBOOK.md) for concrete commands
-- Aggregate repeated runs with [aggregate_tsp_phase6_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_tsp_phase6_runs.py)
+- Prepare the benchmark manifest with [prepare_tsp_benchmarks.py](../prepare_tsp_benchmarks.py)
+- Run the suite with [run_tsp_suite.py](../run_tsp_suite.py) and [configs/tsp_phase6_suite/01_replay_mechanism.json](../configs/tsp_phase6_suite/01_replay_mechanism.json)
+- Use [configs/tsp_phase6_suite/RUNBOOK.md](../configs/tsp_phase6_suite/RUNBOOK.md) for concrete commands
+- Aggregate repeated runs with [aggregate_tsp_phase6_runs.py](../aggregate_tsp_phase6_runs.py)
 - Official results note: versioned on branch `replay-mechanism` as `docs/PHASE_6_TSP_REPLAY_MECHANISM_RESULTS_2026-05-20.md`
 
 ## Relationship To Phase 5

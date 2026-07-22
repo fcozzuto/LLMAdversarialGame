@@ -30,7 +30,7 @@ Run every suite family three times with predefined seed offsets. This gives you 
 
 ## Recommended Execution Order
 
-Run these from [C:\Users\kaaro\Documents\GitHub\LLMAdversarialGame](C:\Users\kaaro\Documents\GitHub\LLMAdversarialGame).
+Run these from [.](.).
 
 ### Fixed Predator
 

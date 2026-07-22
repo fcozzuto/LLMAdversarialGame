@@ -84,7 +84,7 @@ That is a better foundation for the final dissertation story than pretending the
 
 ## Sources
 
-- [Phase 9 aggregate report](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_phase9_suite/solver_evolution/aggregate_20260521_220715_t/aggregate_report.md)
-- [Phase 9 aggregate summary JSON](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_phase9_suite/solver_evolution/aggregate_20260521_220715_t/aggregate_summary.json)
-- [Phase 9 final run suite summary](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_phase9_suite/solver_evolution/run_20260521_220715_t/suite_summary.json)
-- Representative solver-evolution artifacts under [runs/cvrp_phase9_suite/solver_evolution](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_phase9_suite/solver_evolution)
+- [Phase 9 aggregate report](../runs/cvrp_phase9_suite/solver_evolution/aggregate_20260521_220715_t/aggregate_report.md)
+- [Phase 9 aggregate summary JSON](../runs/cvrp_phase9_suite/solver_evolution/aggregate_20260521_220715_t/aggregate_summary.json)
+- [Phase 9 final run suite summary](../runs/cvrp_phase9_suite/solver_evolution/run_20260521_220715_t/suite_summary.json)
+- Representative solver-evolution artifacts under [runs/cvrp_phase9_suite/solver_evolution](../runs/cvrp_phase9_suite/solver_evolution)

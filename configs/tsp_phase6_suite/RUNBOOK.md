@@ -20,7 +20,7 @@ conda activate Python3_14
 python prepare_tsp_benchmarks.py
 ```
 
-That refreshes [benchmarks/tsp/manifest.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/benchmarks/tsp/manifest.json) with descriptor payloads for the official TSPLIB and synthetic TSP instances.
+That refreshes [benchmarks/tsp/manifest.json](../../benchmarks/tsp/manifest.json) with descriptor payloads for the official TSPLIB and synthetic TSP instances.
 
 ## 2. Offline Smoke Test
 

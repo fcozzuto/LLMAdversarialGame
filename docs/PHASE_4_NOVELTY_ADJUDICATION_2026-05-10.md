@@ -3,9 +3,9 @@
 This note records the manual review requested for the top novelty spikes in the three phase-4 transfer recipes.
 It cross-checks the generated packets:
 
-- [baseline novelty packet](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/transfer_suite/novelty_review_baseline_20260510_073503/novelty_review.md)
-- [heavy novelty packet](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/transfer_suite/novelty_review_heavy_20260510_073503/novelty_review.md)
-- [replay-aware novelty packet](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/transfer_suite/novelty_review_replay_aware_20260510_073503/novelty_review.md)
+- [baseline novelty packet](../runs/transfer_suite/novelty_review_baseline_20260510_073503/novelty_review.md)
+- [heavy novelty packet](../runs/transfer_suite/novelty_review_heavy_20260510_073503/novelty_review.md)
+- [replay-aware novelty packet](../runs/transfer_suite/novelty_review_replay_aware_20260510_073503/novelty_review.md)
 
 The goal is not to re-score novelty mechanically. The goal is to decide whether the strongest lexical code changes look like:
 

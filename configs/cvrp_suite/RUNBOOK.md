@@ -14,7 +14,7 @@ conda activate Python3_14
 python prepare_cvrp_benchmarks.py
 ```
 
-That downloads the selected CVRPLIB subset, verifies official solution files against recomputed route cost, and writes [benchmarks/cvrp/manifest.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/benchmarks/cvrp/manifest.json).
+That downloads the selected CVRPLIB subset, verifies official solution files against recomputed route cost, and writes [benchmarks/cvrp/manifest.json](../../benchmarks/cvrp/manifest.json).
 
 ## 2. Offline Smoke Test
 

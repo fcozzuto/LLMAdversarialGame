@@ -111,16 +111,16 @@ Official target for this repository:
 Use the exact same offset list across TSP, ATSP, and CVRP so the paired replay-condition comparisons are directly aligned.
 Report paired uncertainty on condition deltas, not only independent condition summaries.
 
-The replicated aggregates are now available. The current evidence note is [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md), and its main conclusion is mixed rather than uniformly positive.
+The replicated aggregates are now available. The current evidence note is [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](PHASE_5_ROUTING_RESULTS_2026-05-14.md), and its main conclusion is mixed rather than uniformly positive.
 
 ## Operational Entry Points
 
-- Prepare ATSP benchmarks with [prepare_atsp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_atsp_benchmarks.py)
-- Run ATSP experiments with [run_atsp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_atsp_suite.py)
-- Aggregate ATSP runs with [aggregate_atsp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_atsp_runs.py)
-- Use [configs/atsp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/atsp_suite/RUNBOOK.md) for ATSP commands
-- Prepare CVRP benchmarks with [prepare_cvrp_benchmarks.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/prepare_cvrp_benchmarks.py)
-- Run CVRP experiments with [run_cvrp_suite.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/run_cvrp_suite.py)
-- Aggregate CVRP runs with [aggregate_cvrp_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_cvrp_runs.py)
-- Use [configs/cvrp_suite/RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/cvrp_suite/RUNBOOK.md) for CVRP commands
-- Use [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md) when interpreting the completed TSP/ATSP/CVRP evidence pass.
+- Prepare ATSP benchmarks with [prepare_atsp_benchmarks.py](../prepare_atsp_benchmarks.py)
+- Run ATSP experiments with [run_atsp_suite.py](../run_atsp_suite.py)
+- Aggregate ATSP runs with [aggregate_atsp_runs.py](../aggregate_atsp_runs.py)
+- Use [configs/atsp_suite/RUNBOOK.md](../configs/atsp_suite/RUNBOOK.md) for ATSP commands
+- Prepare CVRP benchmarks with [prepare_cvrp_benchmarks.py](../prepare_cvrp_benchmarks.py)
+- Run CVRP experiments with [run_cvrp_suite.py](../run_cvrp_suite.py)
+- Aggregate CVRP runs with [aggregate_cvrp_runs.py](../aggregate_cvrp_runs.py)
+- Use [configs/cvrp_suite/RUNBOOK.md](../configs/cvrp_suite/RUNBOOK.md) for CVRP commands
+- Use [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](PHASE_5_ROUTING_RESULTS_2026-05-14.md) when interpreting the completed TSP/ATSP/CVRP evidence pass.

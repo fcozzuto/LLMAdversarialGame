@@ -100,9 +100,9 @@ That is still scientifically useful. It narrows the thesis claim from "replay al
 
 ## Primary Sources
 
-- [TSP aggregate report](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/tsp_suite/replay_transfer/aggregate_20260513_155249_t/aggregate_report.md)
-- [ATSP aggregate report](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/atsp_suite/replay_transfer/aggregate_20260513_185617_t/aggregate_report.md)
-- [CVRP aggregate report](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_suite/replay_transfer/aggregate_20260513_200113_t/aggregate_report.md)
-- [TSP aggregate summary JSON](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/tsp_suite/replay_transfer/aggregate_20260513_155249_t/aggregate_summary.json)
-- [ATSP aggregate summary JSON](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/atsp_suite/replay_transfer/aggregate_20260513_185617_t/aggregate_summary.json)
-- [CVRP aggregate summary JSON](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/runs/cvrp_suite/replay_transfer/aggregate_20260513_200113_t/aggregate_summary.json)
+- [TSP aggregate report](../runs/tsp_suite/replay_transfer/aggregate_20260513_155249_t/aggregate_report.md)
+- [ATSP aggregate report](../runs/atsp_suite/replay_transfer/aggregate_20260513_185617_t/aggregate_report.md)
+- [CVRP aggregate report](../runs/cvrp_suite/replay_transfer/aggregate_20260513_200113_t/aggregate_report.md)
+- [TSP aggregate summary JSON](../runs/tsp_suite/replay_transfer/aggregate_20260513_155249_t/aggregate_summary.json)
+- [ATSP aggregate summary JSON](../runs/atsp_suite/replay_transfer/aggregate_20260513_185617_t/aggregate_summary.json)
+- [CVRP aggregate summary JSON](../runs/cvrp_suite/replay_transfer/aggregate_20260513_200113_t/aggregate_summary.json)

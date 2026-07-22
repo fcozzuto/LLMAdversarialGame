@@ -14,7 +14,7 @@ conda activate Python3_14
 python prepare_tsp_benchmarks.py
 ```
 
-That downloads the selected TSPLIB95 EUC_2D subset, computes best-known tour costs from the official `.opt.tour` files, and writes [benchmarks/tsp/manifest.json](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/benchmarks/tsp/manifest.json).
+That downloads the selected TSPLIB95 EUC_2D subset, computes best-known tour costs from the official `.opt.tour` files, and writes [benchmarks/tsp/manifest.json](../../benchmarks/tsp/manifest.json).
 
 ## 2. Offline Smoke Test
 

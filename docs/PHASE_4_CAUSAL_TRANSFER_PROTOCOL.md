@@ -1,6 +1,6 @@
 # Phase 4 Causal Transfer Protocol
 
-This document defines the next study phase after the initial transfer result. The benchmark-transfer phase that follows this causal-interpretation pass starts in [docs/TSP_PHASE_5_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/TSP_PHASE_5_PROTOCOL.md) and extends through [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/docs/ROUTING_PHASE_5B_5C_PROTOCOL.md).
+This document defines the next study phase after the initial transfer result. The benchmark-transfer phase that follows this causal-interpretation pass starts in [docs/TSP_PHASE_5_PROTOCOL.md](TSP_PHASE_5_PROTOCOL.md) and extends through [docs/ROUTING_PHASE_5B_5C_PROTOCOL.md](ROUTING_PHASE_5B_5C_PROTOCOL.md).
 
 The goal is not to add another curriculum mechanism yet. The goal is to strengthen the causal interpretation of the transfer result already on the table.
 
@@ -119,9 +119,9 @@ Operational rule:
 
 ## Required Artifacts
 
-- per-recipe aggregate report from [aggregate_runs.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/aggregate_runs.py)
-- paired causal-transfer report from [analyze_causal_transfer.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/analyze_causal_transfer.py)
-- novelty-review packet from [review_novelty_spikes.py](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/review_novelty_spikes.py)
+- per-recipe aggregate report from [aggregate_runs.py](../aggregate_runs.py)
+- paired causal-transfer report from [analyze_causal_transfer.py](../analyze_causal_transfer.py)
+- novelty-review packet from [review_novelty_spikes.py](../review_novelty_spikes.py)
 - short qualitative appendix with:
   - one strong transfer gain
   - one improved but still weak archetype
@@ -137,4 +137,4 @@ Operational rule:
 
 ## Operational Entry Point
 
-Use [configs/transfer_suite/PHASE_4_RUNBOOK.md](C:/Users/kaaro/Documents/GitHub/LLMAdversarialGame/configs/transfer_suite/PHASE_4_RUNBOOK.md) for the concrete commands.
+Use [configs/transfer_suite/PHASE_4_RUNBOOK.md](../configs/transfer_suite/PHASE_4_RUNBOOK.md) for the concrete commands.
