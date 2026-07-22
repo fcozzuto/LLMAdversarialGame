@@ -2,7 +2,7 @@
 
 This document tracks the research-limit reductions that are still worth doing after the project is stable and the current curriculum results are acceptable.
 
-It is intentionally separate from [RESEARCH_CHECKLIST.md](../RESEARCH_CHECKLIST.md). The checklist defines the minimum evidence bar for the active study. This document covers the harder follow-up work needed to make the claims narrower, stronger, and easier to defend under review.
+This document is separate from [RESEARCH_CHECKLIST.md](../RESEARCH_CHECKLIST.md). The checklist defines the minimum evidence bar for the active study. This document covers the follow-up work needed to make the claims narrower, stronger, and easier to defend under review.
 
 ## How To Use This Backlog
 
@@ -71,7 +71,7 @@ Goal: support quantitative claims about novelty, recovery, churn, or overfitting
   - [ ] replay failure or archive-induced recovery
   - [ ] holdout failure after strong training performance
 - [ ] Add qualitative appendices or companion notes for those cases.
-- [ ] Use those cases to check whether the automated metrics are telling the right story.
+- [ ] Use those cases to check whether the automated metrics agree with the manual evidence.
 
 Why this matters:
 - Code novelty alone is not enough to justify words like `innovation` or `new strategy class`.
@@ -120,7 +120,7 @@ Why this matters:
 
 ## 8. Strengthen The Phase 6 Mechanism Claim
 
-Goal: make the phase-6 replay explanation harder to dismiss as a post hoc story.
+Goal: make the phase-6 replay explanation harder to dismiss as a post hoc interpretation.
 
 - [ ] Check whether archive descriptor diversity predicts transfer after controlling for archive hardness and archive size bias.
 - [ ] Verify that the residual-difficulty estimator is stable across baseline portfolios, not only one fixed reference set.
@@ -163,7 +163,7 @@ Research basis:
 
 Why this matters:
 - The current evidence suggests the system is stronger at curation, scheduling, and tuning than at inventing wholly new reusable operators.
-- That makes a selector/configurator phase the most plausible way to end with a positive, interpretable claim without pretending that phase 7 already discovered a reusable primitive.
+- That makes a selector/configurator phase the most plausible way to obtain a positive, interpretable claim without treating phase 7 as evidence of a reusable primitive.
 
 Current status:
 - Phase 8 is now implemented on branch `adaptive-portfolio`.
@@ -270,7 +270,7 @@ Research basis:
 
 Current status:
 - The implementation is on branch `model-strength-factorial`.
-- The no-cost smoke artifacts are intentionally written under `DO NOT COMMIT/`.
+- The no-cost smoke artifacts are written under `DO NOT COMMIT/`.
 - The official campaign should be run only after the smoke test passes and model access is confirmed.
 
 ## Exit Condition
@@ -280,6 +280,6 @@ These items are reduced enough for a stronger publication push when:
 - [ ] behavioral heuristics have human-validation evidence
 - [ ] final evaluation is clearly separated from training-time selection
 - [ ] main claims are replicated across multiple live runs
-- [ ] qualitative case studies support the metric-based story
+- [ ] qualitative case studies support the metric-based interpretation
 - [ ] generalization claims are scoped to the tested benchmark regimes
 - [ ] report language has been updated to reflect the stronger evidence

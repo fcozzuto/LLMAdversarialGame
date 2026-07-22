@@ -39,6 +39,6 @@ The script writes a new directory under `runs/cross_family_synthesis/meta_patter
 ## Interpretation Rules
 
 - Treat the cross-family synthesis as an analysis artifact over completed official campaigns, not a new replicated paid experiment.
-- Treat the direct Codex CVRP solver as a historical single-shot descriptive check, not as retained thesis evidence, unless a future protocol freezes and replicates direct-Codex prompting.
+- Treat the direct Codex CVRP solver as a historical single-shot descriptive check. It is not retained thesis evidence unless a future protocol freezes and replicates direct-Codex prompting.
 - Keep train-time search dynamics separate from held-out endpoint evidence.
 - Do not infer that code novelty means behavioral novelty unless the relevant family has behavioral validation or held-out transfer evidence.

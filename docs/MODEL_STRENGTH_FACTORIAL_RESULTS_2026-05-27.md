@@ -49,34 +49,34 @@ The main technical checks were:
 - The official artifact set contained all required CSV, PNG, Markdown, and PDF outputs.
 - No fatal API or runner crash markers were present in the completed artifact tree.
 
-So the final factorial is scientifically usable as run, with the caveat that the report conclusion must be conservative.
+The final factorial is complete enough for interpretation as run, with the caveat that the report conclusion must be conservative.
 
 ## Interpretation
 
-This phase is useful because it disentangles three effects that were previously easy to conflate:
+This phase separates three effects that were previously easy to conflate:
 
 - base model tier,
 - extra candidate-generation/search budget,
 - replay or failure-memory mechanism.
 
-The result is negative but informative. Replay-style mechanisms did not clear the correct budget-matched control, so they should not be described as adding independent value in this final factorial. At the same time, model tier did not dominate pooled variance under the cheaper ladder, so the final story should not claim that base model strength alone explains the results.
+The result is negative but informative. Replay-style mechanisms did not clear the correct budget-matched control, so they are not described as adding independent value in this final factorial. At the same time, model tier did not dominate pooled variance under the cheaper ladder, so the final interpretation does not attribute the results to base model strength alone.
 
 The defensible final claim is:
 
 > across the three benchmark families, LLM code evolution can generate and select executable heuristic programs, but the reliable advantage over one-shot generation mostly comes from search budget and task/model-specific interaction structure. Replay-specific mechanisms did not provide robust added value beyond budget-matched independent search in this campaign.
 
-## Consequence For The Dissertation Story
+## Consequence For Interpretation
 
-This result strengthens the dissertation if framed as a measurement and limitation result rather than a positive algorithm-discovery result.
+This result is reported as a measurement and limitation result rather than a positive algorithm-discovery result.
 
-It supports a thesis-safe conclusion:
+It supports the following reporting constraints:
 
 - use budget-matched controls before claiming evolutionary or replay benefits,
 - report failed mechanisms directly,
 - separate task headroom from model strength,
 - avoid interpreting novelty or extra API calls as algorithmic discovery.
 
-The final synthesis should connect this result back to the earlier cross-family story: LLM-guided code evolution is best treated as a measurable adaptive search loop whose success depends on validator pressure, benchmark headroom, and baseline strength.
+The final synthesis connects this result back to the earlier cross-family interpretation: LLM-guided code evolution is best treated as a measurable adaptive search loop whose success depends on validator pressure, benchmark headroom, and baseline strength.
 
 ## Sources
 

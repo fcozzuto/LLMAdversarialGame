@@ -76,7 +76,7 @@ python aggregate_cvrp_phase9_runs.py --runs-root runs/cvrp_phase9_suite/solver_e
 
 ## Optional External Reference
 
-`OR-Tools` is deliberately not required for the bounded default suite, because it is not bundled in the current environment and the main phase-9 claim does not depend on it.
+`OR-Tools` is not required for the bounded default suite, because it is not bundled in the current environment and the main phase-9 claim does not depend on it.
 
 If you later install `OR-Tools`, it can be added as an auxiliary external reference condition rather than a core dependency.
 
@@ -102,4 +102,4 @@ The official phase-9 config now separates:
 
 The official bounded suite also uses a slightly looser code budget than the earliest draft, because real CVRP whole-solver logic needs more room than the earlier toy and TSP operator phases. The prompt remains mutation-oriented and still favors compact, local edits over unconstrained rewrites.
 
-The current official solver-worker timeout is `60` seconds per instance. That is intentionally far above observed baseline and preflight runtimes, but much lower than the earlier overly loose setting so obviously pathological candidates are penalized without stalling the full campaign for long periods.
+The current official solver-worker timeout is `60` seconds per instance. This value is above observed baseline and preflight runtimes, but lower than the earlier loose setting, so pathological candidates are penalized without stalling the full campaign for long periods.

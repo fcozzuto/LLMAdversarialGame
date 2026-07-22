@@ -47,11 +47,11 @@ The main technical checks were:
 - Full held-out feasibility was 20 of 20 runs for replay, 5 of 20 runs for direct, and 3 of 20 runs for budget-matched no replay.
 - Replay ended with 20 distinct final fingerprints across the 20 official runs, so the result is not one repeated artifact.
 
-This means the closeout is scientifically usable as run. The weak direct and no-replay outcomes are not explained by hidden fallback contamination.
+The closeout is complete enough for interpretation as run. The weak direct and no-replay outcomes are not explained by hidden fallback contamination.
 
 ## Interpretation
 
-The closeout narrows the dissertation claim in a useful way.
+The closeout narrows the dissertation claim.
 
 - Extra candidate budget alone is not enough. The memoryless `budget_matched_no_replay` control collapsed badly on feasibility and held-out penalized gap.
 - One-step direct synthesis plus repair is also not enough in this bounded setup. It occasionally found strong feasible runs, but it was unstable and often semantically broken.
@@ -72,7 +72,7 @@ This closeout should be used to sharpen, not broaden, the final thesis conclusio
 - It also rules out the idea that a simple direct-generation-plus-repair control already explains the phase-9 result.
 - The remaining limitation is unchanged: the strongest fixed classical baseline still wins on the primary held-out endpoint.
 
-That gives the dissertation a cleaner final message than the original phase-9 result alone.
+The closeout narrows the final phase-9 interpretation relative to the original phase-9 result alone.
 
 ## Sources
 

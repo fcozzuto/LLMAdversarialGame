@@ -16,7 +16,7 @@ This is a phase-9 closeout study, not a new broad phase in the sense of phases 7
 
 - Phase 9 established that bounded whole-solver evolution on real-world `CVRP` is technically feasible and can beat weaker fixed baselines on held-out instances.
 - Phase 9 did not show a win over the strongest fixed `Clarke--Wright` baseline on the primary endpoint.
-- A historical descriptive direct Codex-authored `CVRP` check was stronger than the replicated autonomous mean, but that result was not a frozen replicated condition and is not retained as thesis evidence.
+- A historical descriptive direct Codex-authored `CVRP` check was stronger than the replicated autonomous mean. That result was not a frozen replicated condition and is not retained as thesis evidence.
 
 The closeout study exists to convert that descriptive gap into a controlled budget-comparison result, or else to falsify the stronger interpretation cleanly.
 
@@ -80,11 +80,11 @@ The closeout uses the same `8`-candidate budget as the bounded phase-9 evolution
 - `budget_matched_no_replay`: `8` independent generated candidates
 - `replay_solver_evolution`: `8` iterative generated candidates
 
-The direct arm is intentionally cheaper because it asks a different question: whether minimal bounded repair already explains most of the descriptive direct-solver advantage.
+The direct arm uses a smaller budget because it asks a different question: whether minimal bounded repair already explains most of the descriptive direct-solver advantage.
 
 ## Statistical Reporting
 
-The official report should follow the same conservative reporting discipline as the retained thesis phases.
+The official report follows the same conservative reporting discipline as the retained thesis phases.
 
 - Report per-condition held-out means on the primary endpoint.
 - Report paired deltas with `95%` bootstrap confidence intervals.

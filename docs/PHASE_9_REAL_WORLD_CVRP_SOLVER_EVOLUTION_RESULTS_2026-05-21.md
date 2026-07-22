@@ -51,7 +51,7 @@ The main technical checks were:
 - no completed official run contained solver-worker timeout artifacts
 - train and held-out feasibility were 100% in every official run
 
-So the campaign is scientifically usable as run. This is not another broken or mixed-history phase-9 attempt.
+The campaign is complete enough for interpretation as run.
 
 ## Interpretation
 
@@ -62,7 +62,7 @@ Phase 9 supports a narrower, defensible real-world solver-evolution claim.
 - It does not beat the strongest fixed baseline in this bounded setting.
 - The resulting solvers are diverse enough to show real search rather than fallback collapse or one repeated incumbent artifact.
 
-The strongest positive result is that solver evolution clearly beat nearest-neighbor and regret-insertion plus local search while preserving full held-out feasibility. That means the loop is doing something real on a messier, validator-heavy real-world optimization family rather than only on toy games or near-equivalent TSP heuristic selection.
+The strongest positive result is that solver evolution beat nearest-neighbor and regret-insertion plus local search while preserving full held-out feasibility. The result shows measurable solver-code adaptation on a validator-heavy real-world optimization family.
 
 The main limitation is that Clarke-Wright remained the best fixed method on the primary held-out endpoint. So the phase-9 claim should not be framed as "LLM evolution beat the strongest practical CVRP baseline." It should be framed as:
 
@@ -74,13 +74,13 @@ The runtime picture is also mixed. Solver evolution had a heavy-tailed held-out 
 
 Phase 9 now gives the project a third benchmark family beyond the original simple adversarial games and the routing/TSP benchmark phases.
 
-That makes the next research step a cross-family synthesis rather than another engineering phase. The strongest unified story is likely to be conservative:
+That makes the next research step a cross-family synthesis rather than another engineering phase. A conservative synthesis is:
 
 - in the simple games, the loop adapts and changes behavior under adversarial pressure
 - in benchmark routing, replay and portfolio-style control produce mixed but interpretable family-dependent outcomes
 - in real-world CVRP, whole-solver evolution can reliably produce feasible solver logic and beat weaker baselines, but not the strongest fixed heuristic
 
-That is a better foundation for the final dissertation story than pretending the later routing phases delivered a clean dominant algorithmic win.
+This framing reports the positive solver-evolution evidence while preserving the limiting role of the strongest fixed routing baseline.
 
 ## Sources
 

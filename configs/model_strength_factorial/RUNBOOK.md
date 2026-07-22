@@ -66,7 +66,7 @@ Candidate-generation budget is 15,990 total candidates:
 - `tsp`: `3 models x 20 seeds x (1 + 4 x 8) = 1,980` candidates.
 - `cvrp_phase9_real_world`: `3 models x 20 seeds x (1 + 4 x 8) = 1,980` candidates.
 
-This is intentionally expensive because it separates base model tier from search budget and replay technique. Do not interpret replay as useful unless it improves over `budget_matched_no_replay`, not merely over `single_shot`.
+This run is expensive because it separates base model tier from search budget and replay technique. Interpret replay as adding independent value only if it improves over `budget_matched_no_replay`, not merely over `single_shot`.
 
 The committed strong tier is a budget-feasible ladder point, not the absolute strongest accessible model. This keeps the full crossed campaign affordable while preserving a transparent weak/medium/strong comparison.
 

@@ -93,7 +93,7 @@ Interpretation target:
 
 Every final modular operator candidate must go through the following validation pipeline.
 
-The automatic `surviving_candidate` flag in the suite output is intentionally conservative. It requires:
+The automatic `surviving_candidate` flag in the suite output requires:
 
 - positive transplant evidence across the configured scaffold set
 - a clear family-specific gain without too many severe family regressions
@@ -175,7 +175,7 @@ Secondary endpoints:
 - Do not claim a reusable operator unless it survives transplant or has a narrow but clear family-specific gain.
 - Do not treat lower training gap alone as evidence of operator usefulness.
 - Do not treat lexical novelty as discovery without the transplant and ablation evidence.
-- If no operators survive, that is still a useful result: the pipeline then acts as a falsification filter rather than a discovery amplifier.
+- If no operators survive, the pipeline acts as a falsification filter rather than a discovery amplifier.
 
 ## Replication
 
@@ -211,4 +211,4 @@ The required deliverable is an operator-discovery report for each surviving cand
 
 ## Relationship To Phase 6
 
-Phase 6 is the mechanism study that explains the replay result. Phase 7 is the higher-upside discovery track that asks whether the system can produce a reusable operator primitive rather than only a tuned whole-solver scaffold.
+Phase 6 is the mechanism study that explains the replay result. Phase 7 is the operator-discovery track that asks whether the system can produce a reusable operator primitive rather than only a tuned whole-solver scaffold.

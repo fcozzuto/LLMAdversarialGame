@@ -6,7 +6,7 @@ The framing question is:
 
 > Can LLM-guided evolution discover instance-adaptive hyper-heuristics that select, schedule, and tune known routing heuristics better than a fixed baseline, random portfolio, or conventional learned selector?
 
-This is intentionally narrower and more defensible than asking an LLM to invent a wholly new TSP algorithm. The target is an interpretable algorithm-selection or hyper-heuristic controller over a frozen library of known components.
+The target is an interpretable algorithm-selection or hyper-heuristic controller over a frozen library of known components, rather than open-ended invention of a new TSP algorithm.
 
 ## Scientific Motivation
 
@@ -85,7 +85,7 @@ It may also condition on lightweight online search-state features:
 - edge-length skew in the current tour
 - failed perturbation count
 
-These features are intentionally low-dimensional and interpretable so the final controller can be inspected and defended.
+These features are low-dimensional and interpretable so the final controller can be inspected directly.
 
 ## Controller Output
 
@@ -218,7 +218,7 @@ The required deliverable is a short adaptive-portfolio report that answers:
 
 ## Relationship To Phase 7
 
-Phase 7 asked whether the search could discover a reusable low-level TSP operator. Phase 8 deliberately shifts the goal:
+Phase 7 asked whether the search could discover a reusable low-level TSP operator. Phase 8 shifts the goal:
 
 - from operator invention
 - to hyper-heuristic control over a fixed, known portfolio

@@ -48,7 +48,7 @@ The main technical checks were:
 - `phase8_llm_static_selector` remained instance-conditioned only rather than using online state
 - the replay-aware adaptive controller had only 3 generation-error epochs across the whole campaign, and all 3 were rejected rather than accepted
 
-So the campaign is scientifically usable as run. There is no hidden fallback collapse analogous to the invalid early phase-7 run.
+The campaign is complete enough for interpretation as run. There is no hidden fallback collapse analogous to the invalid early phase-7 run.
 
 ## Interpretation
 
@@ -71,7 +71,7 @@ If a follow-up selector phase is attempted, it should first create nontrivial se
 
 The bounded next step would be:
 
-- enrich the frozen portfolio with heuristics that are deliberately complementary on the held-out regime, or
+- enrich the frozen portfolio with heuristics selected for complementarity on the held-out regime, or
 - evaluate selector performance on regime splits where the oracle already beats the single best heuristic by a meaningful amount
 
 Without that, another selector campaign is unlikely to beat the strongest fixed baseline on the primary endpoint, regardless of how sophisticated the controller is.

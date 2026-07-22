@@ -164,4 +164,4 @@ The required deliverable is a short mechanism report that answers:
 
 ## Relationship To Phase 5
 
-Phase 5 established that the first routing pass is scientifically useful but mixed. Phase 6 is the thesis-safe follow-up that tries to explain that mixed result before the project makes stronger claims about replay-aware abstraction.
+Phase 5 established that the first routing pass was mixed. Phase 6 is the mechanism follow-up that explains that result before the project makes stronger claims about replay-aware abstraction.

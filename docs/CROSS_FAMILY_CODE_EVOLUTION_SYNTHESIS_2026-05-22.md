@@ -4,11 +4,9 @@ Generated: 2026-05-22T17:06:56
 
 ## Purpose
 
-This artifact answers the requested cross-family question: whether comparable LLM-driven code-evolution loops show recurring capability and limitation patterns across the simple-game, TSP, and real-world CVRP experiment families.
+This artifact summarizes recurring capability and limitation patterns across the completed simple-game, TSP, and real-world CVRP code-evolution experiment families.
 
-Public-archive note: the direct Codex CVRP check below is preserved as a historical descriptive artifact. It is not retained as replicated thesis evidence.
-
-The analysis is intentionally conservative. It reuses completed official artifacts instead of creating a new paid campaign, normalizes only metrics that are present in the archived runs, and keeps train-time search dynamics separate from held-out endpoint evidence.
+The analysis reuses completed official artifacts instead of creating a new paid campaign. It normalizes only metrics that are present in the archived runs and keeps train-time search dynamics separate from held-out endpoint evidence.
 
 ## Evidence Base
 
@@ -54,7 +52,7 @@ Codex produced a single deterministic Clarke-Wright-style CVRP solver with bound
 | train | 1 | 0.064271 | 0.064271 | 243.964 |
 | holdout | 1 | 0.06778 | 0.06778 | 687.264 |
 
-Interpretation: the direct Codex solver is useful as a historical sanity check for what a single interactive Codex pass can author, but it should not be treated as a replicated stochastic condition or as retained thesis evidence. The fair comparison remains descriptive unless it is rerun under a frozen direct-Codex protocol.
+Interpretation: the direct Codex solver records one historical interactive authoring outcome. It is not a replicated stochastic condition and is not retained as thesis evidence unless rerun under a frozen direct-Codex protocol.
 
 ## Meta-Patterns
 
@@ -62,7 +60,7 @@ Interpretation: the direct Codex solver is useful as a historical sanity check f
 
 Evidence: Mean novelty was high in the game family (0.6092), TSP (0.687611), and CVRP candidate stream (0.771482), yet final wins were domain-dependent.
 
-Interpretation: The loop is good at producing variants; selection and validation determine whether those variants become useful.
+Interpretation: the loop produces variants; selection and validation determine whether those variants improve the retained endpoints.
 
 ### Improvement depends on available benchmark headroom.
 
@@ -76,7 +74,7 @@ Evidence: The game loop mainly exposed action/runtime behavior issues, TSP expos
 
 Interpretation: A unified framework should classify failure by domain-specific validator pressure rather than only by code novelty or final score.
 
-### The strongest defensible story is capability-bounded adaptation.
+### The retained interpretation is capability-bounded adaptation.
 
 Evidence: Codex direct CVRP held-out gap was 0.06778; phase-9 evolved mean held-out gap was 0.182231; Clarke-Wright was 0.073766.
 

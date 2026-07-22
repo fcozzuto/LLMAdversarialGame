@@ -96,7 +96,7 @@ Both reserve exact synthetic holdouts for final evaluation rather than allowing 
 - Primary endpoint: final held-out CVRPLIB mean optimality gap.
 - Feasibility is part of the task. Capacity-violating routes are not admissible.
 - The preparation script cross-checks official solution files against recomputed route cost before an instance is admitted to the curated subset.
-- One malformed official solution file (`B-n50-k8`) is intentionally excluded from the curated subset because its route list duplicates a customer. Excluding a bad artifact is preferable to weakening the validator or silently trusting an inconsistent file.
+- One malformed official solution file (`B-n50-k8`) is excluded from the curated subset because its route list duplicates a customer. Excluding a bad artifact is preferable to weakening the validator or silently trusting an inconsistent file.
 
 ## Replication Requirement
 

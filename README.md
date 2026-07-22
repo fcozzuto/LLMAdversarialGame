@@ -13,37 +13,35 @@ benchmarks, bounded real-world CVRP instances, model-strength comparisons, and
 a state-of-the-art CVRP calibration based on PyVRP's hybrid genetic search
 implementation.
 
-The central claim is deliberately bounded: LLM-guided code evolution can produce
-measurable improvements under some feedback and replay conditions, but it does
-not automatically replace stronger domain-specific algorithms. The repository is
-organized so that readers can inspect the evidence behind that claim without
-rerunning paid API campaigns.
+The retained thesis claim is bounded: LLM-guided code evolution can produce
+measurable improvements under some feedback and replay conditions, while strong
+domain-specific algorithms continue to define the performance limits in harder
+routing settings. The repository is organized so the reported aggregate evidence
+can be inspected without rerunning paid API campaigns.
 
 ## Repository Scope
 
-This is a research artifact, not a general-purpose solver package. It contains
+This repository is the public research artifact for the thesis. It contains
 experimental harnesses, benchmark preparation scripts, archived run outputs,
-aggregate reports, and protocol documents used to support the thesis.
+aggregate reports, and protocol documents.
 
 Some archived runs contain prompt text, model responses, candidate JSON files,
-and generated code. These files are part of the provenance record for the
-code-evolution experiments. They should be read as experimental outputs, not as
-hand-maintained library code.
+generated code, validation records, and fallback/error records. These files are
+experiment records for the code-evolution runs and provide provenance for the
+aggregate reports.
 
-Private materials are intentionally excluded from the public artifact. This
-includes credentials, local environment files, private thesis-revision notes,
-large transient worker outputs, and unpublished presentation material.
+The public artifact excludes credentials, local environment files, private
+thesis-revision notes, large transient worker outputs, and unpublished
+presentation material.
 
 ## Artifact Map
 
-The main entry point for navigating the empirical evidence is
-[ARTIFACT_MANIFEST.md](ARTIFACT_MANIFEST.md). It maps each thesis phase to the
-relevant protocol documents, configuration files, run archives, aggregate
+[ARTIFACT_MANIFEST.md](ARTIFACT_MANIFEST.md) maps each thesis phase to the
+corresponding protocol documents, configuration files, run archives, aggregate
 reports, and version tags.
 
-Use tagged phase archives and committed run reports as the reference points for
-reported evidence. Branch names are working labels and should not be treated as
-the canonical empirical record.
+Tagged phase archives and committed run reports are the reference points for
+reported evidence. Branch names are working labels, not the empirical record.
 
 ## Repository Layout
 
@@ -60,7 +58,7 @@ the canonical empirical record.
 
 ## Reproducibility Paths
 
-Readers can inspect the reported claims at different levels of effort.
+The reported claims can be inspected at different levels of effort.
 
 1. **No execution:** read the protocol documents, phase reports, run summaries,
    and artifact manifest.
@@ -69,8 +67,8 @@ Readers can inspect the reported claims at different levels of effort.
 3. **External solver reruns:** install the optional PyVRP/VRPLIB dependencies
    and rerun the Phase 12 HGS-style CVRP calibration.
 4. **Full LLM campaign reruns:** provide API credentials and rerun selected
-   evolution campaigns. This path incurs API costs and is not required to verify
-   the reported aggregate tables from archived data.
+   evolution campaigns. This path incurs API costs. The archived aggregate
+   tables do not require paid model access for inspection.
 
 The public artifact is intended to make the reported aggregate claims auditable
 without requiring paid model access.
@@ -115,8 +113,8 @@ The following tags identify the archived code states used during the project:
 - `phase-11-model-strength-factorial`
 - `phase-12-sota-cvrp-hgs-baseline`
 
-If a branch has moved after a phase, use the corresponding tag and archived run
-directory rather than the current branch tip.
+If a branch has moved after a phase, the corresponding tag and archived run
+directory identify the phase evidence.
 
 ## Citation
 

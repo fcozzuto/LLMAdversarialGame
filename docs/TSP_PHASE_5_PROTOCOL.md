@@ -149,7 +149,7 @@ Keep the benchmark manifest, held-out set, and synthetic families fixed across c
 
 The first completed 20-offset routing pass is summarized in [docs/PHASE_5_ROUTING_RESULTS_2026-05-14.md](PHASE_5_ROUTING_RESULTS_2026-05-14.md).
 
-For this TSP family, the strongest result was not `failure_replay`; it was `random_replay`. That means this protocol remains useful as the benchmark recipe, but the completed evidence should be read through the results note rather than through the original expectation alone.
+For this TSP family, the strongest result was not `failure_replay`; it was `random_replay`. The completed evidence is therefore interpreted through the results note, not through the original protocol expectation alone.
 
 The two direct follow-on phases are now:
 

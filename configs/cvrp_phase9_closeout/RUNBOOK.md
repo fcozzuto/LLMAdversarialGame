@@ -74,7 +74,7 @@ foreach ($r in $replicates) {
 python aggregate_cvrp_phase9_runs.py --runs-root runs/cvrp_phase9_closeout/budget_control
 ```
 
-That aggregate command is intentionally cumulative: it combines every official `run_*` directory under `runs/cvrp_phase9_closeout/budget_control`.
+That aggregate command is cumulative: it combines every official `run_*` directory under `runs/cvrp_phase9_closeout/budget_control`.
 
 ## Required Interpretation
 

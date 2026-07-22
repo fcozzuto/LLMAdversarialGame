@@ -64,4 +64,4 @@ Phase 6 is still scientifically useful. It narrows the mechanism claim:
 - descriptor diversity by itself is not sufficient as the main explanation
 - residual-failure replay, as implemented here, did not improve on raw failure replay
 
-That makes phase 6 a thesis-safe negative-or-boundary mechanism result rather than a simple confirmation of the original coverage hypothesis.
+That makes phase 6 a negative-or-boundary mechanism result rather than a simple confirmation of the original coverage hypothesis.
